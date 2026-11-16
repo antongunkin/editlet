@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke-linecap="round">
+  <!-- The Editlet mark: an "e" and a text cursor in one colour, on a dark tile. -->
+  <rect width="32" height="32" rx="8" fill="#101114"/>
+  <g transform="translate(4 4)">
+    <path d="M3 12h10.5a5.25 5.25 0 1 0-1.54 3.71" stroke="#f0efec" stroke-width="2.6"/>
+    <path d="M19 4.5v15M17 4.5h4M17 19.5h4" stroke="#f0efec" stroke-width="2.4"/>
+  </g>
+</svg>
