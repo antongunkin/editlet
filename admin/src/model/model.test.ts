@@ -3,7 +3,16 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { chatPrompts, diffModel, fieldRows, hasChanges, incoming, outgoing, referenceEdges } from './model';
+import {
+  collectionPrompts,
+  diffModel,
+  globalPrompts,
+  fieldRows,
+  hasChanges,
+  incoming,
+  outgoing,
+  referenceEdges,
+} from './model';
 
 import { loadSchema, type Field, type Schema } from '../../../core/schema';
 
@@ -154,56 +163,56 @@ describe('diffModel', () => {
   });
 });
 
-describe('chatPrompts', () => {
-  it('fills the prompts with names from the fixture', () => {
-    const prompts = chatPrompts(fixture(), 'cms/schema.json', { hasProblems: false });
-    expect(prompts.map((p) => p.id)).toEqual([
-      'add-field',
-      'rename-field',
-      'remove-field',
-      'require-field',
-      'add-collection',
-    ]);
+describe('collectionPrompts', () => {
+  it('fills the prompts with names from the collection', () => {
+    const prompts = collectionPrompts(fixture(), 'cms/schema.json', 'post');
+    expect(prompts.map((p) => p.id)).toEqual(['add-field', 'rename-field', 'remove-field', 'require-field']);
     expect(prompts.map((p) => p.text)).toEqual([
       'Add an optional string field "subtitle" (label "Subtitle") to the "post" collection in cms/schema.json.',
       'Rename field "title" in "post" to "headline" and update every entry. Dry-run first and show me the plan.',
       'Remove field "author" from "post". Dry-run first and tell me which entries lose data.',
       'Make "featuredImage" in "post" required. First check which entries would fail.',
-      'Add a collection "tag" (label "Tag") with a required string field "name", and let "post" reference many tags.',
-    ]);
-    expect(prompts.map((p) => p.title)).toEqual([
-      'Add a field',
-      'Rename a field',
-      'Remove a field',
-      'Make a field required',
-      'Add a collection',
     ]);
   });
 
-  it('appends the fix prompt when there are problems', () => {
-    const prompts = chatPrompts(fixture(), 'cms/schema.json', { hasProblems: true });
-    expect(prompts.at(-1)).toMatchObject({
-      id: 'fix-problems',
-      title: 'Fix the problems',
-      text: 'Run the content validation and fix the problems shown in the content model.',
+  it('offers a reference to a collection it does not point to yet', () => {
+    const prompts = collectionPrompts(fixture(), 'cms/schema.json', 'author');
+    expect(prompts.find((p) => p.id === 'add-reference')).toMatchObject({
+      title: 'Link to another collection',
+      text: 'Add an optional reference field "post" to "author" that points to one "post" entry.',
     });
   });
 
-  it('does not throw on an empty schema and names no product', () => {
-    const empty: Schema = { contentDir: 'cms/content', git: { baseBranch: 'main' }, collections: {} };
-    const prompts = chatPrompts(empty, 'cms/schema.json', { hasProblems: true });
-    expect(prompts.length).toBeGreaterThan(0);
-    expect(prompts[0].text).toContain('"post"');
+  it('avoids taken names and names no product', () => {
+    const schema = withField(fixture(), 'post', 'headline', { type: 'string', label: 'H' });
+    const prompts = collectionPrompts(schema, 'cms/schema.json', 'post');
+    expect(prompts[1]!.text).toContain('to "titleNew"');
     for (const p of prompts) expect(p.text).not.toMatch(/editlet/i);
   });
+});
 
-  it('avoids taken names', () => {
-    const schema = withField(fixture(), 'post', 'headline', { type: 'string', label: 'H' });
-    const prompts = chatPrompts(schema, 'cms/schema.json', { hasProblems: false });
-    expect(prompts[1].text).toContain('to "titleNew"');
+describe('globalPrompts', () => {
+  it('adds a collection and reviews the schema; the fix prompt comes first when there are problems', () => {
+    expect(globalPrompts(fixture(), 'cms/schema.json', { hasProblems: false }).map((p) => p.id)).toEqual([
+      'add-collection',
+      'review-schema',
+    ]);
+    const prompts = globalPrompts(fixture(), 'cms/schema.json', { hasProblems: true });
+    expect(prompts[0]).toMatchObject({
+      id: 'fix-problems',
+      text: 'Run the content validation and fix the problems shown in the content model.',
+    });
+    expect(prompts[1]!.text).toBe(
+      'Add a collection "tag" (label "Tag") with a required string field "name", and let "post" reference many tags.',
+    );
+  });
+
+  it('does not throw on an empty schema and avoids taken names', () => {
+    const empty: Schema = { contentDir: 'cms/content', git: { baseBranch: 'main' }, collections: {} };
+    expect(globalPrompts(empty, 'cms/schema.json', { hasProblems: true })[1]!.text).toContain('"post"');
     const taken = withField(fixture(), 'post', 'x', { type: 'string', label: 'X' });
     taken.collections.tag = taken.collections.post;
-    const next = chatPrompts(taken, 'cms/schema.json', { hasProblems: false });
+    const next = globalPrompts(taken, 'cms/schema.json', { hasProblems: false });
     expect(next.find((p) => p.id === 'add-collection')!.text).toContain('many categories.');
   });
 });

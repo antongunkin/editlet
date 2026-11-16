@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createMemorySource } from '../../../core/source';
 import { readEditletRoute } from '../../../loader/protocol';
@@ -42,21 +42,78 @@ describe('Home', () => {
 });
 
 describe('Collection', () => {
-  it('shows entry rows and the Draft badge', async () => {
-    renderApp({ files: variantFiles(), route: 'post' });
-    const hello = await within(main()).findByRole('link', { name: 'Hello world' });
-    const helloRow = hello.closest('tr')!;
-    expect(within(helloRow).getByText('hello-world')).toBeDefined();
-    expect(within(helloRow).queryByText('Draft')).toBeNull();
+  const rowOf = (link: HTMLElement) => link.closest('tr')!;
+  const titles = () =>
+    within(main())
+      .getAllByRole('row')
+      .slice(1)
+      .map((tr) => tr.querySelector('a')?.textContent);
+  function mockHistory(byPath: (path: string) => object | null) {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input), 'http://localhost');
+      const body = url.pathname.endsWith('/history') ? byPath(url.searchParams.get('path')!) : null;
+      return new Response(body ? JSON.stringify(body) : '{}', { status: body ? 200 : 404 });
+    });
+  }
+  afterEach(() => vi.restoreAllMocks());
 
-    const draftRow = within(main()).getByRole('link', { name: 'Second post' }).closest('tr')!;
-    expect(within(draftRow).getByText('Draft')).toBeDefined();
+  it('a row: title and slug, a status dot, a dash without history; the count in the header', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const hello = rowOf(await within(main()).findByRole('link', { name: 'Hello world' }));
+    expect(within(hello).getByText('hello-world')).toBeDefined();
+    expect(within(hello).getByRole('img', { name: 'Published' })).toBeDefined();
+    expect(within(hello).getAllByLabelText('Unknown')).toHaveLength(2);
+    const draft = rowOf(within(main()).getByRole('link', { name: 'Second post' }));
+    expect(within(draft).getByRole('img', { name: 'Draft' })).toBeDefined();
+    expect(within(main()).getByText('2 entries')).toBeDefined();
   });
 
-  it('row click opens the entry route', async () => {
+  it('Updated and By come from the git history; newest first by default', async () => {
+    mockHistory((path) => ({
+      updated: path.endsWith('second-post.md')
+        ? { actor: { name: 'Ann Lee' }, date: '2025-11-19T14:48:00Z', message: 'm' }
+        : { actor: { name: 'Bob Stone' }, date: '2025-10-02T09:00:00Z', message: 'm' },
+      created: null,
+      commits: 1,
+    }));
     renderApp({ files: variantFiles(), route: 'post' });
-    const hello = await within(main()).findByRole('link', { name: 'Hello world' });
-    fireEvent.click(hello.closest('tr')!.querySelector('td:nth-child(2)')!);
+    const second = rowOf(await within(main()).findByRole('link', { name: 'Second post' }));
+    expect(await within(second).findByRole('img', { name: 'Ann Lee' })).toBeDefined();
+    expect(within(second).getByText('Nov 19, 2025')).toBeDefined();
+    expect(titles()).toEqual(['Second post', 'Hello world']);
+  });
+
+  it('a column header sorts, and a second click reverses', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    await within(main()).findByRole('link', { name: 'Hello world' });
+    const title = within(main()).getByRole('button', { name: 'Title' });
+    fireEvent.click(title);
+    expect(titles()).toEqual(['Hello world', 'Second post']);
+    expect(title.closest('th')!.getAttribute('aria-sort')).toBe('ascending');
+    fireEvent.click(title);
+    expect(titles()).toEqual(['Second post', 'Hello world']);
+    expect(title.closest('th')!.getAttribute('aria-sort')).toBe('descending');
+  });
+
+  it('shows 20 rows per page with a pager', async () => {
+    const files = variantFiles();
+    for (let i = 10; i < 33; i++) files[`cms/content/post/p${i}.md`] = `---\ntitle: Post ${i}\n---\n`;
+    renderApp({ files, route: 'post' });
+    await within(main()).findByRole('link', { name: 'Hello world' });
+    fireEvent.click(within(main()).getByRole('button', { name: 'Title' }));
+    expect(within(main()).getAllByRole('row')).toHaveLength(21);
+    const pager = within(main()).getByRole('navigation', { name: 'Pages' });
+    expect(within(pager).getByText('1–20 of 25')).toBeDefined();
+    fireEvent.click(within(pager).getByRole('button', { name: 'Next page' }));
+    expect(within(main()).getAllByRole('row')).toHaveLength(6);
+    expect(within(pager).getByText('21–25 of 25')).toBeDefined();
+    expect((within(pager).getByRole('button', { name: 'Next page' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a row click opens the entry route', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const hello = rowOf(await within(main()).findByRole('link', { name: 'Hello world' }));
+    fireEvent.click(within(hello).getByText('hello-world'));
     expect(editletRoute()).toBe('post/hello-world');
     expect(await within(main()).findByText('Meta')).toBeDefined();
   });

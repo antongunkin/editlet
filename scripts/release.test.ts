@@ -762,7 +762,7 @@ describe('release interrupted by a signal (Ctrl-C)', () => {
    * prompt); every outward command, and the prompt, append to `outward` instead of running.
    */
   const script = (sleepMs: number) => `
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { defaultRunner, release } from ${JSON.stringify(releaseUrl)};
 const [pkg, target, marker, outward, mode] = process.argv.slice(2);
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -778,8 +778,11 @@ const run = (command, args, options = {}) => {
   if (command === 'git' || command === 'tar') return defaultRunner(command, args, { ...options, capture: true });
   if (command === 'npm' && args[0] === 'view') return { status: 1, stdout: '', stderr: 'npm error code E404' };
   if (command === 'npm' && args[0] === 'run') {
-    writeFileSync(marker, 'long step');
-    return defaultRunner(process.execPath, ['-e', 'setTimeout(() => {}, ${sleepMs})'], {});
+    // The long child writes the marker itself once it runs, so a group signal sent on the marker always reaches it.
+    // (Written here, before spawnSync, a slow spawn on a busy CI host started the child after the signal: it slept
+    // the whole sleepMs and the test timed out.)
+    const sleeper = 'require("node:fs").writeFileSync(process.argv[1], "long step"); setTimeout(() => {}, ${sleepMs})';
+    return defaultRunner(process.execPath, ['-e', sleeper, marker], {});
   }
   return ok();
 };

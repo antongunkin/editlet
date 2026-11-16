@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 
 import { Button } from './Button';
 import { cn } from './cn';
@@ -11,7 +12,23 @@ import { Icon } from './Icon';
  * click on the bare sheet outside the content column, and the close button all call `onOpenChange(false)`. A dialog with
  * role `alertdialog` is a narrow column in the centre instead: no close button, and a click around it does nothing; it
  * waits for an explicit answer (one of its buttons or Escape).
+ *
+ * Inside the floating window the dialog opens in the window's dialog layer (`[data-editlet-dialogs]`, over the body,
+ * between the bar and the status bar) as a non-modal `<dialog>` (`show()`), and only the body goes inert: the bar's
+ * Minimize, theme and navigation stay usable, so an open dialog never locks the editor. Without that layer (the
+ * standalone admin, tests) it is a modal over the whole page (`showModal()`).
  */
+
+/** The window's dialog layer, when there is one (`WindowFrame`). */
+const dialogLayer = () => document.querySelector<HTMLElement>('[data-editlet-dialogs]');
+
+/** The body under the layer goes inert while at least one dialog is open in it. */
+function holdLayer(layer: HTMLElement, delta: 1 | -1) {
+  const open = Math.max(0, Number(layer.dataset.open ?? 0) + delta);
+  layer.dataset.open = String(open);
+  const body = layer.parentElement?.querySelector<HTMLElement>('.editlet-window__body');
+  if (body) body.inert = open > 0;
+}
 
 /**
  * What the window draws on every open dialog's sheet: its resize edges. A modal `<dialog>` makes the rest of the page
@@ -59,31 +76,38 @@ export function DialogContent({ className, children, onClick, closable = true, .
   const alert = props.role === 'alertdialog';
   const closesOnSheet = closable && !alert;
   const dialogRef = React.useRef<HTMLDialogElement>(null);
-
-  // Promote to native modal mode while open so the browser handles ::backdrop + top-layer.
+  // Looked up once per opening, after mount (the layer may come later in the same render), before paint:
+  // `undefined` until then, and the dialog waits for it.
+  const [layer, setLayer] = React.useState<HTMLElement | null | undefined>(undefined);
   React.useLayoutEffect(() => {
-    if (!open) return;
+    setLayer(open ? dialogLayer() : undefined);
+  }, [open]);
+
+  // In the window's layer: a non-modal dialog over the body only. Elsewhere: native modal (top layer, ::backdrop).
+  React.useLayoutEffect(() => {
+    if (!open || layer === undefined) return;
     const d = dialogRef.current;
     if (!d) return;
-    if (typeof d.showModal === 'function') {
+    const method = layer ? 'show' : 'showModal';
+    if (typeof d[method] === 'function') {
       try {
         if (d.open) d.close();
-        d.showModal();
+        d[method]();
       } catch {
         // Best effort only.
       }
-      if (!d.open) d.setAttribute('open', '');
-    } else {
-      d.setAttribute('open', '');
     }
+    if (!d.open) d.setAttribute('open', '');
+    if (layer) holdLayer(layer, 1);
     return () => {
+      if (layer) holdLayer(layer, -1);
       try {
         if (d.open && typeof d.close === 'function') d.close();
       } catch {
         // Ignore cleanup failures.
       }
     };
-  }, [open]);
+  }, [open, layer]);
 
   // Block the native cancel → close chain; Escape is handled by the keydown listener below.
   React.useEffect(() => {
@@ -104,15 +128,16 @@ export function DialogContent({ className, children, onClick, closable = true, .
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, setOpen, closable]);
 
-  if (!open) return null;
+  if (!open || layer === undefined) return null;
 
-  return (
+  const dialog = (
     // oxlint-disable-next-line jsx-a11y/click-events-have-key-events
     <dialog
       ref={dialogRef}
       className={cn('editlet-dialog__content', className)}
       data-state="open"
-      aria-modal="true"
+      // In the layer the bar stays usable, so the dialog is not modal for assistive technology either.
+      aria-modal={layer ? undefined : 'true'}
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
       onClick={(e) => {
@@ -145,9 +170,11 @@ export function DialogContent({ className, children, onClick, closable = true, .
           </Button>
         ) : null}
       </div>
-      {edges}
+      {/* A modal dialog makes the window's resize edges inert, so it draws them again; in the layer they still work. */}
+      {layer ? null : edges}
     </dialog>
   );
+  return layer ? createPortal(dialog, layer) : dialog;
 }
 
 export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

@@ -35,19 +35,24 @@ describe('ContentModel', () => {
     await openModel();
     expect(within(main()).getByRole('heading', { name: 'Content model' })).toBeDefined();
     const post = section('Post');
-    const table = within(post).getByRole('table');
-    const authorRow = within(table).getByText('author').closest('tr')!;
+    const fields = within(post).getByRole('list', { name: 'Post fields' });
+    const authorRow = within(fields).getByText('author').closest('li')!;
     expect(authorRow.textContent).toContain('reference → Author');
     expect(within(section('Author')).getByText('.author').closest('li')!.textContent).toContain('Post.author');
     expect(section('Home page')).toBeDefined();
     expect(within(authorRow).getByText('Optional')).toBeDefined();
-    const titleRow = within(table).getByText('title').closest('tr')!;
-    expect(within(titleRow).getByLabelText('Required')).toBeDefined();
+    const titleRow = within(fields).getByText('title').closest('li')!;
+    expect(within(titleRow).getByText('Required')).toBeDefined();
+    // FAQ-style: collapsed, with the counts in the summary.
+    const block = post.querySelector('details')!;
+    expect(block.open).toBe(false);
+    expect(within(post.querySelector('summary')!).getByText(/1 entry, \d+ fields/)).toBeDefined();
   });
 
   it('reports no problems for the fixture', async () => {
     await openModel();
-    expect(await within(main()).findByText('No problems')).toBeDefined();
+    expect(await within(main()).findByText(/^No problems/)).toBeDefined();
+    expect(within(main()).queryByRole('region', { name: 'Problems' })).toBeNull();
   });
 
   it('lists entry problems with a link to the entry', async () => {
@@ -86,9 +91,11 @@ describe('ContentModel', () => {
     await source.commit([{ path: 'cms/schema.json', content: JSON.stringify(schema) }], 'm');
     await act(() => queryClient.invalidateQueries({ queryKey: ['files'] }));
 
-    const row = (await within(section('Post')).findByText('subtitle')).closest('tr')!;
+    const row = (await within(section('Post')).findByText('subtitle')).closest('li')!;
     expect(within(row).getByText('New')).toBeDefined();
     expect(within(section('Post')).getByText('Changed')).toBeDefined();
+    // A changed collection opens by itself.
+    expect(section('Post').querySelector('details')!.open).toBe(true);
     expect(within(main()).getByText(/^Updated/)).toBeDefined();
   });
 
@@ -130,11 +137,10 @@ describe('ContentModel', () => {
     expect(listFiles.mock.calls.length - before).toBeLessThanOrEqual(15);
   });
 
-  it('copies a prompt and shows Copied', async () => {
+  it('copies a collection prompt and shows Copied', async () => {
     const write = stubClipboard(() => Promise.resolve());
     await openModel();
-    const card = within(main()).getByRole('region', { name: 'Ask Claude Code' });
-    const prompt = within(card).getByText('Add a field').closest('li')!;
+    const prompt = within(section('Post')).getByText('Add a field').closest('li')!;
     fireEvent.click(within(prompt).getByRole('button', { name: 'Copy' }));
     await waitFor(() =>
       expect(write).toHaveBeenCalledWith(
@@ -148,9 +154,21 @@ describe('ContentModel', () => {
     stubClipboard(() => Promise.reject(new Error('denied')));
     await openModel();
     const card = within(main()).getByRole('region', { name: 'Ask Claude Code' });
-    const prompt = within(card).getByText('Add a field').closest('li')!;
+    const prompt = within(card).getByText('Add a collection').closest('li')!;
     fireEvent.click(within(prompt).getByRole('button', { name: 'Copy' }));
     expect(await within(prompt).findByRole('button', { name: 'Copy failed' })).toBeDefined();
+  });
+
+  it('offers prompts for the whole model, the fix prompt first when there are problems', async () => {
+    await openModel({
+      files: { ...fixtureFiles(), 'cms/content/post/broken.md': '---\nauthor: author/nobody\n---\n' },
+    });
+    const card = within(main()).getByRole('region', { name: 'Ask Claude Code' });
+    await within(card).findByText('Fix the problems');
+    const titles = within(card)
+      .getAllByRole('listitem')
+      .map((li) => li.querySelector('strong')!.textContent);
+    expect(titles).toEqual(['Fix the problems', 'Add a collection', 'Review the schema']);
   });
 
   it('copies the schema', async () => {
@@ -187,14 +205,16 @@ describe('ContentModel ids and focus', () => {
     renderApp({ route: 'schema', files: { 'cms/schema.json': schema } });
     await within(main()).findByRole('region', { name: 'Problems things' });
     expect(document.querySelectorAll('[id="editlet-model-c-problems"]')).toHaveLength(1);
-    expect(document.querySelectorAll('[id="editlet-model-problems"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[id="editlet-model-prompts"]')).toHaveLength(1);
+    const ids = [...document.querySelectorAll('[id]')].map((el) => el.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('moves focus into the target card on a jump', async () => {
+  it('opens the target block and moves focus into it on a jump', async () => {
     Element.prototype.scrollIntoView = vi.fn();
     await openModel();
-    const table = within(main()).getAllByRole('table')[0]!;
-    fireEvent.click(within(table).getByRole('button', { name: 'Author' }));
+    fireEvent.click(within(section('Post')).getAllByRole('button', { name: 'Author' })[0]!);
+    expect(section('Author').querySelector('details')!.open).toBe(true);
     expect(section('Author').contains(document.activeElement)).toBe(true);
   });
 });

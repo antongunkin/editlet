@@ -1712,7 +1712,8 @@
   /* Save and its menu: one split button stuck to the bottom right of the scroller (the window's body, or the page when
      the admin is opened standalone), floating over the fields with no bar behind it. On a short form it waits at the
      bottom of the panel (`margin-top: auto`). Only the button takes up room, so the fields beside it stay clickable. */
-  .editlet-edit-post__actions {
+  .editlet-edit-post__actions,
+  .editlet-collection__actions {
     position: sticky;
     /* Sticks inside the scroller's padding: 20px above the panel's bottom edge, like the 16px at its side. */
     bottom: 0;
@@ -2497,6 +2498,193 @@
     }
   }
 
+  /* ── editlet-collection: a collection's entries ──
+     A sortable table: Title (the slug under it), Updated, By (an avatar) and Status (a dot). The narrow columns keep
+     their width and the title takes the rest. The screen fills the panel, so the pager and New entry (`__actions`, the
+     same dock as the entry screen's Save) wait at the bottom of a short list; the table keeps room under its last row
+     so they never cover it. */
+  .editlet-collection {
+    flex: 1;
+  }
+
+  .editlet-collection__count {
+    font-size: var(--editlet-text-sm);
+    color: var(--editlet-muted-foreground);
+  }
+
+  /* The table runs edge to edge of the panel (the body's 16px side padding, taken back), and the outer cells pad 20px:
+     the text is 20px from the edge, like the page title and the entry form. */
+  .editlet-collection > .editlet-table__wrapper {
+    width: auto;
+    margin-inline: calc(var(--editlet-spacing) * -4);
+  }
+
+  .editlet-collection__table {
+    margin-bottom: calc(var(--editlet-spacing) * 6);
+    table-layout: fixed;
+
+    & :is(.editlet-table__header, .editlet-table__cell):first-child {
+      padding-left: calc(var(--editlet-spacing) * 5);
+    }
+
+    & :is(.editlet-table__header, .editlet-table__cell):last-child {
+      padding-right: calc(var(--editlet-spacing) * 5);
+    }
+
+    /* Edge to edge, a hovered row fills flat: round ends would leave notches at the panel's sides. */
+    & .editlet-table__row > * {
+      border-radius: 0;
+    }
+
+    /* A hovered row fills as a rounded well; the hairlines above and below it fade so the fill is never cut. */
+    & .editlet-table__row {
+      transition:
+        background-color 80ms,
+        border-color 80ms;
+    }
+
+    & .editlet-table__body .editlet-table__row:hover,
+    & .editlet-table__row:has(+ .editlet-table__row:hover) {
+      border-bottom-color: transparent;
+    }
+
+    & .editlet-table__body .editlet-table__row:hover {
+      background: var(--editlet-muted);
+    }
+
+    /* The row is the target: no underline on the title link inside it. */
+    & .editlet-link:hover {
+      text-decoration: none;
+    }
+  }
+
+  .editlet-collection__title-cell {
+    min-width: 0;
+  }
+
+  .editlet-collection__title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    font-weight: var(--editlet-font-weight-medium);
+    line-height: var(--editlet-leading-snug);
+  }
+
+  .editlet-collection__slug {
+    display: block;
+    margin-top: calc(var(--editlet-spacing) * 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--editlet-font-mono);
+    font-size: var(--editlet-text-xs);
+    color: var(--editlet-muted-foreground);
+  }
+
+  .editlet-collection__col-updated {
+    width: calc(var(--editlet-spacing) * 26);
+    white-space: nowrap;
+    font-size: var(--editlet-text-sm);
+    color: var(--editlet-muted-foreground);
+  }
+
+  .editlet-collection__col-by {
+    width: calc(var(--editlet-spacing) * 14);
+  }
+
+  .editlet-collection__col-status {
+    width: calc(var(--editlet-spacing) * 18);
+  }
+
+  .editlet-collection__by {
+    display: inline-flex;
+  }
+
+  /* A sortable column header: the whole label is the button, with the direction after it. */
+  .editlet-table__sort {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--editlet-spacing) * 1);
+    margin-inline: calc(var(--editlet-spacing) * -1.5);
+    padding: calc(var(--editlet-spacing) * 1) calc(var(--editlet-spacing) * 1.5);
+    border: 0;
+    border-radius: var(--editlet-radius-md);
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--editlet-muted);
+      color: var(--editlet-foreground);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--editlet-ring);
+      outline-offset: 1px;
+    }
+  }
+
+  .editlet-table__header[aria-sort] {
+    color: var(--editlet-foreground);
+  }
+
+  /* Status as a dot: filled green for Published, a hollow ring for Draft (the colours of the status chips). */
+  .editlet-status-dot {
+    display: inline-block;
+    width: calc(var(--editlet-spacing) * 2.5);
+    height: calc(var(--editlet-spacing) * 2.5);
+    border-radius: 9999px;
+    vertical-align: middle;
+  }
+
+  .editlet-status-dot--published {
+    background: var(--editlet-chart-2);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--editlet-chart-2) 20%, transparent);
+  }
+
+  .editlet-status-dot--draft {
+    border: 2px solid var(--editlet-muted-foreground);
+  }
+
+  /* The bottom dock: the pager at the left, New entry at the right. Only its controls take clicks, so the rows under
+     its empty middle stay clickable. */
+  .editlet-collection__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(var(--editlet-spacing) * 3);
+    align-self: stretch;
+    pointer-events: none;
+
+    & > * {
+      pointer-events: auto;
+    }
+
+    & > .editlet-split {
+      margin-left: auto;
+    }
+  }
+
+  .editlet-pager {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--editlet-spacing) * 2);
+    padding: calc(var(--editlet-spacing) * 1);
+    border-radius: 9999px;
+    background: var(--editlet-card);
+    box-shadow: var(--editlet-shadow-lg);
+    font-size: var(--editlet-text-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--editlet-muted-foreground);
+
+    & > .editlet-button {
+      border-radius: 9999px;
+    }
+  }
+
   /* Home: one tile per collection, the entry count large like a figure on a dashboard. */
   .editlet-collection-list {
     display: grid;
@@ -3128,6 +3316,28 @@
     cursor: inherit;
   }
 
+  /* The window's middle row: the scrolling body and, stacked over it, the layer dialogs open in. The bar above and the
+     status bar below are outside it, so they stay usable while a dialog is open. */
+  .editlet-window__main {
+    position: relative;
+    display: grid;
+    min-height: 0;
+  }
+
+  /* Empty, it lets every click through to the body; a dialog in it fills it, rounded like the body it covers. */
+  .editlet-window__dialogs {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+
+    & > .editlet-dialog__content {
+      position: absolute;
+      border-radius: var(--editlet-radius-3xl);
+      pointer-events: auto;
+    }
+  }
+
   .editlet-window__body {
     display: flex;
     flex-direction: column;
@@ -3143,9 +3353,11 @@
   /* The sticky page header paints a full-bleed strip with side shadows; inside the rounded panel it only shows as an edge. */
   /* Compact page chrome: this is a small window, not a full page. The header sticks to the top of this scroller. */
   .editlet-window__body .editlet-page-top {
-    top: 0;
+    /* Flush with the panel's top edge: the body's 20px top padding would leave a strip where scrolled rows show. */
+    top: calc(var(--editlet-spacing) * -5);
     height: calc(var(--editlet-spacing) * 13);
-    padding-inline: calc(var(--editlet-spacing) * 4);
+    /* The title 20px from the panel's edge, like the entry form's fields (16px body padding + 4px). */
+    padding-inline: calc(var(--editlet-spacing) * 1);
     box-shadow: none;
   }
 

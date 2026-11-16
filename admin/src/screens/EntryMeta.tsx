@@ -7,12 +7,13 @@ import { useBranches, useWorkspace } from '../github/workspace';
 import { sourceKey, useSource } from '../source/context';
 import { Icon } from '../ui/Icon';
 
-/** The file's git history: GitHub commits of the active branch, or `git log` through the dev API. */
-function useFileHistory(path: string, version: string | null) {
-  const source = useSource();
-  const workspace = useWorkspace();
-  return useQuery({
-    queryKey: ['file-history', sourceKey(source), path, version],
+type Source = ReturnType<typeof useSource>;
+type Workspace = ReturnType<typeof useWorkspace>;
+
+/** Query options for a file's git history: GitHub commits of the active branch, or `git log` through the dev API. */
+export function fileHistoryQuery(source: Source, workspace: Workspace, path: string, version: string | null) {
+  return {
+    queryKey: ['file-history', sourceKey(source), path, version] as const,
     enabled: version !== null,
     retry: false,
     queryFn: async (): Promise<FileHistory> => {
@@ -21,10 +22,15 @@ function useFileHistory(path: string, version: string | null) {
       if (!res.ok) throw new Error(`history: ${res.status}`);
       return (await res.json()) as FileHistory;
     },
-  });
+  };
 }
 
-function Avatar({ actor }: { actor: FileActor }) {
+/** The file's git history (`fileHistoryQuery`). */
+function useFileHistory(path: string, version: string | null) {
+  return useQuery(fileHistoryQuery(useSource(), useWorkspace(), path, version));
+}
+
+export function Avatar({ actor }: { actor: FileActor }) {
   const initial = (actor.login ?? actor.name).slice(0, 1).toUpperCase();
   return actor.avatarUrl ? (
     <img className="editlet-meta__avatar" src={actor.avatarUrl} alt="" width={20} height={20} />
@@ -36,14 +42,14 @@ function Avatar({ actor }: { actor: FileActor }) {
 }
 
 /** A GitHub login as is; a git author name as first name and last initial ("Anton Gunkin" → "Anton G"). */
-function shortName(actor: FileActor): string {
+export function shortName(actor: FileActor): string {
   if (actor.login) return actor.login;
   const [first, ...rest] = actor.name.trim().split(/\s+/);
   const last = rest.at(-1);
   return last ? `${first} ${last.slice(0, 1)}` : actor.name;
 }
 
-function When({ date }: { date: string }) {
+export function When({ date }: { date: string }) {
   return (
     <time dateTime={date} title={new Date(date).toLocaleString()}>
       {relativeTime(date)}

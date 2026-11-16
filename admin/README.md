@@ -41,6 +41,7 @@ It has two modes with the same screens:
 |---|---|
 | Mode detection, local content source, `sha` conflict check, polling | [docs/admin/modes-and-source.md](../../../docs/admin/modes-and-source.md) |
 | `?editlet` routes, navigation, protocol bridge, unsaved-changes guard | [docs/admin/routing-and-bridge.md](../../../docs/admin/routing-and-bridge.md) |
+| Collection list: sortable table (title, updated, by, status), pages, New entry | [docs/admin/collection.md](../../../docs/admin/collection.md) |
 | Entry form: values, validation, new entry, draft, delete, conflicts | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md) |
 | References: combobox search, Open link, broken references, **Used by**, Rename, delete with the references removed | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#used-by) |
 | `object` and `blocks`: groups, item cards, Add block, move and remove, nested errors and images | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#widgets) |

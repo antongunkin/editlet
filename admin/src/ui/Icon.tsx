@@ -117,6 +117,10 @@ const ArrowLeft = createIcon('arrow-left', [
 
 const ChevronRight = createIcon('chevron-right', [['path', { d: 'm9 18 6-6-6-6', key: 'mthhwq' }]]);
 
+const ChevronLeft = createIcon('chevron-left', [['path', { d: 'm15 18-6-6 6-6', key: '1wnfg3' }]]);
+
+const ChevronUp = createIcon('chevron-up', [['path', { d: 'm18 15-6-6-6 6', key: '153udz' }]]);
+
 const File = createIcon('file', [
   ['path', { d: 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', key: '1rqfz7' }],
   ['path', { d: 'M14 2v4a2 2 0 0 0 2 2h4', key: 'tnqrlb' }],
@@ -301,6 +305,8 @@ export const Icon = {
   ExternalLink,
   ArrowLeft,
   ChevronRight,
+  ChevronLeft,
+  ChevronUp,
   File,
   Folder,
   Eye,

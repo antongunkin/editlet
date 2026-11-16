@@ -166,7 +166,15 @@ export function hasChanges(changes: ModelChanges): boolean {
 }
 
 export type ChatPrompt = {
-  id: 'add-field' | 'rename-field' | 'remove-field' | 'require-field' | 'add-collection' | 'fix-problems';
+  id:
+    | 'add-field'
+    | 'rename-field'
+    | 'remove-field'
+    | 'require-field'
+    | 'add-reference'
+    | 'add-collection'
+    | 'fix-problems'
+    | 'review-schema';
   title: string;
   text: string;
 };
@@ -180,15 +188,19 @@ function freeName(candidates: string[], taken: (name: string) => boolean): strin
 
 const PLURALS: Record<string, string> = { tag: 'tags', category: 'categories', topic: 'topics' };
 
-/**
- * Copyable prompts for Claude Code, filled with real names from the schema. Prompts whose target does not exist
- * (no field to remove, no optional field) are left out. Markdown fields are never used as a target.
- */
-export function chatPrompts(schema: Schema, schemaPath: string, opts: { hasProblems: boolean }): ChatPrompt[] {
+/** The collection the global prompts name: the first one with entries of its own, else the first, else `post`. */
+const mainCollection = (schema: Schema) => {
   const entries = Object.entries(schema.collections);
-  const collection = (entries.find(([, c]) => !c.singleton) ?? entries[0])?.[0] ?? 'post';
-  const fields = Object.entries(schema.collections[collection]?.fields ?? {}).filter(([, f]) => f.type !== 'markdown');
+  return (entries.find(([, c]) => !c.singleton) ?? entries[0])?.[0] ?? 'post';
+};
+
+/**
+ * Copyable prompts for one collection, filled with its real names. Prompts whose target does not exist (no field to
+ * remove, no optional field, no other collection to reference) are left out. Markdown fields are never a target.
+ */
+export function collectionPrompts(schema: Schema, schemaPath: string, collection: string): ChatPrompt[] {
   const all = schema.collections[collection]?.fields ?? {};
+  const fields = Object.entries(all).filter(([, f]) => f.type !== 'markdown');
   const prompts: ChatPrompt[] = [];
 
   const newField = freeName(['subtitle', 'summary', 'note'], (name) => Object.hasOwn(all, name));
@@ -226,13 +238,24 @@ export function chatPrompts(schema: Schema, schemaPath: string, opts: { hasProbl
     });
   }
 
-  const tag = freeName(['tag', 'category', 'topic'], (name) => Object.hasOwn(schema.collections, name));
-  prompts.push({
-    id: 'add-collection',
-    title: 'Add a collection',
-    text: `Add a collection "${tag}" (label "${capitalize(tag)}") with a required string field "name", and let "${collection}" reference many ${PLURALS[tag] ?? `${tag}s`}.`,
-  });
+  const referenced = new Set(Object.values(all).flatMap((f) => (f.type === 'reference' ? f.collections : [])));
+  const target = Object.entries(schema.collections).find(
+    ([key, c]) => key !== collection && !c.singleton && !referenced.has(key),
+  )?.[0];
+  if (target !== undefined) {
+    const field = freeName([target, `${target}Ref`], (name) => Object.hasOwn(all, name));
+    prompts.push({
+      id: 'add-reference',
+      title: 'Link to another collection',
+      text: `Add an optional reference field "${field}" to "${collection}" that points to one "${target}" entry.`,
+    });
+  }
+  return prompts;
+}
 
+/** Copyable prompts for the whole model: add a collection, review the schema, and fix the problems when there are any. */
+export function globalPrompts(schema: Schema, schemaPath: string, opts: { hasProblems: boolean }): ChatPrompt[] {
+  const prompts: ChatPrompt[] = [];
   if (opts.hasProblems) {
     prompts.push({
       id: 'fix-problems',
@@ -240,5 +263,17 @@ export function chatPrompts(schema: Schema, schemaPath: string, opts: { hasProbl
       text: 'Run the content validation and fix the problems shown in the content model.',
     });
   }
+  const collection = mainCollection(schema);
+  const tag = freeName(['tag', 'category', 'topic'], (name) => Object.hasOwn(schema.collections, name));
+  prompts.push({
+    id: 'add-collection',
+    title: 'Add a collection',
+    text: `Add a collection "${tag}" (label "${capitalize(tag)}") with a required string field "name", and let "${collection}" reference many ${PLURALS[tag] ?? `${tag}s`}.`,
+  });
+  prompts.push({
+    id: 'review-schema',
+    title: 'Review the schema',
+    text: `Review ${schemaPath}: suggest missing labels, hints, required fields and slug sources. Show me the plan before changing anything.`,
+  });
   return prompts;
 }

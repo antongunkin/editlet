@@ -365,7 +365,12 @@ export function WindowFrame({
             </div>
             <NavMenu id={nav} schema={schema} route={route} />
           </header>
-          <div className="editlet-window__body">{children}</div>
+          {/* The body and, over it, the layer that dialogs open in (`DialogContent`): the bar and the status bar stay
+              outside both, so Minimize and the rest of the bar work while a dialog is open. */}
+          <div className="editlet-window__main">
+            <div className="editlet-window__body">{children}</div>
+            <div className="editlet-window__dialogs" data-editlet-dialogs="" />
+          </div>
           <StatusBar />
           {edges}
         </div>

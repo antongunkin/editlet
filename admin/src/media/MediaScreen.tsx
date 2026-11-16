@@ -143,24 +143,34 @@ function useDropZone(onFiles: (files: File[]) => void) {
   };
 }
 
+/**
+ * One image: a square preview with a flag only when something needs a look (Unused, No alt), the file name and the
+ * entry folder it sits in. Files dropped on a card go into that card's folder.
+ */
 function MediaCard({
+  schema,
   image,
   selecting,
   selected,
   active,
   incomplete,
   onClick,
+  onFiles,
 }: {
+  schema: Schema;
   image: MediaImage;
   selecting: boolean;
   selected: boolean;
   active: boolean;
   incomplete: boolean;
   onClick(): void;
+  onFiles(files: File[], folder: string): void;
 }) {
   const used = isUsed(image);
   const locked = selecting && (used || incomplete);
   const status = used ? `Used in ${image.uses.length}` : incomplete ? 'Checking…' : 'Unused';
+  const drop = useDropZone((files) => onFiles(files, image.folder));
+  const place = shortFolder(schema, image.folder).replace(/\/$/, '');
   return (
     <button
       type="button"
@@ -170,10 +180,16 @@ function MediaCard({
       aria-current={!selecting && active ? 'true' : undefined}
       disabled={locked}
       onClick={onClick}
+      data-dragging={drop.over ? 'true' : undefined}
+      {...drop.handlers}
     >
       <LazyPreview>
         <AssetPreview path={image.path} alt="" className="editlet-media-grid__img" />
       </LazyPreview>
+      <span className="editlet-media__flags">
+        {!used && !incomplete ? <span className="editlet-media__flag">Unused</span> : null}
+        {hasMissingAlt(image) ? <span className="editlet-media__flag editlet-media__flag--warn">No alt</span> : null}
+      </span>
       {selecting && !locked ? (
         <span className="editlet-media__check" aria-hidden="true">
           {selected ? <Icon.Check size={14} /> : null}
@@ -181,41 +197,29 @@ function MediaCard({
       ) : null}
       <div className="editlet-media-grid__info">
         <div className="editlet-media-grid__name">{image.name}</div>
-        <div className="editlet-media-grid__meta">
-          {status}
-          {hasMissingAlt(image) ? ' · No alt' : ''}
-        </div>
+        <div className="editlet-media-grid__meta">{place.split('/').slice(1).join('/') || place}</div>
+        <span className="editlet-sr-only">{status}</span>
       </div>
     </button>
   );
 }
 
-function FolderGroup({
-  schema,
-  folder,
-  count,
-  onFiles,
-  children,
-}: {
-  schema: Schema;
-  folder: string;
-  count: number;
-  onFiles(files: File[], folder: string): void;
-  children: ReactNode;
-}) {
-  const drop = useDropZone((files) => onFiles(files, folder));
-  // The folder names the group, so two `cover.jpg` cards are told apart by the folder they sit in.
+/** The collection an image belongs to: the first folder under `contentDir` (`post`), or `media` for the library. */
+export const groupOf = (schema: Schema, folder: string) => shortFolder(schema, folder).split('/')[0] ?? '';
+
+/** The group's name: the collection's label, `Media library` for the media folder, else the folder itself. */
+const groupLabel = (schema: Schema, group: string) =>
+  schema.collections[group]?.label ??
+  (`${schema.contentDir}/${group}` === mediaFolder(schema) ? 'Media library' : group);
+
+/** One collection's images, collapsible: its label and count, then a grid of cards. */
+function CollectionGroup({ label, count, children }: { label: string; count: number; children: ReactNode }) {
   return (
-    <details
-      className="editlet-media__group"
-      open
-      aria-label={shortFolder(schema, folder)}
-      data-dragging={drop.over ? 'true' : undefined}
-      {...drop.handlers}
-    >
+    <details className="editlet-media__group" open aria-label={label}>
       <summary className="editlet-media__folder">
-        <span className="editlet-u-mono">{shortFolder(schema, folder)}</span>
-        <span className="editlet-u-text-muted">{count}</span>
+        <Icon.ChevronRight size={16} className="editlet-media__chevron" />
+        <span>{label}</span>
+        <span className="editlet-media__count">{count}</span>
       </summary>
       <div className="editlet-media-grid editlet-media-grid--auto">{children}</div>
     </details>
@@ -426,7 +430,7 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
   const images = index?.images ?? [];
   const counts = useMemo(() => filterCounts(index?.images ?? []), [index]);
   const shown = images.filter((i) => matchesFilter(i, filter) && matchesQuery(i, query));
-  const folders = [...new Set(shown.map((i) => i.folder))];
+  const groups = [...new Set(shown.map((i) => groupOf(schema, i.folder)))];
   const detail = open === null ? undefined : images.find((i) => i.path === open);
 
   const remove = (paths: string[]) =>
@@ -525,28 +529,24 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
           ) : shown.length === 0 ? (
             <p className="editlet-ff-image__none">No images match.</p>
           ) : (
-            folders.map((folder) => {
-              const inFolder = shown.filter((i) => i.folder === folder);
+            groups.map((group) => {
+              const inGroup = shown.filter((i) => groupOf(schema, i.folder) === group);
               return (
-                <FolderGroup
-                  key={folder}
-                  schema={schema}
-                  folder={folder}
-                  count={inFolder.length}
-                  onFiles={(files, f) => void uploader.upload(files, f)}
-                >
-                  {inFolder.map((image) => (
+                <CollectionGroup key={group} label={groupLabel(schema, group)} count={inGroup.length}>
+                  {inGroup.map((image) => (
                     <MediaCard
                       key={image.path}
+                      schema={schema}
                       image={image}
                       selecting={selecting}
                       selected={selected.has(image.path)}
                       active={image.path === open}
                       incomplete={index.incomplete}
                       onClick={() => (selecting ? toggle(image.path) : setOpen(image.path))}
+                      onFiles={(files, f) => void uploader.upload(files, f)}
                     />
                   ))}
-                </FolderGroup>
+                </CollectionGroup>
               );
             })
           )}

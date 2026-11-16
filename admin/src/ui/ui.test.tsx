@@ -107,6 +107,53 @@ describe('Dialog', () => {
   });
 });
 
+describe('Dialog in the window', () => {
+  function Window({ open }: { open: boolean }) {
+    return (
+      <div className="editlet-window">
+        <header>
+          <button type="button">Minimize</button>
+        </header>
+        <div className="editlet-window__main">
+          <div className="editlet-window__body">
+            <Dialog open={open} onOpenChange={() => {}}>
+              <DialogContent>
+                <DialogTitle>Sign in again</DialogTitle>
+              </DialogContent>
+            </Dialog>
+          </div>
+          <div className="editlet-window__dialogs" data-editlet-dialogs="" />
+        </div>
+      </div>
+    );
+  }
+
+  it('opens in the dialog layer over the body: the body goes inert, the bar does not', () => {
+    const { container, rerender } = render(<Window open />);
+    const dialog = screen.getByRole('dialog', { name: 'Sign in again' });
+    const body = container.querySelector<HTMLElement>('.editlet-window__body')!;
+    expect(dialog.parentElement).toBe(container.querySelector('[data-editlet-dialogs]'));
+    expect(dialog.getAttribute('aria-modal')).toBeNull();
+    expect(body.inert).toBe(true);
+    expect(screen.getByRole('button', { name: 'Minimize' }).closest('[inert]')).toBeNull();
+
+    rerender(<Window open={false} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(body.inert).toBe(false);
+  });
+
+  it('is a modal over the page without a window', () => {
+    render(
+      <Dialog open onOpenChange={() => {}}>
+        <DialogContent>
+          <DialogTitle>Alone</DialogTitle>
+        </DialogContent>
+      </Dialog>,
+    );
+    expect(screen.getByRole('dialog', { name: 'Alone' }).getAttribute('aria-modal')).toBe('true');
+  });
+});
+
 describe('Field', () => {
   it('shows the error text and the required marker', () => {
     render(

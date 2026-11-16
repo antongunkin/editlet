@@ -33,10 +33,12 @@ afterEach(() => {
 });
 
 describe('MediaScreen', () => {
-  it('lists images by folder with Used and Unused, and filters them', async () => {
+  it('lists images by collection with their entry folder, Used and Unused, and filters them', async () => {
     await openMedia();
-    expect(within(main()).getByText('post/hello-world/')).toBeDefined();
+    const post = within(main()).getByRole('group', { name: 'Post' });
+    expect(within(post).getAllByText('hello-world')).toHaveLength(2);
     expect(card(COVER).textContent).toContain('Used in 1');
+    expect(card(COVER).textContent).not.toContain('Unused');
     await waitFor(() => expect(card(OLD).textContent).toContain('Unused'));
     fireEvent.click(within(main()).getByRole('tab', { name: 'Unused 1' }));
     expect(within(main()).queryByTitle(COVER)).toBeNull();
@@ -129,7 +131,7 @@ const section = () => main().querySelector<HTMLElement>('.editlet-media')!;
 const big = (name: string) => new File([new Uint8Array(6 * 1024 * 1024)], name);
 
 describe('MediaScreen: drops, failures and several uses', () => {
-  it('uploads files dropped on the screen to the media folder, and on a folder into that folder', async () => {
+  it('uploads files dropped on the screen to the media folder, and on a card into that card folder', async () => {
     const { commit } = await openMedia();
     const png = new File([new Uint8Array([5])], 'drop.png');
 
@@ -151,10 +153,10 @@ describe('MediaScreen: drops, failures and several uses', () => {
     expect(commit.mock.calls[0]![0].map((c) => c.path)).toEqual(['cms/content/media/drop.png']);
     expect(commit.mock.calls[0]![1]).toBe('Upload media/drop.png');
 
-    const folder = within(main()).getByRole('group', { name: 'post/hello-world/' });
-    fireEvent.dragEnter(folder, drag([png]));
-    expect(folder.dataset.dragging).toBe('true');
-    fireEvent.drop(folder, drag([new File([new Uint8Array([6])], 'here.png')]));
+    const target = card(COVER);
+    fireEvent.dragEnter(target, drag([png]));
+    expect(target.dataset.dragging).toBe('true');
+    fireEvent.drop(target, drag([new File([new Uint8Array([6])], 'here.png')]));
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(2));
     expect(commit.mock.calls[1]![0].map((c) => c.path)).toEqual(['cms/content/post/hello-world/here.png']);
   });
@@ -219,7 +221,8 @@ describe('MediaScreen: drops, failures and several uses', () => {
     await openMedia({
       'cms/content/post/second.md': '---\ntitle: Second\nfeaturedImage:\n  src: hello-world/old.png\n---\n',
     });
-    await waitFor(() => expect(card(OLD).textContent).toContain('Used in 1 · No alt'));
+    await waitFor(() => expect(card(OLD).textContent).toContain('Used in 1'));
+    expect(within(card(OLD)).getByText('No alt')).toBeDefined();
     fireEvent.click(within(main()).getByRole('tab', { name: 'Missing alt 1' }));
     expect(within(main()).queryByTitle(COVER)).toBeNull();
     fireEvent.change(within(main()).getByLabelText('Search images'), { target: { value: 'zzz' } });

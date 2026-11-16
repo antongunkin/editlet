@@ -32,7 +32,8 @@ export type SchemaData = { schema: Schema; schemaPath: string };
 
 export type EntryFileData = { file: EntryFile; sha: string; keyOrder: string[] };
 
-export type EntryListItem = { slug: string; path: string; title: string; draft: boolean };
+/** One row of a collection list. `sha` is the listed file's sha: it keys the file's history, like the entry screen's Meta. */
+export type EntryListItem = { slug: string; path: string; sha: string; title: string; draft: boolean };
 
 /** Thrown by `useCommit` when the source answered with issues (nothing was written). */
 export class IssuesError extends Error {
@@ -180,7 +181,7 @@ export function useEntries(collection: string): Loadable<EntryListItem[]> {
     const data = results[i]?.data?.file.data;
     const raw = titleField === undefined ? undefined : data?.[titleField];
     const title = typeof raw === 'string' && raw.trim() !== '' ? raw : ref.slug;
-    return { slug: ref.slug, path: ref.path, title, draft: data?.draft === true };
+    return { slug: ref.slug, path: ref.path, sha: ref.sha, title, draft: data?.draft === true };
   });
   items.sort((a, b) => a.title.localeCompare(b.title) || a.slug.localeCompare(b.slug));
   return { data: items, error: null, isPending: false };
