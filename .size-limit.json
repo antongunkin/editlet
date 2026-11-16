@@ -1,0 +1,14 @@
+[
+  {
+    "name": "editlet/loader",
+    "path": "dist/loader/index.js",
+    "import": "{ mountEditletLoader }",
+    "limit": "1770 B"
+  },
+  {
+    "name": "editlet window.js (select-to-edit, window geometry)",
+    "path": "dist/admin/dist/window.js",
+    "gzip": true,
+    "limit": "4 KB"
+  }
+]

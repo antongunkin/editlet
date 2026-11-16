@@ -1,0 +1,20 @@
+# CI of the public repo antongunkin/editlet (the exported packages/editlet tree, spec P13 §9.3–9.4).
+# Inert inside the monorepo: GitHub reads workflows only from the repository root.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: npm install --no-package-lock --no-audit --no-fund
+      - run: npm run release:check

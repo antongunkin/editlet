@@ -1,0 +1,1 @@
+# npm reads this file instead of .gitignore here, so the bundled scripts/*.mjs are packed.

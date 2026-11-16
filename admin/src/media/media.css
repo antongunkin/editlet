@@ -1,0 +1,182 @@
+/* Declared here first so the layer order holds however the CSS files are ordered in the bundle. */
+@layer tokens, base, components, utilities;
+
+@layer components {
+  /* The Media screen: the grid, and the open image beside it on a wide window or instead of it on a narrow one. */
+  .editlet-media {
+    container-type: inline-size;
+  }
+
+  /* Dropping files outlines the folder they go to (a folder group, or the whole screen for the media folder). */
+  .editlet-media[data-dragging='true'],
+  .editlet-media__group[data-dragging='true'] {
+    border-radius: var(--editlet-radius-xl);
+    outline: 2px dashed var(--editlet-ring);
+    outline-offset: calc(var(--editlet-spacing) * -1);
+  }
+
+  .editlet-media__layout {
+    display: grid;
+    gap: calc(var(--editlet-spacing) * 6);
+  }
+
+  .editlet-media__list {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--editlet-spacing) * 4);
+    min-width: 0;
+  }
+
+  .editlet-media--detail .editlet-media__list {
+    display: none;
+  }
+
+  @container (width >= 48rem) {
+    .editlet-media--detail .editlet-media__layout {
+      grid-template-columns: minmax(0, 1fr) var(--editlet-container-2xs);
+    }
+
+    .editlet-media--detail .editlet-media__list {
+      display: flex;
+    }
+  }
+
+  .editlet-media__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--editlet-spacing) * 3);
+    align-items: center;
+
+    & input {
+      flex: 1 1 var(--editlet-container-3xs);
+    }
+  }
+
+  .editlet-media__group {
+    padding: calc(var(--editlet-spacing) * 1);
+
+    & > .editlet-media-grid {
+      margin-top: calc(var(--editlet-spacing) * 3);
+    }
+  }
+
+  .editlet-media__folder {
+    display: flex;
+    gap: calc(var(--editlet-spacing) * 2);
+    align-items: baseline;
+    cursor: pointer;
+    font-size: var(--editlet-text-sm);
+    font-weight: var(--editlet-font-weight-medium);
+    color: var(--editlet-foreground);
+  }
+
+  /* The tick on a card while selecting. */
+  .editlet-media__check {
+    position: absolute;
+    top: calc(var(--editlet-spacing) * 2);
+    left: calc(var(--editlet-spacing) * 2);
+    display: grid;
+    place-items: center;
+    width: calc(var(--editlet-spacing) * 5);
+    height: calc(var(--editlet-spacing) * 5);
+    border-radius: var(--editlet-radius-sm);
+    border: 1px solid var(--editlet-border);
+    background: var(--editlet-card);
+    color: var(--editlet-foreground);
+  }
+
+  .editlet-media-grid__card:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .editlet-media__selectbar {
+    display: flex;
+    gap: calc(var(--editlet-spacing) * 3);
+    align-items: center;
+  }
+
+  .editlet-media__detail {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--editlet-spacing) * 3);
+    min-width: 0;
+  }
+
+  .editlet-media__detail-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--editlet-spacing) * 2);
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .editlet-media__title {
+    overflow-wrap: anywhere;
+    font-size: var(--editlet-text-lg);
+    font-weight: var(--editlet-font-weight-semibold);
+    color: var(--editlet-foreground);
+  }
+
+  .editlet-media__heading {
+    margin-top: calc(var(--editlet-spacing) * 2);
+    font-size: var(--editlet-text-sm);
+    font-weight: var(--editlet-font-weight-semibold);
+    color: var(--editlet-foreground);
+  }
+
+  .editlet-media__preview {
+    display: grid;
+    place-items: center;
+    min-height: calc(var(--editlet-spacing) * 24);
+    border-radius: var(--editlet-radius-lg);
+    border: 1px solid var(--editlet-border);
+    background: var(--editlet-background);
+    color: var(--editlet-muted-foreground);
+
+    & img {
+      display: block;
+      max-width: 100%;
+      max-height: calc(var(--editlet-spacing) * 60);
+      object-fit: contain;
+    }
+  }
+
+  .editlet-media__uses {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--editlet-spacing) * 3);
+  }
+
+  .editlet-media__use {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--editlet-spacing) * 1);
+  }
+
+  .editlet-media__alt-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  /* The image field's Gallery dialog: search, scope and Upload above the grid. */
+  .editlet-media-picker {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--editlet-spacing) * 4);
+  }
+
+  .editlet-media-picker__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--editlet-spacing) * 3);
+    align-items: center;
+
+    & input[type='search'] {
+      flex: 1 1 var(--editlet-container-3xs);
+    }
+  }
+}

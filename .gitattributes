@@ -1,0 +1,4 @@
+# Left out of the public export (git archive, scripts/export-repo.mjs): the admin's Playwright suite runs on the
+# monorepo's examples/astro content and only in this repository's CI.
+admin/e2e export-ignore
+admin/playwright.config.ts export-ignore

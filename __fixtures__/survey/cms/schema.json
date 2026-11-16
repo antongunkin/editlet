@@ -1,0 +1,373 @@
+{
+  "contentDir": "cms/content",
+  "git": {
+    "baseBranch": "main"
+  },
+  "collections": {
+    "brand": {
+      "label": "Brand",
+      "singleton": true,
+      "titleField": "name",
+      "fields": {
+        "name": {
+          "type": "string",
+          "label": "Name",
+          "required": true
+        },
+        "accent": {
+          "type": "color",
+          "label": "Accent"
+        },
+        "logo": {
+          "type": "image",
+          "label": "Logo"
+        }
+      }
+    },
+    "survey": {
+      "label": "Survey",
+      "titleField": "title",
+      "slugFrom": "title",
+      "fields": {
+        "title": {
+          "type": "string",
+          "label": "Title",
+          "required": true
+        },
+        "status": {
+          "type": "select",
+          "label": "Status",
+          "options": [
+            {
+              "label": "Open",
+              "value": "open"
+            },
+            {
+              "label": "Closed",
+              "value": "closed"
+            }
+          ],
+          "required": true
+        },
+        "brand": {
+          "type": "reference",
+          "label": "Brand",
+          "collections": [
+            "brand"
+          ]
+        },
+        "sections": {
+          "type": "reference",
+          "label": "Sections",
+          "collections": [
+            "section"
+          ],
+          "multiple": true,
+          "min": 1
+        },
+        "intro": {
+          "type": "markdown",
+          "label": "Intro"
+        }
+      }
+    },
+    "section": {
+      "label": "Section",
+      "titleField": "title",
+      "fields": {
+        "title": {
+          "type": "string",
+          "label": "Title",
+          "required": true
+        },
+        "order": {
+          "type": "number",
+          "label": "Order",
+          "integer": true,
+          "required": true
+        },
+        "questions": {
+          "type": "reference",
+          "label": "Questions",
+          "collections": [
+            "question"
+          ],
+          "multiple": true
+        },
+        "description": {
+          "type": "markdown",
+          "label": "Description"
+        }
+      }
+    },
+    "question": {
+      "label": "Question",
+      "titleField": "prompt",
+      "fields": {
+        "prompt": {
+          "type": "string",
+          "label": "Prompt",
+          "required": true
+        },
+        "kind": {
+          "type": "select",
+          "label": "Kind",
+          "options": [
+            {
+              "label": "One choice",
+              "value": "single"
+            },
+            {
+              "label": "Free text",
+              "value": "text"
+            },
+            {
+              "label": "Scale",
+              "value": "scale"
+            }
+          ],
+          "required": true
+        },
+        "mandatory": {
+          "type": "boolean",
+          "label": "Answer required"
+        },
+        "weight": {
+          "type": "number",
+          "label": "Weight",
+          "min": 0
+        },
+        "image": {
+          "type": "image",
+          "label": "Image"
+        },
+        "scale": {
+          "type": "object",
+          "label": "Scale",
+          "hint": "For a scale question: the ends and their labels.",
+          "fields": {
+            "min": {
+              "type": "number",
+              "label": "From",
+              "integer": true,
+              "required": true
+            },
+            "max": {
+              "type": "number",
+              "label": "To",
+              "integer": true,
+              "required": true
+            },
+            "labels": {
+              "type": "object",
+              "label": "Labels",
+              "fields": {
+                "low": {
+                  "type": "string",
+                  "label": "Low end"
+                },
+                "high": {
+                  "type": "string",
+                  "label": "High end"
+                }
+              }
+            }
+          }
+        },
+        "options": {
+          "type": "reference",
+          "label": "Options",
+          "collections": [
+            "option"
+          ],
+          "multiple": true
+        },
+        "next": {
+          "type": "reference",
+          "label": "Next question",
+          "collections": [
+            "question"
+          ]
+        },
+        "help": {
+          "type": "markdown",
+          "label": "Help"
+        }
+      }
+    },
+    "option": {
+      "label": "Option",
+      "titleField": "label",
+      "fields": {
+        "label": {
+          "type": "string",
+          "label": "Label",
+          "required": true
+        },
+        "score": {
+          "type": "number",
+          "label": "Score"
+        },
+        "correct": {
+          "type": "boolean",
+          "label": "Correct"
+        },
+        "followUp": {
+          "type": "reference",
+          "label": "Follow-up question",
+          "collections": [
+            "question"
+          ]
+        }
+      }
+    },
+    "page": {
+      "label": "Page",
+      "titleField": "title",
+      "fields": {
+        "title": {
+          "type": "string",
+          "label": "Title",
+          "required": true
+        },
+        "seo": {
+          "type": "object",
+          "label": "SEO",
+          "fields": {
+            "title": {
+              "type": "string",
+              "label": "Title"
+            },
+            "description": {
+              "type": "text",
+              "label": "Description"
+            }
+          }
+        },
+        "content": {
+          "type": "blocks",
+          "label": "Content",
+          "max": 12,
+          "blocks": {
+            "hero": {
+              "label": "Hero",
+              "fields": {
+                "title": {
+                  "type": "string",
+                  "label": "Title",
+                  "required": true
+                },
+                "image": {
+                  "type": "image",
+                  "label": "Image"
+                },
+                "cta": {
+                  "type": "object",
+                  "label": "Button",
+                  "fields": {
+                    "label": {
+                      "type": "string",
+                      "label": "Label"
+                    },
+                    "url": {
+                      "type": "url",
+                      "label": "URL"
+                    }
+                  }
+                }
+              }
+            },
+            "features": {
+              "label": "Features",
+              "fields": {
+                "items": {
+                  "type": "object",
+                  "label": "Items",
+                  "list": true,
+                  "min": 1,
+                  "max": 6,
+                  "fields": {
+                    "title": {
+                      "type": "string",
+                      "label": "Title",
+                      "required": true
+                    },
+                    "text": {
+                      "type": "text",
+                      "label": "Text"
+                    },
+                    "icon": {
+                      "type": "image",
+                      "label": "Icon"
+                    }
+                  }
+                }
+              }
+            },
+            "prose": {
+              "label": "Text",
+              "fields": {
+                "text": {
+                  "type": "markdown",
+                  "label": "Text",
+                  "required": true
+                }
+              }
+            },
+            "survey": {
+              "label": "Survey",
+              "fields": {
+                "survey": {
+                  "type": "reference",
+                  "label": "Survey",
+                  "collections": [
+                    "survey"
+                  ],
+                  "required": true
+                },
+                "note": {
+                  "type": "text",
+                  "label": "Note"
+                }
+              }
+            },
+            "quote": {
+              "label": "Quote",
+              "fields": {
+                "text": {
+                  "type": "text",
+                  "label": "Text",
+                  "required": true
+                },
+                "by": {
+                  "type": "object",
+                  "label": "By",
+                  "fields": {
+                    "name": {
+                      "type": "string",
+                      "label": "Name"
+                    },
+                    "role": {
+                      "type": "select",
+                      "label": "Role",
+                      "options": [
+                        {
+                          "label": "Customer",
+                          "value": "customer"
+                        },
+                        {
+                          "label": "Team",
+                          "value": "team"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+name = "editlet-auth"
+main = "worker.ts"
+compatibility_date = "2026-11-01"
+
+# Keep variables set in the dashboard when `wrangler deploy` runs.
+keep_vars = true
+
+# Set the variables here (uncomment) or once in the dashboard after the first deploy.
+# GITHUB_CLIENT_SECRET is a secret, not a var. Set it with:
+#   npx wrangler@4 secret put GITHUB_CLIENT_SECRET
+# [vars]
+# GITHUB_CLIENT_ID = "Iv23li..."
+# ALLOWED_ORIGINS = "https://example.com, https://*.preview.example.com"

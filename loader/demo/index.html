@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Editlet loader demo</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #222;
+      }
+      article {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        margin: 1rem 0;
+      }
+      nav a {
+        margin-right: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>My site</h1>
+    <nav>
+      <a href="?editlet">Open editor</a>
+      <a href="?editlet=post/hello-world">Edit hello-world</a>
+      <a href="?editlet=schema">Schema</a>
+      <a href="?editlet=branch:homepage-edits">Branch</a>
+    </nav>
+    <article data-editlet-entry="post/hello-world">
+      <h2>Hello world</h2>
+      <p>The first post.</p>
+    </article>
+    <article data-editlet-entry="post/second">
+      <h2>Second post</h2>
+      <p>Another post.</p>
+    </article>
+    <script type="module">
+      import { mountEditletLoader } from '../index.ts';
+      mountEditletLoader({ adminUrl: '/editlet/' });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Editlet admin</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        margin: 0;
+        padding: 2rem;
+        background: #fff;
+        color: #111;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #111;
+          color: #eee;
+        }
+      }
+      button {
+        font: inherit;
+        padding: 0.4rem 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Editlet admin</h1>
+    <p>The Editlet admin is not built yet (P6).</p>
+    <p id="route">Waiting for the host page...</p>
+    <button id="close" type="button">Close</button>
+    <script>
+      var origin = null;
+      function send(type) {
+        var target = type === 'ready' ? '*' : origin;
+        if (target) window.parent.postMessage({ source: 'editlet', v: 1, type: type }, target);
+      }
+      window.addEventListener('message', function (event) {
+        var data = event.data;
+        if (event.source !== window.parent || !data || data.source !== 'editlet' || data.type !== 'init') return;
+        if (origin === null) origin = event.origin;
+        if (event.origin !== origin) return;
+        document.getElementById('route').textContent = 'Route: ' + (data.route || '/');
+      });
+      document.getElementById('close').addEventListener('click', function () {
+        send('close');
+      });
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') send('close');
+      });
+      send('ready');
+    </script>
+  </body>
+</html>

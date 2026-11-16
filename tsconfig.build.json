@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "declaration": true,
+    "noEmit": true
+  },
+  "files": [
+    "core/index.ts",
+    "node/index.ts",
+    "auth/handler.ts",
+    "auth/client.ts",
+    "auth/protocol.ts",
+    "github/index.ts",
+    "loader/index.ts",
+    "loader/protocol.ts",
+    "astro/index.ts",
+    "astro/content.ts",
+    "next/index.ts",
+    "next/config.ts",
+    "next/preview.ts"
+  ]
+}

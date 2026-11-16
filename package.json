@@ -1,0 +1,189 @@
+{
+  "name": "editlet",
+  "version": "0.1.0-alpha.0",
+  "description": "Git-based, file-based CMS for Next.js and Astro: Markdown content with YAML frontmatter and a schema in your repo, an editor overlay on your own site, every edit a commit.",
+  "keywords": [
+    "cms",
+    "git",
+    "git-based-cms",
+    "headless-cms",
+    "file-based",
+    "markdown",
+    "frontmatter",
+    "nextjs",
+    "astro",
+    "github",
+    "editor"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/antongunkin/editlet.git"
+  },
+  "homepage": "https://github.com/antongunkin/editlet#readme",
+  "bugs": {
+    "url": "https://github.com/antongunkin/editlet/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "browserslist": [
+    "chrome 125",
+    "edge 125",
+    "firefox 126",
+    "safari 17.5"
+  ],
+  "files": [
+    "dist",
+    "LICENSE",
+    "skills/README.md",
+    "skills/*/SKILL.md",
+    "skills/*/references/*.md",
+    "skills/*/scripts/*.mjs"
+  ],
+  "exports": {
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js",
+      "default": "./dist/node/index.js"
+    },
+    "./auth": {
+      "types": "./dist/auth/handler.d.ts",
+      "import": "./dist/auth/handler.js",
+      "default": "./dist/auth/handler.js"
+    },
+    "./auth/client": {
+      "types": "./dist/auth/client.d.ts",
+      "import": "./dist/auth/client.js",
+      "default": "./dist/auth/client.js"
+    },
+    "./auth/protocol": {
+      "types": "./dist/auth/protocol.d.ts",
+      "import": "./dist/auth/protocol.js",
+      "default": "./dist/auth/protocol.js"
+    },
+    "./github": {
+      "types": "./dist/github/index.d.ts",
+      "import": "./dist/github/index.js",
+      "default": "./dist/github/index.js"
+    },
+    "./loader": {
+      "types": "./dist/loader/index.d.ts",
+      "import": "./dist/loader/index.js",
+      "default": "./dist/loader/index.js"
+    },
+    "./loader/protocol": {
+      "types": "./dist/loader/protocol.d.ts",
+      "import": "./dist/loader/protocol.js",
+      "default": "./dist/loader/protocol.js"
+    },
+    "./astro": {
+      "types": "./dist/astro/index.d.ts",
+      "import": "./dist/astro/index.js",
+      "default": "./dist/astro/index.js"
+    },
+    "./astro/content": {
+      "types": "./dist/astro/content.d.ts",
+      "import": "./dist/astro/content.js",
+      "default": "./dist/astro/content.js"
+    },
+    "./next": {
+      "types": "./dist/next/index.d.ts",
+      "import": "./dist/next/index.js",
+      "default": "./dist/next/index.js"
+    },
+    "./next/config": {
+      "types": "./dist/next/config.d.ts",
+      "import": "./dist/next/config.js",
+      "default": "./dist/next/config.js"
+    },
+    "./next/preview": {
+      "types": "./dist/next/preview.d.ts",
+      "import": "./dist/next/preview.js",
+      "default": "./dist/next/preview.js"
+    },
+    "./admin/dist/*": "./dist/admin/dist/*",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
+  "scripts": {
+    "admin:build": "vite build --config admin/vite.config.ts",
+    "admin:dev": "vite --config admin/vite.config.ts",
+    "admin:host": "jiti admin/dev/host.ts",
+    "admin:host:github": "jiti admin/dev/githubHost.ts",
+    "build": "npm run admin:build && npm run skill:build && tsdown",
+    "skill:build": "node skills/editlet/scripts/build.ts",
+    "check:package": "publint && npm_config_ignore_scripts=true npm_config_dry_run=false attw --pack . --profile esm-only",
+    "size": "size-limit",
+    "verify:tarball": "node scripts/verify-tarball.mjs",
+    "release:check": "npm run build && npm run check:package && npm run size && npm run verify:tarball",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run release:check"
+  },
+  "dependencies": {
+    "dexie": "^4.4.7",
+    "yaml": "^2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@milkdown/core": "^7.23.0",
+    "@milkdown/ctx": "^7.23.0",
+    "@milkdown/plugin-clipboard": "^7.23.0",
+    "@milkdown/plugin-history": "^7.23.0",
+    "@milkdown/preset-commonmark": "^7.23.0",
+    "@milkdown/preset-gfm": "^7.23.0",
+    "@milkdown/prose": "^7.23.0",
+    "@milkdown/transformer": "^7.23.0",
+    "@milkdown/utils": "^7.23.0",
+    "@size-limit/preset-small-lib": "^14.3.0",
+    "@tanstack/react-form": "^1.33.5",
+    "@tanstack/react-query": "^5.107.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "approx-string-match": "^2.0.3",
+    "astro": "^7.4.8",
+    "diff": "^9.0.0",
+    "esbuild": "^0.28.2",
+    "fake-indexeddb": "^6.2.8",
+    "jiti": "^2.7.0",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "micromark-extension-gfm": "^3.0.0",
+    "next": "^16.4.6",
+    "publint": "^0.3.25",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "size-limit": "^14.3.0",
+    "tsdown": "0.23.7",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.8"
+  },
+  "peerDependencies": {
+    "astro": "^6 || ^7",
+    "next": ">=16",
+    "react": ">=19"
+  },
+  "peerDependenciesMeta": {
+    "astro": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "contentDir": "cms/content",
+  "git": { "baseBranch": "main" },
+  "collections": {
+    "post": {
+      "label": "Post",
+      "fields": {
+        "title": { "type": "string", "label": "Title", "required": true },
+        "body": { "type": "markdown", "label": "Body" },
+        "featuredImage": { "type": "image", "label": "Featured image" },
+        "author": { "type": "reference", "label": "Author", "collections": ["author"] }
+      }
+    },
+    "author": {
+      "label": "Author",
+      "fields": {
+        "name": { "type": "string", "label": "Name", "required": true }
+      }
+    },
+    "homePage": {
+      "label": "Home page",
+      "singleton": true,
+      "fields": {
+        "title": { "type": "string", "label": "Title", "required": true }
+      }
+    }
+  }
+}

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Editlet</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 2rem;
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+        background: #fff;
+        color: #222;
+      }
+      code {
+        background: #f2f2f2;
+        padding: 0 0.25em;
+        border-radius: 4px;
+      }
+      button {
+        font: inherit;
+        padding: 0.4rem 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Editlet admin</h1>
+    <p>
+      This is a placeholder. The real admin is not built yet: run the admin build so
+      <code>editlet/admin/dist/</code> exists, and the adapter serves it here instead.
+    </p>
+    <p>Mode: <b id="mode">…</b> · Route: <b id="route">…</b></p>
+    <button id="close" type="button">Close</button>
+    <script type="module">
+      // Minimal admin side of the frozen loader protocol (packages/editlet/loader/protocol.ts), inlined so the
+      // placeholder needs no build step.
+      const SOURCE = 'editlet';
+      const V = 1;
+      const embedded = window.parent !== window;
+      const $ = (id) => document.getElementById(id);
+      let pinned = null;
+
+      const send = (body) => {
+        if (embedded && pinned) window.parent.postMessage({ source: SOURCE, v: V, ...body }, pinned);
+      };
+      const showRoute = (route) => ($('route').textContent = route === '' ? '(root)' : route);
+      showRoute(new URL(location.href).searchParams.get('editlet') ?? '');
+
+      fetch('/__editlet/files').then(
+        (res) => ($('mode').textContent = res.ok ? 'local (dev file API)' : 'github'),
+        () => ($('mode').textContent = 'github'),
+      );
+
+      $('close').addEventListener('click', () => send({ type: 'close' }));
+      window.addEventListener('keydown', (e) => e.key === 'Escape' && send({ type: 'close' }));
+      window.addEventListener('message', (e) => {
+        const m = e.data;
+        if (!embedded || e.source !== window.parent || m?.source !== SOURCE || m.v !== V) return;
+        if (pinned === null) {
+          if (m.type !== 'init' || e.origin !== location.origin) return;
+          pinned = e.origin;
+        } else if (e.origin !== pinned) return;
+        if (m.type === 'init' || m.type === 'navigate') showRoute(m.route);
+        else if (m.type === 'close-request') send({ type: 'close' });
+      });
+      if (embedded) window.parent.postMessage({ source: SOURCE, v: V, type: 'ready' }, '*');
+    </script>
+  </body>
+</html>
