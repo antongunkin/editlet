@@ -23,14 +23,14 @@ has only `name` and `description`.
 Give the agent this prompt in the project:
 
 ```text
-Install Editlet in this project: add the package `editlet@alpha` with the project's package manager, then read
+Install Editlet in this project: add the package `editlet` with the project's package manager, then read
 node_modules/editlet/skills/editlet-setup/SKILL.md and follow it.
 ```
 
 By hand:
 
 ```bash
-npm install editlet@alpha
+npm install editlet
 node node_modules/editlet/skills/editlet/scripts/link.mjs --hooks
 ```
 

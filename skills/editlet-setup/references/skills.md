@@ -81,7 +81,7 @@ Optional extra permission rules for the same settings file: `"permissions": { "a
 
 ## Upgrade
 
-1. `npm install editlet@alpha` (while Editlet is in alpha, `latest` stays on the first published version), with the
+1. `npm install editlet`, with the
    project's package manager.
 2. `node node_modules/editlet/skills/editlet/scripts/link.mjs --hooks`: the links follow the new version on their own;
    this adds links for new skills and removes stale ones.

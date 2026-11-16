@@ -4,7 +4,7 @@
 //
 //   npm run release:copy              export-repo.mjs: export + npm install + release:check, nothing pushed
 //   npm run release:bump              release.mjs bump: npm version, commit, tag v<v>, push --atomic --follow-tags
-//   npm run release:publish           release.mjs publish: npm publish --tag alpha
+//   npm run release:publish           release.mjs publish: npm publish --tag latest
 //   npm run release [-- --dry-run]    release.mjs: copy → version → npm check → [y/N] → bump → publish → gh release
 //
 // Versions come from the public repo's tags: the highest v<x.y.z>-alpha.<N> with N + 1, or the version in
@@ -33,7 +33,10 @@ export { defaultRunner };
 
 const PACKAGE_DIR = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
 const PACKAGE = 'editlet';
-const DIST_TAG = 'alpha';
+/** The prerelease id of every version (`0.1.0-alpha.N`). */
+const PRERELEASE = 'alpha';
+/** The npm dist-tag of every release: `latest`, as in uiify, so `npm install editlet` gets the newest alpha. */
+const DIST_TAG = 'latest';
 /** No leading zeros (semver): `0.1.0-alpha.01` and `01.0.0-alpha.0` are not versions. */
 const ALPHA = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-alpha\.(0|[1-9]\d*)$/;
 
@@ -74,7 +77,7 @@ export function releaseVersion(tags, { requested, fallback } = {}) {
   const highest = highestAlphaTag(tags);
   if (requested !== undefined) {
     const version = parseAlpha(requested);
-    if (!version) throw new Error(`--version must look like 0.1.0-${DIST_TAG}.1, got ${requested}`);
+    if (!version) throw new Error(`--version must look like 0.1.0-${PRERELEASE}.1, got ${requested}`);
     if (highest && compareAlpha(version, parseAlpha(highest)) <= 0) {
       throw new Error(`--version ${requested} must be above the last tag v${highest}`);
     }
@@ -82,10 +85,10 @@ export function releaseVersion(tags, { requested, fallback } = {}) {
   }
   if (highest) {
     const [major, minor, patch, n] = parseAlpha(highest);
-    return `${major}.${minor}.${patch}-${DIST_TAG}.${n + 1}`;
+    return `${major}.${minor}.${patch}-${PRERELEASE}.${n + 1}`;
   }
   if (!isAlphaVersion(fallback)) {
-    throw new Error(`No v*-${DIST_TAG}.N tag yet, and package.json has ${fallback}, not x.y.z-${DIST_TAG}.N`);
+    throw new Error(`No v*-${PRERELEASE}.N tag yet, and package.json has ${fallback}, not x.y.z-${PRERELEASE}.N`);
   }
   return fallback;
 }
@@ -131,7 +134,7 @@ export function parseReleaseArgs(argv, env = {}) {
     else if (arg === '--version' && command !== 'publish') {
       const value = args[i + 1];
       if (!value || value.startsWith('-'))
-        throw new Error(`--version needs a value, e.g. --version 0.1.0-${DIST_TAG}.1`);
+        throw new Error(`--version needs a value, e.g. --version 0.1.0-${PRERELEASE}.1`);
       options.version = value;
       i += 1;
     } else if (arg.startsWith('-')) throw new Error(`Unknown argument for ${command}: ${arg}`);
@@ -426,7 +429,7 @@ export async function bumpRelease({
 }
 
 /**
- * `release:publish` (§10): `npm publish --tag alpha` in the target (`prepublishOnly` runs `release:check`). Checks
+ * `release:publish` (§10): `npm publish --tag latest` in the target (`prepublishOnly` runs `release:check`). Checks
  * first: the target preflight, an `x.y.z-alpha.N` version whose tag `v<v>` is on HEAD and on origin, free on npm.
  * @param {{ target: string, run?: Runner, log?: Log, dryRun?: boolean }} options
  */
@@ -440,7 +443,7 @@ export function publishRelease({
   if (unborn) throw new Error(`Target ${root} has no commit yet; run npm run release:copy and release:bump first`);
   const { version } = readManifest(root);
   if (!isAlphaVersion(version))
-    throw new Error(`${PACKAGE} version must look like x.y.z-${DIST_TAG}.N, got ${version}`);
+    throw new Error(`${PACKAGE} version must look like x.y.z-${PRERELEASE}.N, got ${version}`);
   const tag = `v${version}`;
   const git = gitIn(run, root);
   if (!git(['tag', '--points-at', head]).split('\n').includes(tag)) {

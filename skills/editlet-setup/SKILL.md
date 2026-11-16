@@ -60,7 +60,7 @@ normal install: everything it needs is here.
 1. **Look** (rule 1). Read `package.json`, the framework config, the root layout or `src/content.config.*`,
    `.gitignore`, and list content folders.
 2. **Plan.** Name the files (rule 2). If a schema or content already exists, say what you will leave alone.
-3. **Package.** Install `editlet@alpha` with the project's package manager (`npm install`, `pnpm add`, `yarn add`,
+3. **Package.** Install `editlet` with the project's package manager (`npm install`, `pnpm add`, `yarn add`,
    `bun add`).
 4. **Skills.** `node node_modules/editlet/skills/editlet/scripts/link.mjs --hooks` ([skills](references/skills.md)).
 5. **Framework.** [Next.js](references/next.md) or [Astro](references/astro.md), steps 1–4 there: config, `.gitignore`,

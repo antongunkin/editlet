@@ -484,7 +484,7 @@ describe('release:bump', () => {
           'failed (exit 1)).',
         `Push outcome unknown; check git -C ${r.target} ls-remote origin. The local commit and v0.1.0-alpha.0 are kept.`,
         `If origin has main at ${releaseCommit.slice(0, 7)} and v0.1.0-alpha.0, the push went through; finish with:`,
-        `  (cd ${r.target} && npm publish --tag alpha)`,
+        `  (cd ${r.target} && npm publish --tag latest)`,
         `Otherwise undo with: git -C ${r.target} tag -d v0.1.0-alpha.0 && git -C ${r.target} reset --keep ` +
           exported.commit,
       ].join('\n'),
@@ -509,14 +509,14 @@ describe('release:bump', () => {
 });
 
 describe('release:publish', () => {
-  it('runs npm publish --tag alpha in the target after the bump', async () => {
+  it('runs npm publish --tag latest in the target after the bump', async () => {
     const r = repos();
     await released(r);
     const { run, calls } = stubRunner();
     const result = publishRelease({ target: r.target, run, log: quiet });
     expect(result).toMatchObject({ status: 'published', version: '0.1.0-alpha.0' });
     expect(calls.filter((c) => c.command === 'npm' && c.args[0] === 'publish')).toEqual([
-      { command: 'npm', args: ['publish', '--tag', 'alpha'], cwd: r.target },
+      { command: 'npm', args: ['publish', '--tag', 'latest'], cwd: r.target },
     ]);
   });
 
@@ -559,7 +559,7 @@ describe('release', () => {
         `  (cd ${r.target} && git commit --quiet --allow-empty -m 'chore(release): 0.1.0-alpha.0')`,
         `  (cd ${r.target} && git tag -a v0.1.0-alpha.0 -m v0.1.0-alpha.0)`,
         `  (cd ${r.target} && git push --atomic origin main --follow-tags)`,
-        `  (cd ${r.target} && npm publish --tag alpha)`,
+        `  (cd ${r.target} && npm publish --tag latest)`,
         `  (cd ${r.target} && gh release create v0.1.0-alpha.0 --repo antongunkin/editlet --verify-tag --prerelease ` +
           '--title 0.1.0-alpha.0 --generate-notes)',
       ]),
@@ -595,7 +595,7 @@ describe('release', () => {
       });
       expect(result.status).toBe('stopped');
       expect(questions).toEqual([
-        'Tag v0.1.0-alpha.0, push it to antongunkin/editlet, publish editlet@0.1.0-alpha.0 to npm with --tag alpha ' +
+        'Tag v0.1.0-alpha.0, push it to antongunkin/editlet, publish editlet@0.1.0-alpha.0 to npm with --tag latest ' +
           'and create a GitHub prerelease?',
       ]);
       expect(outward()).toEqual([]);
@@ -646,7 +646,7 @@ describe('release', () => {
     ]);
     expect(pushes(lines())).toEqual([
       'git push --atomic origin main --follow-tags',
-      'npm publish --tag alpha',
+      'npm publish --tag latest',
       'gh release create v0.1.0-alpha.0 --repo antongunkin/editlet --verify-tag --prerelease --title 0.1.0-alpha.0 ' +
         '--generate-notes',
     ]);
@@ -700,7 +700,7 @@ describe('release', () => {
       [
         'interrupted by SIGINT. Interrupted by SIGINT',
         'Pushed v0.1.0-alpha.0 to antongunkin/editlet. Finish by hand with:',
-        `  (cd ${r.target} && npm publish --tag alpha)`,
+        `  (cd ${r.target} && npm publish --tag latest)`,
         `  (cd ${r.target} && gh release create v0.1.0-alpha.0 --repo antongunkin/editlet --verify-tag --prerelease ` +
           '--title 0.1.0-alpha.0 --generate-notes)',
       ].join('\n'),
@@ -735,9 +735,9 @@ describe('release', () => {
       release({ packageDir: r.pkg, target: r.target, run: failing.run, log: quiet, yes: true }),
     ).rejects.toThrow(
       [
-        'npm publish --tag alpha failed (exit 1)\nnpm error code E403',
+        'npm publish --tag latest failed (exit 1)\nnpm error code E403',
         'Pushed v0.1.0-alpha.0 to antongunkin/editlet. Finish by hand with:',
-        `  (cd ${r.target} && npm publish --tag alpha)`,
+        `  (cd ${r.target} && npm publish --tag latest)`,
         `  (cd ${r.target} && gh release create v0.1.0-alpha.0 --repo antongunkin/editlet --verify-tag --prerelease ` +
           '--title 0.1.0-alpha.0 --generate-notes)',
       ].join('\n'),

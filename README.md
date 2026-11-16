@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/editlet"><img src="https://img.shields.io/npm/v/editlet/alpha?label=npm&color=7c8cff&labelColor=101114" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/editlet"><img src="https://img.shields.io/npm/v/editlet?label=npm&color=7c8cff&labelColor=101114" alt="npm version"></a>
   <a href="https://editlet.gunkin.dev/docs/quick-start-next"><img src="https://img.shields.io/badge/Built_for-Next.js_·_Astro-7c8cff?labelColor=101114" alt="Built for Next.js and Astro"></a>
   <a href="https://editlet.gunkin.dev/docs/content-model"><img src="https://img.shields.io/badge/Content_in-Git-7c8cff?labelColor=101114" alt="Content in Git"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-7c8cff?labelColor=101114" alt="MIT license"></a>
@@ -35,7 +35,7 @@ every change is a pull request that a person merges.
 Paste this into Claude Code, Codex or another coding agent in your Next.js or Astro project:
 
 ```text
-Install Editlet in this project: add the package `editlet@alpha` with the project's package manager, then read
+Install Editlet in this project: add the package `editlet` with the project's package manager, then read
 node_modules/editlet/skills/editlet-setup/SKILL.md and follow it.
 ```
 
@@ -48,7 +48,7 @@ node_modules/editlet/skills/editlet-setup/SKILL.md and follow it.
 ## Install
 
 ```bash
-npm install editlet@alpha
+npm install editlet
 node node_modules/editlet/skills/editlet/scripts/link.mjs --hooks
 ```
 
