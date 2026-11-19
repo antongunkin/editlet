@@ -1,6 +1,6 @@
 {
   "name": "editlet",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.5",
   "description": "Git-based, file-based CMS for Next.js and Astro: Markdown content with YAML frontmatter and a schema in your repo, an editor overlay on your own site, every edit a commit.",
   "keywords": [
     "cms",
