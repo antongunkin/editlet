@@ -1,5 +1,5 @@
 import { referenceFields } from '../../../core/references';
-import type { Collection, Field, Schema } from '../../../core/schema';
+import { fieldGroups, type Collection, type Field, type Schema } from '../../../core/schema';
 import { allFields } from '../../../core/walk';
 
 export type FieldBadge = 'title' | 'slugSource' | 'body';
@@ -61,6 +61,9 @@ function fieldDetails(field: Field): string[] {
  * container as rows keyed by their dot path (`seo.title`, `content.hero.title` for a block kind's field).
  */
 export function fieldRows(collection: Collection): FieldRow[] {
+  // With `groups`, each top-level field says its tab (`group: Media`; a field without `group` is in the first).
+  const groups = collection.groups ? fieldGroups(collection) : [];
+  const groupOf = (key: string) => groups.find((g) => g.fields.includes(key))?.label;
   return allFields(collection.fields).map(([path, field]) => {
     const key = path.join('.');
     const badges: FieldBadge[] = [];
@@ -75,7 +78,7 @@ export function fieldRows(collection: Collection): FieldRow[] {
       type: typeLabel(field),
       targets: field.type === 'reference' ? [...field.collections] : [],
       many: field.type === 'reference' && field.multiple === true,
-      details: fieldDetails(field),
+      details: [...fieldDetails(field), ...(path.length === 1 && groupOf(key) ? [`group: ${groupOf(key)}`] : [])],
       badges,
     };
   });

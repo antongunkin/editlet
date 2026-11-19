@@ -19,7 +19,15 @@ import { EditletError, type Issue } from '../core/issues.ts';
 import { isHiddenContentPath } from '../core/paths.ts';
 import { parseSchemaText, type Schema } from '../core/schema.ts';
 import { gitBlobSha } from '../core/sha.ts';
-import type { ContentSource, FileChange, FileEvent, FileHistory, FileRef } from '../core/source.ts';
+import {
+  versionLimit,
+  type ContentSource,
+  type FileChange,
+  type FileEvent,
+  type FileHistory,
+  type FileRef,
+  type FileVersion,
+} from '../core/source.ts';
 import { validateCommit } from '../core/writes.ts';
 
 export interface GitHubSourceOptions {
@@ -76,6 +84,10 @@ export interface GitHubSource extends ContentSource {
   ): Promise<{ issues: Issue[]; commit?: { oid: string; url: string } }>;
   /** The commits of this branch that touched `path`: newest, oldest and the count (all `null` / 0 for a new file). */
   history(path: string): Promise<FileHistory>;
+  /** The commits of this branch that touched `path`, newest first, each with the file's blob sha (one GraphQL call). */
+  listVersions(path: string, limit?: number): Promise<FileVersion[]>;
+  /** The file as `commit` left it (blob cache first); `EditletError` when it is not a file there. */
+  readVersion(path: string, commit: string): Promise<Uint8Array>;
   baseBranch(): Promise<string>;
   /** The branch prefix: the option, else `git.branchPrefix` of the schema on this branch, else `editlet/`. */
   branchPrefix(): Promise<string>;
@@ -398,6 +410,16 @@ const HISTORY_QUERY = `query History($owner: String!, $name: String!, $ref: Stri
   }
 }`;
 
+const VERSIONS_QUERY = `query Versions($owner: String!, $name: String!, $ref: String!, $path: String!, $first: Int!) {
+  repository(owner: $owner, name: $name) {
+    ref(qualifiedName: $ref) {
+      target { ... on Commit { history(first: $first, path: $path) { nodes {
+        oid url messageHeadline committedDate author { name user { login avatarUrl } } file(path: $path) { oid type }
+      } } } }
+    }
+  }
+}`;
+
 interface HistoryNode {
   url: string;
   messageHeadline: string;
@@ -419,6 +441,15 @@ function nodeEvent(n: HistoryNode): FileEvent {
     message: n.messageHeadline,
     url: n.url,
   };
+}
+
+interface VersionNode extends HistoryNode {
+  oid: string;
+  file: { oid: string; type: string } | null;
+}
+
+function versionOf(n: VersionNode): FileVersion {
+  return { ...nodeEvent(n), commit: n.oid, sha: n.file?.type === 'blob' ? n.file.oid : null };
 }
 
 function restEvent(c: RestCommit): FileEvent {
@@ -792,6 +823,21 @@ function makeSource(ctx: SourceContext, branch: string): GitHubSource {
         if (oldest) created = restEvent(oldest);
       }
       return { updated: nodeEvent(latest), created, commits: total };
+    },
+
+    async listVersions(path, limit) {
+      const repo = await repoQuery<{
+        ref: { target: { history?: { nodes: VersionNode[] } } | null } | null;
+      }>(ctx, VERSIONS_QUERY, { ref: `refs/heads/${branch}`, path, first: versionLimit(limit) });
+      return (repo.ref?.target?.history?.nodes ?? []).map(versionOf);
+    },
+
+    async readVersion(path, commit) {
+      const entry = await entryAt(ctx, commit, path);
+      if (entry?.type !== 'blob') {
+        throw new EditletError([{ file: path, path: '', message: `Not in ${commit.slice(0, 7)}: ${path}` }]);
+      }
+      return (await readBlobs(ctx, [entry.oid])).get(entry.oid)!.slice();
     },
 
     baseBranch,

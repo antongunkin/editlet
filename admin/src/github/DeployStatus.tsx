@@ -3,11 +3,13 @@ import type { ReactNode } from 'react';
 
 import type { DeploymentInfo, GitHubSource } from '../../../github';
 import { withEditletRoute } from '../../../loader/protocol';
+import { StepRow, type StepKind } from '../ui/parts/rows';
+import { Icon } from '../ui/primitives/icon';
 
 const POLL_MS = 10_000;
 
-const NO_PREVIEW =
-  "No preview yet. The build may still be starting, or the host doesn't report deployments to GitHub. Review the diff below.";
+/** The host may still be starting the build, or it does not report deployments to GitHub: the changes are below. */
+const NO_PREVIEW = 'No preview yet';
 
 type Phase = 'none' | 'ready' | 'building' | 'failed';
 
@@ -20,15 +22,18 @@ function phaseOf(deployment: DeploymentInfo | null, expectSha: string): Phase {
 
 /**
  * The newest GitHub Deployment of the head of `ref` (`['deployment', ref]`). Polls every 10 s while there is none,
- * while it is not final (success, failure, error), and while a success is for another sha than `expectSha`.
+ * while it is not final (success, failure, error), and while a success is for another sha than `expectSha`. Nothing
+ * while `enabled` is false (the branch has not loaded, failed to load, or is gone).
  */
 export function useDeployment(
   source: GitHubSource,
   ref: string,
   expectSha: string,
+  enabled = true,
 ): UseQueryResult<DeploymentInfo | null> {
   return useQuery({
     queryKey: ['deployment', ref],
+    enabled,
     queryFn: () => source.latestDeployment(ref),
     refetchInterval: (query) => {
       const phase = query.state.data === undefined ? 'none' : phaseOf(query.state.data, expectSha);
@@ -48,19 +53,37 @@ function webUrl(url: string | null | undefined): string | null {
   }
 }
 
+/** A link in a step's line: opens in a new tab, underlined (not told apart by colour alone). */
 function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a className="editlet-link editlet-deploy-status__link" href={href} target="_blank" rel="noreferrer">
+    <a
+      className="rounded-md font-medium text-foreground underline underline-offset-2 outline-none focused:inset-ring-2 focused:inset-ring-ring"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
       {children}
+      <Icon name="arrow-up-right" size={16} className="ml-0.5 inline align-text-bottom" />
     </a>
   );
 }
 
+/** A step's words, then its link after a middle dot. */
+const line = (text: string, link: ReactNode) =>
+  link ? (
+    <>
+      {text} · {link}
+    </>
+  ) : (
+    text
+  );
+
 /**
- * The branch preview card: "Open preview" opens the admin's `previewRoute` on the preview URL of `expectSha` (the
- * reviewed head), under the site's query parameter `param` (default `editlet`). `undefined` = still loading.
+ * The *Preview* step of the branch screen (FigCraft *Publish · preview building*, *· preview failed*): its mark and its
+ * line. *Open preview* opens the admin's `previewRoute` on the preview URL of `expectSha` (the reviewed head), under
+ * the site's query parameter `param` (default `editlet`). `undefined` = still loading.
  */
-export function DeployStatus({
+export function PreviewStep({
   deployment,
   expectSha,
   previewRoute,
@@ -71,42 +94,44 @@ export function DeployStatus({
   previewRoute: string;
   param?: string;
 }) {
-  let text: string;
-  let link: ReactNode = null;
+  let kind: StepKind;
+  let sub: ReactNode;
 
   if (deployment === undefined) {
-    text = 'Checking deployments…';
+    kind = 'busy';
+    sub = 'Checking deployments…';
   } else {
     const url = webUrl(deployment?.url);
     const logUrl = webUrl(deployment?.logUrl);
     switch (phaseOf(deployment, expectSha)) {
       case 'none':
-        text = NO_PREVIEW;
+        kind = 'todo';
+        sub = NO_PREVIEW;
         break;
       case 'failed':
-        text = 'Preview build failed';
-        if (logUrl) link = <ExternalLink href={logUrl}>Build log</ExternalLink>;
+        kind = 'fail';
+        sub = (
+          <span className="text-tint-danger-foreground">
+            {line('Preview build failed', logUrl ? <ExternalLink href={logUrl}>Build log</ExternalLink> : null)}
+          </span>
+        );
         break;
       case 'ready':
-        text = 'Preview ready';
-        if (url) link = <ExternalLink href={withEditletRoute(url, previewRoute, param)}>Open preview</ExternalLink>;
+        kind = 'done';
+        sub = line(
+          'Preview ready',
+          url ? <ExternalLink href={withEditletRoute(url, previewRoute, param)}>Open preview</ExternalLink> : null,
+        );
         break;
       case 'building':
-        text = 'Build in progress';
-        if (url) link = <ExternalLink href={withEditletRoute(url, previewRoute, param)}>Older preview</ExternalLink>;
+        kind = 'busy';
+        sub = line(
+          'Build in progress',
+          url ? <ExternalLink href={withEditletRoute(url, previewRoute, param)}>Older preview</ExternalLink> : null,
+        );
         break;
     }
   }
 
-  return (
-    <section className="editlet-card editlet-deploy-status" aria-label="Preview">
-      <div className="editlet-card__header">
-        <h2 className="editlet-card__title">Preview</h2>
-      </div>
-      <div className="editlet-card__content editlet-deploy-status__body" aria-live="polite">
-        <span>{text}</span>
-        {link}
-      </div>
-    </section>
-  );
+  return <StepRow title="Preview" sub={<span aria-live="polite">{sub}</span>} kind={kind} />;
 }

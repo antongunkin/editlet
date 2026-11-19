@@ -1,49 +1,85 @@
 import { useCallback, useState } from 'react';
 
-export const THEMES = [
+/** What the editor chooses in Appearance (docs/admin/account.md): the operating system's setting, or one theme. */
+export const THEME_CHOICES = [
+  { id: 'system', label: 'System' },
   { id: 'light', label: 'Light' },
   { id: 'dark', label: 'Dark' },
 ] as const;
 
+export type ThemeChoice = (typeof THEME_CHOICES)[number]['id'];
+
+/** The theme the admin is drawn in: what `data-editlet-theme` says. */
+export type ThemeId = 'light' | 'dark';
+
 /** Themes removed in the two-theme design system, mapped to the one that replaces them. */
 const RETIRED: Record<string, ThemeId> = { sand: 'light', ocean: 'dark', grape: 'dark' };
 
-export type ThemeId = (typeof THEMES)[number]['id'];
-
 const STORAGE_KEY = 'editlet:theme';
+const LIGHT = '(prefers-color-scheme: light)';
 
-/** The saved theme (a retired one maps to Light or Dark); else the system preference. */
-export function readTheme(): ThemeId {
+/** The choice made in this session; the source of truth when storage is blocked. */
+let remembered: ThemeChoice | null = null;
+
+const systemMedia = (): MediaQueryList | null => (typeof matchMedia === 'function' ? matchMedia(LIGHT) : null);
+
+/**
+ * The saved choice (a retired theme maps to Light or Dark); *System* without one. The key holds `light` or `dark`:
+ * *System* is the absence of a choice, as it was before Appearance existed.
+ */
+export function readChoice(): ThemeChoice {
+  if (remembered) return remembered;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    const found = THEMES.find((t) => t.id === saved);
-    if (found) return found.id;
+    if (saved === 'light' || saved === 'dark') return saved;
     if (saved && saved in RETIRED) return RETIRED[saved]!;
   } catch {
     /* storage blocked */
   }
-  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  return 'system';
+}
+
+/** The theme a choice draws: *System* is Light when the system says so, else Dark (the admin's default). */
+export function resolveTheme(choice: ThemeChoice): ThemeId {
+  if (choice !== 'system') return choice;
+  return systemMedia()?.matches ? 'light' : 'dark';
 }
 
 export function applyTheme(theme: ThemeId): void {
   document.documentElement.dataset.editletTheme = theme;
 }
 
-/** Call before the first render so the page never flashes the wrong theme. */
-export function initTheme(): void {
-  applyTheme(readTheme());
+/** Saves a choice (*System* removes the key) and draws it. */
+export function chooseTheme(choice: ThemeChoice): void {
+  remembered = choice;
+  try {
+    if (choice === 'system') localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, choice);
+  } catch {
+    /* storage blocked: the choice lasts until reload */
+  }
+  applyTheme(resolveTheme(choice));
 }
 
-export function useTheme(): [ThemeId, (theme: ThemeId) => void] {
-  const [theme, setTheme] = useState(readTheme);
-  const choose = useCallback((next: ThemeId) => {
-    setTheme(next);
-    applyTheme(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      /* storage blocked: the theme lasts until reload */
-    }
+/** Call before the first render so the page never flashes the wrong theme; *System* then follows the system's changes. */
+export function initTheme(): void {
+  applyTheme(resolveTheme(readChoice()));
+  systemMedia()?.addEventListener('change', () => {
+    if (readChoice() === 'system') applyTheme(resolveTheme('system'));
+  });
+}
+
+/** The editor's choice and the setter (Appearance). */
+export function useThemeChoice(): [ThemeChoice, (choice: ThemeChoice) => void] {
+  const [choice, setChoice] = useState(readChoice);
+  const choose = useCallback((next: ThemeChoice) => {
+    setChoice(next);
+    chooseTheme(next);
   }, []);
-  return [theme, choose];
+  return [choice, choose];
+}
+
+/** Forgets the session's choice (tests). */
+export function resetThemeChoice(): void {
+  remembered = null;
 }

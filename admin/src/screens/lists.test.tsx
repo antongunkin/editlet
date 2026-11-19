@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createMemorySource } from '../../../core/source';
@@ -6,7 +6,7 @@ import { readEditletRoute } from '../../../loader/protocol';
 import { App } from '../App';
 import { pendingNewEntries } from '../entry/pending';
 import { createFakeWindow, ORIGIN } from '../test/fakeWindow';
-import { createTestQueryClient, fixtureFiles, renderApp } from '../test/render';
+import { createTestQueryClient, doneField, fixtureFiles, HOME_LOADED, renderApp, sheet } from '../test/render';
 
 /** The fixture site with `titleField: 'title'` on post and one extra draft post. */
 function variantFiles(): Record<string, string | Uint8Array> {
@@ -29,25 +29,46 @@ afterEach(() => {
 });
 
 describe('Home', () => {
-  it('lists collections with counts and navigates to a collection', async () => {
+  it('has the header actions and All content; dev mode has no Your changes and no account, only Appearance', async () => {
     renderApp();
-    const post = await within(main()).findByRole('link', { name: 'Post (1)' });
-    expect(within(main()).getByRole('link', { name: 'Author (1)' })).toBeDefined();
-    expect(within(main()).getByRole('link', { name: 'Home page' })).toBeDefined();
+    const all = await within(main()).findByRole('link', { name: HOME_LOADED });
+    expect(all.textContent).toContain('3 entries · media · model');
+    expect(within(main()).getByRole('heading', { name: 'Home', level: 1 })).toBeDefined();
+    expect(within(main()).queryByText('Your changes')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Appearance' })).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Account' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review changes' })).toBeNull();
+  });
 
-    fireEvent.click(post);
-    expect(editletRoute()).toBe('post');
-    expect(await within(main()).findByRole('heading', { name: 'Post' })).toBeDefined();
+  it('opens All content', async () => {
+    renderApp();
+    fireEvent.click(await within(main()).findByRole('link', { name: HOME_LOADED }));
+    expect(editletRoute()).toBe('all-content');
+    expect(await within(main()).findByRole('heading', { name: 'All content', level: 1 })).toBeDefined();
+  });
+});
+
+describe('All content', () => {
+  it('lists the collections with counts, Media and the Content model; a row opens its screen', async () => {
+    renderApp({ route: 'all-content' });
+    const collections = await within(main()).findByRole('list', { name: 'Collections' });
+    await within(collections).findByRole('link', { name: /^Post\s*1 entry$/ });
+    expect(within(collections).getByRole('link', { name: /^Author\s*1 entry$/ })).toBeDefined();
+    expect(within(collections).getByRole('link', { name: /^Home page\s*Single page/ })).toBeDefined();
+    expect(within(main()).getByRole('link', { name: /^Media/ })).toBeDefined();
+    fireEvent.click(within(main()).getByRole('link', { name: /^Content model/ }));
+    expect(editletRoute()).toBe('schema');
+  });
+
+  it('goes Back to Home', async () => {
+    renderApp({ route: 'all-content' });
+    fireEvent.click(await screen.findByRole('link', { name: 'Back' }));
+    expect(editletRoute()).toBe('');
   });
 });
 
 describe('Collection', () => {
-  const rowOf = (link: HTMLElement) => link.closest('tr')!;
-  const titles = () =>
-    within(main())
-      .getAllByRole('row')
-      .slice(1)
-      .map((tr) => tr.querySelector('a')?.textContent);
+  const list = () => within(main()).getByRole('list', { name: /entries$/ });
   function mockHistory(byPath: (path: string) => object | null) {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(String(input), 'http://localhost');
@@ -55,20 +76,57 @@ describe('Collection', () => {
       return new Response(body ? JSON.stringify(body) : '{}', { status: body ? 200 : 404 });
     });
   }
-  afterEach(() => vi.restoreAllMocks());
-
-  it('a row: title and slug, a status dot, a dash without history; the count in the header', async () => {
-    renderApp({ files: variantFiles(), route: 'post' });
-    const hello = rowOf(await within(main()).findByRole('link', { name: 'Hello world' }));
-    expect(within(hello).getByText('hello-world')).toBeDefined();
-    expect(within(hello).getByRole('img', { name: 'Published' })).toBeDefined();
-    expect(within(hello).getAllByLabelText('Unknown')).toHaveLength(2);
-    const draft = rowOf(within(main()).getByRole('link', { name: 'Second post' }));
-    expect(within(draft).getByRole('img', { name: 'Draft' })).toBeDefined();
-    expect(within(main()).getByText('2 entries')).toBeDefined();
+  const width = window.innerWidth;
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.innerWidth = width;
   });
 
-  it('Updated and By come from the git history; newest first by default', async () => {
+  it('a row on a phone: the title, and under it the status; the header names the collection', async () => {
+    window.innerWidth = 375;
+    renderApp({ files: variantFiles(), route: 'post' });
+    const hello = await within(main()).findByRole('button', { name: /^Hello world/ });
+    expect(hello.textContent).toBe('Hello worldPublished');
+    expect(within(list()).getByRole('button', { name: /^Second post/ }).textContent).toBe('Second postDraft');
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Post' })).toBeDefined();
+    expect(within(main()).getByRole('link', { name: 'Back' })).toBeDefined();
+  });
+
+  it('in a wide window the status is a badge after the title', async () => {
+    window.innerWidth = 600;
+    renderApp({ files: variantFiles(), route: 'post' });
+    const draft = await within(main()).findByRole('button', { name: /^Second post/ });
+    expect(draft.textContent).toBe('Second postDraft');
+    expect(draft.querySelector('[data-slot="badge"]')?.textContent).toBe('Draft');
+  });
+
+  it('filter chips: All and Drafts with their counts; Drafts narrows the list', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    await within(main()).findByRole('button', { name: /^Hello world/ });
+    const chips = within(main()).getByRole('group', { name: 'Show' });
+    const all = within(chips).getByRole('button', { name: /^All\s*2$/ });
+    const drafts = within(chips).getByRole('button', { name: /^Drafts\s*1$/ });
+    expect(all.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(drafts);
+    expect(drafts.getAttribute('aria-pressed')).toBe('true');
+    expect(within(list()).getAllByRole('button')).toHaveLength(1);
+    expect(within(list()).getByRole('button', { name: /^Second post/ })).toBeDefined();
+    fireEvent.click(all);
+    expect(within(list()).getAllByRole('button')).toHaveLength(2);
+  });
+
+  it('a filter with nothing in it says so', async () => {
+    const files = variantFiles();
+    delete files['cms/content/post/second-post.md'];
+    renderApp({ files, route: 'post' });
+    await within(main()).findByRole('button', { name: /^Hello world/ });
+    fireEvent.click(within(main()).getByRole('button', { name: /^Drafts\s*0$/ }));
+    expect(within(main()).getByRole('status').textContent).toBe('No drafts. Every entry is published.');
+    expect(within(main()).queryByRole('list')).toBeNull();
+  });
+
+  it('when it changed comes from the git history; newest first by default', async () => {
+    window.innerWidth = 375;
     mockHistory((path) => ({
       updated: path.endsWith('second-post.md')
         ? { actor: { name: 'Ann Lee' }, date: '2025-11-19T14:48:00Z', message: 'm' }
@@ -77,88 +135,195 @@ describe('Collection', () => {
       commits: 1,
     }));
     renderApp({ files: variantFiles(), route: 'post' });
-    const second = rowOf(await within(main()).findByRole('link', { name: 'Second post' }));
-    expect(await within(second).findByRole('img', { name: 'Ann Lee' })).toBeDefined();
-    expect(within(second).getByText('Nov 19, 2025')).toBeDefined();
-    expect(titles()).toEqual(['Second post', 'Hello world']);
+    const second = await within(main()).findByRole('button', { name: /^Second post/ });
+    await waitFor(() => expect(second.textContent).toBe('Second postDraft · Nov 19, 2025 · Ann L'));
+    expect(
+      within(list())
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Second postDraft · Nov 19, 2025 · Ann L', 'Hello worldPublished · Oct 2, 2025 · Bob S']);
   });
 
-  it('a column header sorts, and a second click reverses', async () => {
+  it('Sort: the header button opens one choice; a tap sorts, closes, and the choice is marked', async () => {
+    window.innerWidth = 375;
+    mockHistory((path) => ({
+      updated: path.endsWith('second-post.md')
+        ? { actor: { name: 'Ann Lee' }, date: '2025-11-19T14:48:00Z', message: 'm' }
+        : { actor: { name: 'Bob Stone' }, date: '2025-10-02T09:00:00Z', message: 'm' },
+      created: null,
+      commits: 1,
+    }));
     renderApp({ files: variantFiles(), route: 'post' });
-    await within(main()).findByRole('link', { name: 'Hello world' });
-    const title = within(main()).getByRole('button', { name: 'Title' });
-    fireEvent.click(title);
-    expect(titles()).toEqual(['Hello world', 'Second post']);
-    expect(title.closest('th')!.getAttribute('aria-sort')).toBe('ascending');
-    fireEvent.click(title);
-    expect(titles()).toEqual(['Second post', 'Hello world']);
-    expect(title.closest('th')!.getAttribute('aria-sort')).toBe('descending');
+    await within(main()).findByRole('button', { name: /^Second post/ });
+    fireEvent.click(within(main()).getByRole('button', { name: 'Sort' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Sort' }));
+    const options = dialog.getAllByRole('radio').map((r) => r.textContent);
+    expect(options).toEqual(['Newest first', 'Oldest first', 'Title A–Z', 'Title Z–A', 'By author', 'By status']);
+    expect(dialog.getByRole('radio', { name: 'Newest first' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(dialog.getByRole('radio', { name: 'Title A–Z' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(
+      within(list())
+        .getAllByRole('button')
+        .map((b) => b.querySelector('span > span')?.textContent),
+    ).toEqual(['Hello world', 'Second post']);
+    fireEvent.click(within(main()).getByRole('button', { name: 'Sort' }));
+    const again = within(await screen.findByRole('dialog', { name: 'Sort' }));
+    expect(again.getByRole('radio', { name: 'Title A–Z' }).getAttribute('aria-checked')).toBe('true');
   });
 
-  it('shows 20 rows per page with a pager', async () => {
+  it('shows 20 rows and Show 20 more under them; a sort or a chip goes back to the first 20', async () => {
     const files = variantFiles();
     for (let i = 10; i < 33; i++) files[`cms/content/post/p${i}.md`] = `---\ntitle: Post ${i}\n---\n`;
     renderApp({ files, route: 'post' });
-    await within(main()).findByRole('link', { name: 'Hello world' });
-    fireEvent.click(within(main()).getByRole('button', { name: 'Title' }));
-    expect(within(main()).getAllByRole('row')).toHaveLength(21);
-    const pager = within(main()).getByRole('navigation', { name: 'Pages' });
-    expect(within(pager).getByText('1–20 of 25')).toBeDefined();
-    fireEvent.click(within(pager).getByRole('button', { name: 'Next page' }));
-    expect(within(main()).getAllByRole('row')).toHaveLength(6);
-    expect(within(pager).getByText('21–25 of 25')).toBeDefined();
-    expect((within(pager).getByRole('button', { name: 'Next page' }) as HTMLButtonElement).disabled).toBe(true);
+    await within(main()).findByRole('button', { name: /^Hello world/ });
+    expect(within(list()).getAllByRole('button')).toHaveLength(21);
+    const more = within(list()).getByRole('button', { name: /^Show 5 more/ });
+    expect(more.textContent).toBe('Show 5 more20 of 25 shown');
+    fireEvent.click(more);
+    expect(within(list()).getAllByRole('button')).toHaveLength(25);
+    expect(within(list()).queryByRole('button', { name: /^Show/ })).toBeNull();
+    fireEvent.click(within(main()).getByRole('button', { name: /^Drafts\s*1$/ }));
+    fireEvent.click(within(main()).getByRole('button', { name: /^All\s*25$/ }));
+    expect(within(list()).getAllByRole('button')).toHaveLength(21);
   });
 
-  it('a row click opens the entry route', async () => {
+  it('a row opens the entry route', async () => {
     renderApp({ files: variantFiles(), route: 'post' });
-    const hello = rowOf(await within(main()).findByRole('link', { name: 'Hello world' }));
-    fireEvent.click(within(hello).getByText('hello-world'));
+    fireEvent.click(await within(main()).findByRole('button', { name: /^Hello world/ }));
     expect(editletRoute()).toBe('post/hello-world');
-    expect(await within(main()).findByText('Meta')).toBeDefined();
+    expect(await within(main()).findByRole('group', { name: / fields$/ })).toBeDefined();
+  });
+
+  it('a collection without entries says so; the one CTA is New <collection>', async () => {
+    const files = variantFiles();
+    delete files['cms/content/post/hello-world.md'];
+    delete files['cms/content/post/second-post.md'];
+    renderApp({ files, route: 'post' });
+    expect(await within(main()).findByText('No entries yet')).toBeDefined();
+    expect(within(main()).queryByRole('group', { name: 'Show' })).toBeNull();
+    expect(within(main()).getByRole('button', { name: 'New post' })).toBeDefined();
   });
 
   it('a singleton route renders the entry screen', async () => {
     renderApp({ route: 'homePage' });
-    expect(await within(main()).findByText('Meta')).toBeDefined();
+    expect(await within(main()).findByRole('group', { name: / fields$/ })).toBeDefined();
   });
 });
 
-describe('NewEntryDialog', () => {
-  it('auto-fills the slug from the title and navigates on Confirm', async () => {
-    renderApp({ files: variantFiles(), route: 'post' });
-    fireEvent.click(await within(main()).findByRole('button', { name: 'New entry' }));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Title'), { target: { value: 'My Post' } });
-    expect((within(dialog).getByLabelText('Slug') as HTMLInputElement).value).toBe('my-post');
+describe('A new entry', () => {
+  it('the CTA counts the required fields, opens the first, and is Save once they are filled', async () => {
+    const files = variantFiles();
+    const schema = JSON.parse(files['cms/schema.json'] as string);
+    schema.collections.post.fields.title.required = true;
+    files['cms/schema.json'] = JSON.stringify(schema);
+    renderApp({ files, route: 'post/brand-new' });
+    const cta = await within(main()).findByRole('button', { name: 'Fill 1 required field' });
+    fireEvent.click(cta);
+    const title = await sheet('Title');
+    fireEvent.change(title.getByLabelText(/^Title/), { target: { value: 'Filled' } });
+    await doneField();
+    expect(await within(main()).findByRole('button', { name: 'Save' })).toBeDefined();
+  });
+});
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
+describe('New entry', () => {
+  const open = async () => {
+    fireEvent.click(await within(main()).findByRole('button', { name: 'New post' }));
+    return within(await screen.findByRole('dialog', { name: 'New post' }));
+  };
+
+  it('asks for the name first; the address follows it and Create opens the blank entry', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const dialog = await open();
+    expect(dialog.getByText('Address')).toBeDefined();
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'My Post' } });
+    expect(dialog.getByText('my-post')).toBeDefined();
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Create post' }));
     expect(editletRoute()).toBe('post/my-post');
     expect(pendingNewEntries.get('post/my-post')).toEqual({ title: 'My Post' });
-    expect(await within(main()).findByText('Meta')).toBeDefined();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(await within(main()).findByRole('group', { name: / fields$/ })).toBeDefined();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
-  it('rejects an existing or invalid slug', async () => {
+  it('opens with the cursor in the name', async () => {
     renderApp({ files: variantFiles(), route: 'post' });
-    fireEvent.click(await within(main()).findByRole('button', { name: 'New entry' }));
-    const dialog = await screen.findByRole('dialog');
-    const slug = within(dialog).getByLabelText('Slug');
-    const confirm = within(dialog).getByRole('button', { name: 'Confirm' }) as HTMLButtonElement;
+    const dialog = await open();
+    await waitFor(() => expect(document.activeElement).toBe(dialog.getByLabelText('Title')));
+  });
 
-    fireEvent.change(slug, { target: { value: 'hello-world' } });
-    expect(within(dialog).getByText('Slug already exists')).toBeDefined();
-    expect(confirm.disabled).toBe(true);
+  it('Create is off until there is an address; Enter in the name creates', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const dialog = await open();
+    expect((dialog.getByRole('button', { name: 'Create post' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Enter' } });
+    fireEvent.submit(dialog.getByLabelText('Title').closest('form')!);
+    expect(editletRoute()).toBe('post/enter');
+  });
 
-    fireEvent.change(slug, { target: { value: 'Not A Slug' } });
-    expect(within(dialog).getByText('Invalid slug')).toBeDefined();
-    expect(confirm.disabled).toBe(true);
+  it('a taken address turns the name red with the reason and turns Create off', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const dialog = await open();
+    const name = dialog.getByLabelText('Title');
+    fireEvent.change(name, { target: { value: 'Hello world' } });
+    expect(dialog.getByRole('alert').textContent).toBe('A post with this address already exists');
+    expect(name.getAttribute('aria-invalid')).toBe('true');
+    expect((dialog.getByRole('button', { name: 'Create post' }) as HTMLButtonElement).disabled).toBe(true);
+  });
 
-    // An edited slug no longer follows the title.
-    fireEvent.change(slug, { target: { value: 'kept' } });
-    fireEvent.change(within(dialog).getByLabelText('Title'), { target: { value: 'Other title' } });
-    expect((slug as HTMLInputElement).value).toBe('kept');
-    expect(confirm.disabled).toBe(false);
+  it('Edit opens the address as a field: an invalid one is refused, an edited one stops following the name', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const dialog = await open();
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'My Post' } });
+    fireEvent.click(dialog.getByRole('button', { name: 'Edit the address' }));
+    const address = dialog.getByLabelText('Address') as HTMLInputElement;
+    expect(address.value).toBe('my-post');
+    const create = dialog.getByRole('button', { name: 'Create post' }) as HTMLButtonElement;
+
+    fireEvent.change(address, { target: { value: 'Not A Slug' } });
+    expect(dialog.getByRole('alert').textContent).toBe('The address can use lowercase letters, numbers and hyphens.');
+    expect(address.getAttribute('aria-invalid')).toBe('true');
+    expect(create.disabled).toBe(true);
+
+    fireEvent.change(address, { target: { value: 'kept' } });
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Other title' } });
+    expect(address.value).toBe('kept');
+    expect(create.disabled).toBe(false);
+  });
+
+  it('a name with no Latin letters makes no address: the reason and Edit are there', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const dialog = await open();
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Привет мир' } });
+    expect(dialog.getByRole('alert').textContent).toContain('This name makes no address');
+    expect((dialog.getByRole('button', { name: 'Create post' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole('button', { name: 'Edit the address' }));
+    await waitFor(() => expect(document.activeElement).toBe(dialog.getByLabelText('Address')));
+    fireEvent.change(dialog.getByLabelText('Address'), { target: { value: 'privet' } });
+    expect((dialog.getByRole('button', { name: 'Create post' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a taken address keeps Edit next to the reason, and Edit puts the cursor in the address', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    const dialog = await open();
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Hello world' } });
+    expect(dialog.getByRole('alert').textContent).toBe('A post with this address already exists');
+    fireEvent.click(dialog.getByRole('button', { name: 'Edit the address' }));
+    const address = dialog.getByLabelText('Address') as HTMLInputElement;
+    await waitFor(() => expect(document.activeElement).toBe(address));
+    fireEvent.change(address, { target: { value: 'hello-world-2' } });
+    expect((dialog.getByRole('button', { name: 'Create post' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('opens empty each time', async () => {
+    renderApp({ files: variantFiles(), route: 'post' });
+    let dialog = await open();
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Left over' } });
+    fireEvent.click(dialog.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    dialog = await open();
+    expect((dialog.getByLabelText('Title') as HTMLInputElement).value).toBe('');
   });
 });
 
@@ -166,12 +331,14 @@ describe('other routes', () => {
   it('schema renders the content model', async () => {
     renderApp({ route: 'schema' });
     expect(await within(main()).findByRole('heading', { name: 'Content model' })).toBeDefined();
-    expect(await within(main()).findByRole('region', { name: 'Post' })).toBeDefined();
+    expect(await within(main()).findByRole('button', { name: /^Post/ })).toBeDefined();
   });
 
-  it('branch:x renders the branch placeholder', async () => {
+  it('branch:x in dev mode says branch preview is for production mode', async () => {
     renderApp({ route: 'branch:x' });
-    expect(await within(main()).findByText('Branch preview is available in production mode')).toBeDefined();
+    expect(await within(main()).findByText('Branch preview is available in production mode.')).toBeDefined();
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Branch preview' })).toBeDefined();
+    expect(within(main()).getByRole('heading', { level: 2, name: 'Branch preview' })).toBeDefined();
   });
 
   it('a/b/c and an unknown collection render not found', async () => {
@@ -195,6 +362,8 @@ describe('App', () => {
     const fetch = (async () => new Response(body, { status: 500 })) as unknown as typeof globalThis.fetch;
     render(<App fetch={fetch} queryClient={createTestQueryClient()} />);
     expect(await screen.findByText('cms/schema.json: Invalid JSON')).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'The schema has errors' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Copy fix prompt' })).toBeDefined();
   });
 });
 
@@ -203,9 +372,9 @@ describe('Shell embedded', () => {
     const fake = createFakeWindow();
     render(<App source={createMemorySource(fixtureFiles())} win={fake.win} queryClient={createTestQueryClient()} />);
     act(() => fake.fromSite({ type: 'init', route: '', site: { origin: ORIGIN, href: `${ORIGIN}/` } }));
-    await within(main()).findByRole('link', { name: 'Post (1)' });
+    await within(main()).findByRole('link', { name: HOME_LOADED });
 
-    expect(screen.getByRole('button', { name: /^Switch to (light|dark) theme$/ })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Appearance' })).toBeDefined();
     expect(screen.getByRole('button', { name: 'Minimize' })).toBeDefined();
     const sent = () => fake.parent.postMessage.mock.calls.map(([m]) => (m as { type: string }).type);
 

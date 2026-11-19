@@ -1,14 +1,13 @@
 import { describedBy, fieldProps, invalid } from './shared';
 import type { WidgetProps } from './types';
 
-import { Field, FIELD_INPUT_CLASS } from '../ui';
+import { Field, Input } from '../ui';
 
 export function StringField({ name, field, value, onChange, onBlur, error }: WidgetProps<string>) {
   return (
     <Field {...fieldProps(field, error, name)} htmlFor={name}>
-      <input
+      <Input
         id={name}
-        className={FIELD_INPUT_CLASS}
         type="text"
         name={name}
         value={value}

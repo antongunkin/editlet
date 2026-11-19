@@ -1,8 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { formatStored, fromPickerValue, parseStored, toPickerValue } from './DatetimeField';
 import { FieldWidget } from './FormFields';
 import type { FieldContext } from './types';
 
@@ -85,47 +84,15 @@ describe('field widgets', () => {
     expect(onChange).toHaveBeenLastCalledWith('x\ny');
   });
 
-  it('boolean → boolean with custom labels; undefined shows neither active', () => {
-    const { onChange } = renderWidget(
-      { type: 'boolean', label: 'Featured', labels: { true: 'On', false: 'Off' } },
-      undefined,
-    );
-    const on = screen.getByRole('button', { name: 'On' });
-    const off = screen.getByRole('button', { name: 'Off' });
-    expect(on.getAttribute('aria-pressed')).toBe('false');
-    expect(off.getAttribute('aria-pressed')).toBe('false');
-    fireEvent.click(on);
-    expect(onChange).toHaveBeenLastCalledWith(true);
-    expect(on.getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(off);
-    expect(onChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it('single select → string; empty option unless required', () => {
-    const options = [
-      { label: 'News', value: 'news' },
-      { label: 'Blog', value: 'blog' },
-    ];
-    const { onChange, unmount } = renderWidget({ type: 'select', label: 'Category', options }, '');
-    const select = screen.getByLabelText(/^Category/) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(['', 'news', 'blog']);
-    fireEvent.change(select, { target: { value: 'blog' } });
-    expect(onChange).toHaveBeenLastCalledWith('blog');
-    unmount();
-    renderWidget({ type: 'select', label: 'Category', options, required: true }, 'news');
-    const required = screen.getByLabelText(/Category/) as HTMLSelectElement;
-    expect([...required.options].map((o) => o.value)).toEqual(['news', 'blog']);
-  });
-
   it('multiple select → string[] via checkboxes', () => {
     const options = [
       { label: 'A', value: 'a' },
       { label: 'B', value: 'b' },
     ];
     const { onChange } = renderWidget({ type: 'select', label: 'Kinds', options, multiple: true }, ['a']);
-    fireEvent.click(screen.getByLabelText('B'));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'B' }));
     expect(onChange).toHaveBeenLastCalledWith(['a', 'b']);
-    fireEvent.click(screen.getByLabelText('A'));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'A' }));
     expect(onChange).toHaveBeenLastCalledWith(['b']);
   });
 
@@ -138,43 +105,6 @@ describe('field widgets', () => {
     expect(input.step).toBe('0.5');
     fireEvent.change(input, { target: { value: '4.5' } });
     expect(onChange).toHaveBeenLastCalledWith('4.5');
-  });
-
-  it('datetime: shows the date formatted with Intl; the native picker stores UTC ISO 8601', () => {
-    const { onChange } = renderWidget({ type: 'datetime', label: 'At' }, '2024-05-01T10:30:15Z');
-    const shown = screen.getByLabelText(/^At/) as HTMLInputElement;
-    expect(shown.readOnly).toBe(true);
-    expect(shown.value).toBe(formatStored('2024-05-01T10:30:15Z', false));
-    expect(shown.value).not.toContain('2024-05-01T');
-    const picker = document.querySelector('input[type="datetime-local"]') as HTMLInputElement;
-    expect(picker.value).toBe(toPickerValue(new Date('2024-05-01T10:30:15Z'), false));
-    fireEvent.change(picker, { target: { value: '2024-05-02T08:00' } });
-    expect(onChange).toHaveBeenLastCalledWith(new Date('2024-05-02T08:00').toISOString().replace('.000Z', 'Z'));
-    fireEvent.keyDown(shown, { key: 'Backspace' });
-    expect(onChange).toHaveBeenLastCalledWith('');
-  });
-
-  it('datetime: a value that cannot be read stays as stored; the picker is empty', () => {
-    renderWidget({ type: 'datetime', label: 'At' }, 'next week');
-    expect((screen.getByLabelText(/^At/) as HTMLInputElement).value).toBe('next week');
-    expect((document.querySelector('input[type="datetime-local"]') as HTMLInputElement).value).toBe('');
-  });
-
-  it('datetime dateOnly → date picker, stored as YYYY-MM-DD', () => {
-    const { onChange } = renderWidget({ type: 'datetime', label: 'Day', dateOnly: true }, '2024-05-01');
-    const shown = screen.getByLabelText(/^Day/) as HTMLInputElement;
-    expect(shown.value).toBe(formatStored('2024-05-01', true));
-    const picker = document.querySelector('input[type="date"]') as HTMLInputElement;
-    expect(picker.value).toBe('2024-05-01');
-    fireEvent.change(picker, { target: { value: '2024-06-01' } });
-    expect(onChange).toHaveBeenLastCalledWith('2024-06-01');
-  });
-
-  it('datetime helpers: zone-less values are local time; invalid dates are unreadable', () => {
-    expect(toPickerValue(parseStored('2024-05-01T10:30:15', false)!, false)).toBe('2024-05-01T10:30');
-    expect(parseStored('2024-02-31', true)).toBeUndefined();
-    expect(parseStored('2024-05-01', false)).toBeUndefined();
-    expect(fromPickerValue('2024-05-02T08:00', true)).toBe('2024-05-02T08:00');
   });
 
   it('json → text with Valid / Invalid status', () => {
@@ -208,98 +138,9 @@ describe('field widgets', () => {
     localStorage.removeItem('editlet:markdown-mode');
     const ta = screen.getByLabelText(/^Body/) as HTMLTextAreaElement;
     expect(ta.tagName).toBe('TEXTAREA');
-    expect(ta.className).toContain('editlet-ff-markdown__textarea');
     expect(ta.value).toBe('# Hi\n\n_em_\n');
     fireEvent.change(ta, { target: { value: '# Hi\n' } });
     expect(onChange).toHaveBeenLastCalledWith('# Hi\n');
-  });
-
-  it('single reference → string from entries of the allowed collections, picked in a combobox', () => {
-    const { onChange } = renderWidget({ type: 'reference', label: 'Author', collections: ['author'] }, '');
-    const input = screen.getByRole('combobox', { name: /^Author/ });
-    fireEvent.focus(input);
-    const list = screen.getByRole('listbox');
-    expect(
-      within(list)
-        .getAllByRole('option')
-        .map((o) => o.textContent),
-    ).toEqual(['Janejane']);
-    fireEvent.click(within(list).getByRole('option', { name: /Jane/ }));
-    expect(onChange).toHaveBeenLastCalledWith('jane');
-    expect(screen.getByRole('combobox', { name: /^Author/ }).getAttribute('aria-expanded')).toBe('false');
-    expect((screen.getByRole('combobox', { name: /^Author/ }) as HTMLInputElement).value).toBe('Jane');
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Author' }));
-    expect(onChange).toHaveBeenLastCalledWith('');
-  });
-
-  it('reference combobox: typing filters by title and ref, arrows and Enter pick, Escape closes', () => {
-    const { onChange } = renderWidget({ type: 'reference', label: 'Post', collections: ['post'] }, '');
-    const input = screen.getByRole('combobox', { name: /^Post/ });
-    fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: 'sec' } });
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Second postsecond']);
-    fireEvent.change(input, { target: { value: 'hello world' } });
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Hello worldhello-world']);
-    fireEvent.change(input, { target: { value: 'zzz' } });
-    expect(screen.queryAllByRole('option')).toEqual([]);
-    expect(screen.getByText('No matching entries')).toBeDefined();
-    fireEvent.change(input, { target: { value: '' } });
-    fireEvent.keyDown(input, { key: 'ArrowDown' });
-    expect(input.getAttribute('aria-activedescendant')).toBe(screen.getAllByRole('option')[1]!.id);
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(onChange).toHaveBeenLastCalledWith('second');
-    fireEvent.change(input, { target: { value: 'x' } });
-    fireEvent.keyDown(input, { key: 'Escape' });
-    expect(input.getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('reference: a link opens the chosen entry when the context gives one', () => {
-    const EntryLink = ({ to, children, ...props }: { to: string; children?: ReactNode }) => (
-      <a href={`#${to}`} {...props}>
-        {children}
-      </a>
-    );
-    renderWidget({ type: 'reference', label: 'Author', collections: ['author'] }, 'jane', makeCtx({ EntryLink }));
-    expect(screen.getByRole('link', { name: 'Open Jane' }).getAttribute('href')).toBe('#jane');
-  });
-
-  it('reference: an unlisted value is "not found" once entries are loaded, not while loading', () => {
-    const field: Field = { type: 'reference', label: 'Author', collections: ['author'] };
-    const loading = renderWidget(field, 'author/gone', makeCtx({ entriesPending: true }));
-    expect(screen.queryByText('Referenced entry not found: author/gone')).toBeNull();
-    loading.unmount();
-    renderWidget(field, 'author/gone');
-    expect(screen.getByText('Referenced entry not found: author/gone')).toBeDefined();
-    expect((screen.getByRole('combobox', { name: /^Author/ }) as HTMLInputElement).value).toBe(
-      'Not found: author/gone',
-    );
-  });
-
-  it('multiple reference: a missing item is a marked chip', () => {
-    renderWidget({ type: 'reference', label: 'Related', collections: ['post'], multiple: true }, [
-      'hello-world',
-      'gone',
-    ]);
-    const chips = screen.getByRole('list', { name: 'Related selected' });
-    expect(within(chips).getByText('Not found: gone').closest('li')?.className).toContain('--broken');
-    expect(screen.getByText('Referenced entry not found: gone')).toBeDefined();
-  });
-
-  it('multiple reference adds and removes chips → string[]', () => {
-    const { onChange } = renderWidget({ type: 'reference', label: 'Related', collections: ['post'], multiple: true }, [
-      'hello-world',
-    ]);
-    const chips = screen.getByRole('list', { name: 'Related selected' });
-    expect(within(chips).getByText('Hello world')).toBeDefined();
-    const add = screen.getByRole('combobox', { name: /^Related/ });
-    fireEvent.focus(add);
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Second postsecond']);
-    fireEvent.click(screen.getByRole('option', { name: /Second post/ }));
-    expect(onChange).toHaveBeenLastCalledWith(['hello-world', 'second']);
-    expect(within(screen.getByRole('list', { name: 'Related selected' })).getByText('Second post')).toBeDefined();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Hello world' }));
-    expect(onChange).toHaveBeenLastCalledWith(['second']);
-    expect(screen.queryByRole('button', { name: 'Remove Hello world' })).toBeNull();
   });
 
   it('image Upload calls stageUpload and onChange with the returned src', async () => {
@@ -315,7 +156,7 @@ describe('field widgets', () => {
 
   it('image: dropping a file on the field uploads it; a drag without files does nothing', async () => {
     const { onChange, ctx, container } = renderWidget({ type: 'image', label: 'Cover' }, { src: '', alt: 'A cat' });
-    const zone = container.querySelector('.editlet-ff-image__body')!;
+    const zone = container.querySelector('[data-editlet="image-drop"]')!;
     const file = new File([new Uint8Array([1, 2, 3])], 'Dropped.webp', { type: 'image/webp' });
 
     fireEvent.dragEnter(zone, { dataTransfer: { types: ['Files'], files: [file] } });
@@ -351,24 +192,53 @@ describe('field widgets', () => {
     expect(onChange).toHaveBeenLastCalledWith({ src: 'hello-world/cover.webp', alt: 'Sunset' });
   });
 
-  it('image Gallery searches, scopes to the entry or All, and uploads from the picker', async () => {
+  it('image Gallery scopes to This entry or All, searches by path, names tiles by file and folder, uploads from its bar', async () => {
     const stageUpload = vi.fn(async (file: File) => `hello-world/${file.name}`);
     const { onChange } = renderWidget(
       { type: 'image', label: 'Cover' },
       { src: '', alt: 'Kept' },
-      makeCtx({ stageUpload }),
+      makeCtx({ stageUpload, contentDir: 'cms/content' }),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Gallery' }));
-    const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByRole('tab', { name: 'This entry (1)' }).getAttribute('aria-selected')).toBe('true');
+    const dialog = await screen.findByRole('dialog', { name: 'Gallery' });
+    expect(within(dialog).getByText('2 images')).toBeDefined();
+    // The entry's own images are the default scope.
+    const entry = within(dialog).getByRole('button', { name: /^This entry\s*1$/ });
+    expect(entry.getAttribute('aria-pressed')).toBe('true');
     expect(within(dialog).queryByTitle('cms/content/shared/logo.png')).toBeNull();
-    fireEvent.click(within(dialog).getByRole('tab', { name: 'All (2)' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^All\s*2$/ }));
+    const tiles = within(dialog).getAllByRole('button', { name: /, (post\/hello-world|shared)$/ });
+    expect(tiles.map((t) => t.getAttribute('aria-label'))).toEqual([
+      'cover.webp, post/hello-world',
+      'logo.png, shared',
+    ]);
+    // The file and its folder are written under the picture: a tooltip does not exist on a touch screen.
+    expect(within(tiles[1]!).getByText('logo.png')).toBeDefined();
+    expect(within(tiles[1]!).getByText('shared')).toBeDefined();
     fireEvent.change(within(dialog).getByLabelText('Search images'), { target: { value: 'LOGO' } });
     expect(within(dialog).queryByTitle('cms/content/post/hello-world/cover.webp')).toBeNull();
     expect(within(dialog).getByTitle('cms/content/shared/logo.png')).toBeDefined();
     fireEvent.change(screen.getByTestId('media-picker-file'), { target: { files: [new File(['x'], 'new.png')] } });
     await waitFor(() => expect(onChange).toHaveBeenLastCalledWith({ src: 'hello-world/new.png', alt: 'Kept' }));
     expect(stageUpload).toHaveBeenCalledOnce();
+  });
+
+  it('image Gallery starts with a fresh search and scope every time it opens', async () => {
+    renderWidget({ type: 'image', label: 'Cover' }, { src: '', alt: '' });
+    fireEvent.click(screen.getByRole('button', { name: 'Gallery' }));
+    let dialog = await screen.findByRole('dialog', { name: 'Gallery' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^All\s*2$/ }));
+    fireEvent.change(within(dialog).getByLabelText('Search images'), { target: { value: 'zzz' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Gallery' })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Gallery' }));
+    dialog = await screen.findByRole('dialog', { name: 'Gallery' });
+    expect((within(dialog).getByLabelText('Search images') as HTMLInputElement).value).toBe('');
+    expect(
+      within(dialog)
+        .getByRole('button', { name: /^This entry\s*1$/ })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
   it('image Remove is one icon button that asks first: Cancel keeps the image, Remove clears it', () => {
@@ -392,11 +262,18 @@ describe('field widgets', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
-  it('image shows a large openable preview and the file name, which has the whole path as its title', () => {
-    renderWidget({ type: 'image', label: 'Cover' }, { src: 'hello-world/cover.webp', alt: '' });
+  it('image shows an openable preview, and a chip with the file name while it waits for the save', () => {
+    const { unmount } = renderWidget({ type: 'image', label: 'Cover' }, { src: 'hello-world/cover.webp', alt: '' });
     expect(screen.getByTestId('preview').getAttribute('data-openable')).toBe('true');
-    const name = screen.getByText('cover.webp');
-    expect(name.getAttribute('title')).toBe('hello-world/cover.webp');
+    expect(screen.queryByText(/uploads when you save/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Replace' })).toBeDefined();
+    unmount();
+    renderWidget(
+      { type: 'image', label: 'Cover' },
+      { src: 'hello-world/cover.webp', alt: '' },
+      makeCtx({ isStaged: (p) => p === 'cms/content/post/hello-world/cover.webp' }),
+    );
+    expect(screen.getByText('cover.webp · uploads when you save')).toBeDefined();
   });
 
   it.each<[string, Field, unknown]>([
@@ -406,21 +283,8 @@ describe('field widgets', () => {
     ['markdown', { type: 'markdown', label: 'F' }, ''],
     ['number', { type: 'number', label: 'F' }, ''],
     ['url', { type: 'url', label: 'F' }, ''],
-    ['datetime', { type: 'datetime', label: 'F' }, ''],
     ['json', { type: 'json', label: 'F' }, ''],
     ['color', { type: 'color', label: 'F' }, '#ffffff'],
-    [
-      'select',
-      {
-        type: 'select',
-        label: 'F',
-        options: [
-          { label: 'A', value: 'a' },
-          { label: 'B', value: 'b' },
-        ],
-      },
-      'a',
-    ],
     [
       'multi select',
       {
@@ -434,9 +298,6 @@ describe('field widgets', () => {
       },
       [],
     ],
-    ['reference', { type: 'reference', label: 'F', collections: ['post'] }, ''],
-    ['multi reference', { type: 'reference', multiple: true, label: 'F', collections: ['post'] }, []],
-    ['boolean', { type: 'boolean', label: 'F' }, true],
     ['image', { type: 'image', label: 'F' }, { src: '', alt: '' }],
   ])(
     '%s: the hint comes before the control, and the control is described by the hint and the error',

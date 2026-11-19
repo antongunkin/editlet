@@ -76,7 +76,10 @@ export function sheetHeight(start: number, dy: number, v: Viewport): number {
 export const PILL_BOTTOM = 20;
 
 /** The dialog's inline styles. An empty value removes the property, so the loader's CSS applies again. */
-export type DialogStyle = Record<'left' | 'top' | 'right' | 'bottom' | 'width' | 'height' | 'border-radius', string>;
+export type DialogStyle = Record<
+  'left' | 'top' | 'right' | 'bottom' | 'width' | 'height' | 'border-radius' | 'box-shadow',
+  string
+>;
 
 /** No inline geometry: the loader's CSS places the dialog (the bottom sheet on a narrow page). */
 export const LOADER_STYLE: DialogStyle = {
@@ -87,6 +90,7 @@ export const LOADER_STYLE: DialogStyle = {
   width: '',
   height: '',
   'border-radius': '',
+  'box-shadow': '',
 };
 
 /** The bottom sheet: the loader's CSS, with only the height set once the top edge was pulled (`null`: not yet). */
@@ -109,11 +113,15 @@ export function dialogStyle(r: Rect): DialogStyle {
 
 /**
  * Inline styles of the pill: `size` (the admin measures it), centred, `PILL_BOTTOM` above the bottom edge. The radius is
- * half the height (not 9999px), so the corner animates smoothly from the window's 20px.
+ * half the height (not 9999px), so the corner animates smoothly from the window's 20px. The pill's `shadow` (the admin
+ * sends its computed `box-shadow`) goes on the dialog: the iframe clips whatever the admin draws outside the pill, and
+ * a margin around it would widen the dialog, which then takes the page's clicks there. So the dialog is exactly the
+ * pill (the same hit area and place) and draws the shadow outside itself; without one, the loader's outline stays.
  */
-export function pillStyle(size: { w: number; h: number }, v: Viewport): DialogStyle {
+export function pillStyle(size: { w: number; h: number; shadow?: string }, v: Viewport): DialogStyle {
   const w = Math.min(size.w, v.w);
   return {
+    ...LOADER_STYLE,
     left: `${Math.round((v.w - w) / 2)}px`,
     top: 'auto',
     right: 'auto',
@@ -121,5 +129,26 @@ export function pillStyle(size: { w: number; h: number }, v: Viewport): DialogSt
     width: `${w}px`,
     height: `${size.h}px`,
     'border-radius': `${size.h / 2}px`,
+    'box-shadow': size.shadow ?? '',
   };
+}
+
+/**
+ * What covers the bottom of the dialog (CSS px), for the admin's bottom bar (`ViewportMessage`). `bottom` is the
+ * dialog's bottom edge and `layoutH` the layout viewport's height; `visualBottom` the visual viewport's bottom edge in
+ * the same coordinates (`offsetTop + height`), which the on-screen keyboard pulls up; `scale` its pinch zoom; `inset`
+ * the page's `env(safe-area-inset-bottom)`. The keyboard is the part of the dialog below the visual viewport (none while
+ * zoomed in: then the visual viewport is small because of the zoom); the safe area is the part of the inset the dialog
+ * reaches into, none while the keyboard covers it.
+ */
+export function bottomInsets(
+  bottom: number,
+  layoutH: number,
+  visualBottom: number,
+  scale: number,
+  inset: number,
+): { safeBottom: number; keyboard: number } {
+  const keyboard = scale > 1.01 ? 0 : Math.max(0, Math.round(bottom - visualBottom));
+  const safeBottom = keyboard > 0 ? 0 : Math.max(0, Math.round(inset - Math.max(0, layoutH - bottom)));
+  return { safeBottom, keyboard };
 }

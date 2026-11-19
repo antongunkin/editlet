@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { BAR_HEIGHT, dialogStyle, drag, fitRect, MARGIN, pillStyle, sheetHeight, sheetStyle } from './geometry';
+import {
+  BAR_HEIGHT,
+  bottomInsets,
+  dialogStyle,
+  drag,
+  fitRect,
+  MARGIN,
+  pillStyle,
+  sheetHeight,
+  sheetStyle,
+} from './geometry';
 
 const V = { w: 1440, h: 900 };
 
@@ -63,8 +73,36 @@ describe('pillStyle', () => {
       width: '140px',
       height: '40px',
       'border-radius': '20px',
+      'box-shadow': '',
     });
     expect(pillStyle({ w: 500, h: 40 }, { w: 300, h: 600 })).toMatchObject({ left: '0px', width: '300px' });
+  });
+
+  it('draws the pill’s shadow on the dialog, which stays exactly the pill (same place, same hit area)', () => {
+    const shadow = 'rgba(28, 25, 23, 0.1) 0px 0px 0px 1px, rgba(28, 25, 23, 0.2) 0px 12px 32px -8px';
+    const plain = pillStyle({ w: 140, h: 56 }, V);
+    const shaded = pillStyle({ w: 140, h: 56, shadow }, V);
+    expect(shaded).toEqual({ ...plain, 'box-shadow': shadow });
+    expect(shaded).toMatchObject({ left: '650px', bottom: '20px', width: '140px', height: '56px' });
+  });
+});
+
+describe('bottomInsets', () => {
+  const phone = 844;
+  it('reports the safe area under a dialog that reaches the bottom, less any gap below the dialog', () => {
+    expect(bottomInsets(phone, phone, phone, 1, 34)).toEqual({ safeBottom: 34, keyboard: 0 });
+    expect(bottomInsets(phone - 20, phone, phone, 1, 34)).toEqual({ safeBottom: 14, keyboard: 0 });
+    expect(bottomInsets(phone - 60, phone, phone, 1, 34)).toEqual({ safeBottom: 0, keyboard: 0 });
+  });
+
+  it('reports the part of the dialog the keyboard hides, and no safe area under the keyboard', () => {
+    expect(bottomInsets(phone, phone, phone - 300, 1, 34)).toEqual({ safeBottom: 0, keyboard: 300 });
+    // The page scrolled the visual viewport down by 100: the keyboard hides 200 px of the dialog.
+    expect(bottomInsets(phone, phone, phone - 300 + 100, 1, 34)).toEqual({ safeBottom: 0, keyboard: 200 });
+  });
+
+  it('reads a pinch zoom as no keyboard', () => {
+    expect(bottomInsets(phone, phone, phone / 2, 2, 0)).toEqual({ safeBottom: 0, keyboard: 0 });
   });
 });
 

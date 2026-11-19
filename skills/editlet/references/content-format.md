@@ -23,7 +23,7 @@ each field is written in the file.
 
 ## Field types
 
-Every field has `label` and may have `required` and `hint`. An optional field may be absent.
+Every field has `label` and may have `required` and `hint`; a top-level field may also have `group` (its tab in the editor, see schema-changes.md). An optional field may be absent.
 
 | Type | YAML value | Notes |
 |---|---|---|

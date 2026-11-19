@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 /**
- * A square preview slot that renders `children` (the preview, which reads the image) only once it scrolls near the
- * viewport. Without `IntersectionObserver` it renders them at once.
+ * A preview slot that fills its tile and renders `children` (the preview, which reads the image) only once it scrolls
+ * near the viewport. Without `IntersectionObserver` it renders them at once.
  */
 export function LazyPreview({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -23,7 +23,7 @@ export function LazyPreview({ children }: { children: ReactNode }) {
     return () => observer.disconnect();
   }, [visible]);
   return (
-    <div ref={ref} className="editlet-media-grid__img-wrap">
+    <div ref={ref} className="size-full bg-muted">
       {visible ? children : null}
     </div>
   );

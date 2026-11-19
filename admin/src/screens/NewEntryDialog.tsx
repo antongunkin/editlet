@@ -1,12 +1,10 @@
-import { useId, useState } from 'react';
+import { useRef, useState } from 'react';
+
+import { NewEntryView } from './NewEntryView';
 
 import { isValidSlug, slugify } from '../../../core/paths';
 import { entryRefs, useFiles, type SchemaData } from '../data/queries';
 import { pendingNewEntries } from '../entry/pending';
-import { Button } from '../ui/Button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/Dialog';
-import { Field, fieldDescribedBy } from '../ui/Field';
-import { FIELD_INPUT_CLASS } from '../ui/Input';
 import { useRoute } from '../useRoute';
 
 export type NewEntryDialogProps = {
@@ -16,98 +14,95 @@ export type NewEntryDialogProps = {
   onOpenChange(open: boolean): void;
 };
 
-/** The field the title input fills: `slugFrom`, else `titleField`. */
+/**
+ * A collection's label as a noun in a sentence (*New post*, *A tag with this address*): the first letter lower-cased
+ * unless the label has a capital after it (*FAQ*, *Home Page*), which a label of names keeps. The schema's `label` is
+ * taken as the singular name of one entry (*Post*); a plural label reads *New posts*.
+ */
+export function entryNoun(label: string): string {
+  const rest = label.slice(1);
+  return rest === rest.toLowerCase() ? label.slice(0, 1).toLowerCase() + rest : label;
+}
+
+/** The field the name input fills: `slugFrom`, else `titleField`. */
 function titleKey(schema: SchemaData, collection: string): string | undefined {
   const c = schema.schema.collections[collection];
   return c?.slugFrom ?? c?.titleField;
 }
 
-function NewEntryForm({ collection, schema, onOpenChange }: Omit<NewEntryDialogProps, 'open'>) {
-  const id = useId();
+/**
+ * *New post*: asks for the name first, the address (the slug) follows it until it is edited, then opens the blank entry,
+ * unsaved. Nothing is written here; the entry's Save creates the file. The view is NewEntryView.tsx.
+ */
+export function NewEntryDialog({ collection, schema, open, onOpenChange }: NewEntryDialogProps) {
   const { navigate } = useRoute();
   const files = useFiles();
-  const key = titleKey(schema, collection);
+  const focus = useRef<HTMLInputElement>(null);
   const def = schema.schema.collections[collection];
-  const [title, setTitle] = useState('');
-  const [slugInput, setSlugInput] = useState<string | null>(null);
-  const slug = slugInput ?? slugify(title);
+  const label = def?.label ?? collection;
+  const noun = entryNoun(label);
+  const key = titleKey(schema, collection);
+  const [name, setName] = useState('');
+  const [typed, setTyped] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    // Each opening starts empty.
+    setWasOpen(open);
+    if (open) {
+      setName('');
+      setTyped(null);
+      setEditing(false);
+    }
+  }
+  const address = typed ?? slugify(name);
 
   const existing = new Set(files.data ? entryRefs(schema.schema, files.data, collection).map((r) => r.slug) : []);
-  const error =
-    slug === ''
-      ? undefined
-      : !isValidSlug(slug)
-        ? 'Invalid slug'
-        : existing.has(slug)
-          ? 'Slug already exists'
+  const problem =
+    address === ''
+      ? // A name with no Latin letters or digits (Привет мир, 日本語) makes no address: say so, and let the user write one.
+        name.trim() === ''
+        ? undefined
+        : editing
+          ? 'Write an address with lowercase letters, numbers and hyphens.'
+          : 'This name makes no address (it needs letters a–z or numbers). Edit the address to write one.'
+      : !isValidSlug(address)
+        ? 'The address can use lowercase letters, numbers and hyphens.'
+        : existing.has(address)
+          ? `A ${noun} with this address already exists`
           : undefined;
-  const canConfirm = slug !== '' && error === undefined && files.data !== undefined;
+  const canCreate = address !== '' && problem === undefined && files.data !== undefined;
 
-  const confirm = () => {
-    if (!canConfirm) return;
+  const create = () => {
+    if (!canCreate) return;
     const initial: Record<string, unknown> = {};
-    if (title.trim() !== '') {
-      if (def?.titleField !== undefined) initial[def.titleField] = title;
-      if (def?.slugFrom !== undefined) initial[def.slugFrom] = title;
+    if (name.trim() !== '') {
+      if (def?.titleField !== undefined) initial[def.titleField] = name;
+      if (def?.slugFrom !== undefined) initial[def.slugFrom] = name;
     }
-    pendingNewEntries.set(`${collection}/${slug}`, initial);
+    pendingNewEntries.set(`${collection}/${address}`, initial);
     onOpenChange(false);
-    navigate({ kind: 'entry', collection, slug });
+    navigate({ kind: 'entry', collection, slug: address });
   };
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        confirm();
-      }}
-    >
-      <DialogHeader>
-        <DialogTitle>New {def?.label ?? collection}</DialogTitle>
-        <DialogDescription>Nothing is saved until you save the entry.</DialogDescription>
-      </DialogHeader>
-      <div className="editlet-u-stack editlet-u-gap-3">
-        {key !== undefined ? (
-          <Field label={def?.fields[key]?.label ?? 'Title'} htmlFor={`${id}-title`}>
-            <input
-              id={`${id}-title`}
-              className={FIELD_INPUT_CLASS}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              // oxlint-disable-next-line jsx-a11y/no-autofocus -- first field of a modal dialog
-              autoFocus
-            />
-          </Field>
-        ) : null}
-        <Field label="Slug" htmlFor={`${id}-slug`} error={error}>
-          <input
-            id={`${id}-slug`}
-            className={FIELD_INPUT_CLASS}
-            value={slug}
-            onChange={(e) => setSlugInput(e.target.value)}
-            spellCheck={false}
-            aria-invalid={error !== undefined ? true : undefined}
-            aria-describedby={fieldDescribedBy(`${id}-slug`, undefined, error)}
-          />
-        </Field>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={() => onOpenChange(false)}>
-          Cancel
-        </Button>
-        <Button type="submit" variant="primary" disabled={!canConfirm}>
-          Confirm
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
-
-/** Asks for a slug (auto-filled from the title until edited), then opens the new, unsaved entry. */
-export function NewEntryDialog({ open, onOpenChange, ...props }: NewEntryDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>{open ? <NewEntryForm {...props} onOpenChange={onOpenChange} /> : null}</DialogContent>
-    </Dialog>
+    <NewEntryView
+      open={open}
+      onOpenChange={onOpenChange}
+      title={`New ${noun}`}
+      sub={label}
+      nameLabel={key === undefined ? undefined : (def?.fields[key]?.label ?? 'Title')}
+      name={name}
+      onName={setName}
+      address={address}
+      onAddress={setTyped}
+      editing={editing}
+      onEdit={() => setEditing(true)}
+      problem={problem}
+      ctaLabel={`Create ${noun}`}
+      canCreate={canCreate}
+      onCreate={create}
+      focusRef={focus}
+    />
   );
 }

@@ -334,6 +334,26 @@ export function createFakeGitHub(init: {
       }));
       return { data: { repository: { ref: { target: { history: { totalCount: all.length, nodes } } } } } };
     },
+    Versions(v) {
+      if (!isRepo(v)) return repoMissing();
+      const oid = state.refs.get(branchOf(String(v.ref)));
+      if (!oid) return { data: { repository: { ref: null } } };
+      const path = String(v.path);
+      const nodes = touching(oid, path)
+        .slice(0, Number(v.first))
+        .map((c) => {
+          const entry = fileEntry(c, path);
+          return {
+            oid: c.oid,
+            url: `https://github.test/${c.oid}`,
+            messageHeadline: c.message,
+            committedDate: '2025-11-19T14:48:00Z',
+            author: fakeAuthor,
+            file: entry && { oid: entry.oid, type: entry.type },
+          };
+        });
+      return { data: { repository: { ref: { target: { history: { nodes } } } } } };
+    },
     Snapshot(v) {
       if (!isRepo(v)) return repoMissing();
       const oid = state.refs.get(branchOf(String(v.ref)));

@@ -6,7 +6,7 @@ import { configure, fireEvent, screen, waitFor, within } from '@testing-library/
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createLocalSource } from './source/local';
-import { entryActions, renderApp } from './test/render';
+import { moreAction, moreActions, openField, renderApp, rowText, setField } from './test/render';
 
 import { createDevHandler } from '../../node/devHandler';
 
@@ -47,12 +47,22 @@ const route = () => new URLSearchParams(window.location.search).get('editlet');
 /** Opens the More actions item `name` once the entry's Used by (if any) has loaded. */
 async function menu(name: string, usedBy?: string) {
   if (usedBy) await within(main()).findByRole('region', { name: usedBy });
-  else await within(main()).findByLabelText(/^Prompt|^Title/);
-  fireEvent.click(entryActions().getByRole('button', { name, hidden: true }));
+  else await screen.findByRole('button', { name: /^Prompt|^Title/ });
+  await moreAction(name);
   return screen.findByRole('alertdialog');
 }
 
 describe('rename and delete with references, end to end', () => {
+  it('Rename opens with the focus in the slug field; Delete opens with it on Cancel', async () => {
+    await site('question/role');
+    const rename = await menu('Rename…', 'Used by 2 entries');
+    await waitFor(() => expect(document.activeElement).toBe(within(rename).getByLabelText('New slug')));
+    fireEvent.click(within(rename).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    const del = await menu('Delete…', 'Used by 2 entries');
+    await waitFor(() => expect(document.activeElement).toBe(within(del).getByRole('button', { name: 'Cancel' })));
+  });
+
   it('renames an entry: new file, moved image folder, references rewritten, one commit', async () => {
     const { read, exists } = await site('question/role');
     const dialog = await menu('Rename…', 'Used by 2 entries');
@@ -80,26 +90,31 @@ describe('rename and delete with references, end to end', () => {
     expect(await read('option/rating-high.md')).toContain('followUp: question/team-role\n');
     // The renamed entry opens with its references and image in place.
     const usedBy = await within(main()).findByRole('region', { name: 'Used by 2 entries' });
-    expect(within(usedBy).getByRole('link', { name: 'About you' })).toBeDefined();
-    expect(within(main()).getByTitle('team-role/diagram.webp')).toBeDefined();
+    expect(within(usedBy).getByRole('link', { name: /^About you / })).toBeDefined();
+    await waitFor(() => expect(rowText('Image')).toContain('diagram.webp'));
+    expect((await openField('Image')).getByRole('button', { name: 'Replace' })).toBeDefined();
   });
 
   it('refuses Rename while the form has unsaved changes', async () => {
     await site('question/role');
-    fireEvent.change(await within(main()).findByLabelText(/^Prompt/), { target: { value: 'Changed' } });
-    const item = entryActions().getByRole('button', { name: 'Rename…', hidden: true }) as HTMLButtonElement;
-    await waitFor(() => expect(item.disabled).toBe(true));
+    await screen.findByRole('button', { name: /^Prompt/ });
+    await setField('Prompt', 'Changed');
+    const item = (await moreActions()).getByRole('button', { name: /^Rename…/ }) as HTMLButtonElement;
+    expect(item.disabled).toBe(true);
+    expect(item.textContent).toContain('Save first');
   });
 
   it('has no Rename for a singleton', async () => {
     await site('brand/index');
-    await within(main()).findByLabelText(/^Name/);
-    expect(entryActions().queryByRole('button', { name: 'Rename…', hidden: true })).toBeNull();
+    await screen.findByRole('button', { name: /^Name/ });
+    const actions = await moreActions();
+    expect(actions.getByRole('button', { name: 'Delete…' })).toBeDefined();
+    expect(actions.queryByRole('button', { name: /^Rename/ })).toBeNull();
   });
 
   it('deletes an entry and removes the references to it in one commit', async () => {
     const { read, exists } = await site('question/rating');
-    const dialog = await menu('Delete', 'Used by 2 entries');
+    const dialog = await menu('Delete…', 'Used by 2 entries');
     const confirm = () => within(dialog).getByRole('button', { name: /^Delete/ }) as HTMLButtonElement;
     expect(confirm().disabled).toBe(true);
     fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Also remove the references from 2 entries' }));
@@ -114,7 +129,7 @@ describe('rename and delete with references, end to end', () => {
 
   it('does not delete when removing the references would break another entry', async () => {
     const { exists } = await site('survey/onboarding');
-    const dialog = await menu('Delete', 'Used by 1 entry');
+    const dialog = await menu('Delete…', 'Used by 1 entry');
     expect(within(dialog).getByRole('alert').textContent).toContain('page/landing: content.3.survey — Required');
     expect(within(dialog).queryByRole('checkbox')).toBeNull();
     expect((within(dialog).getByRole('button', { name: /^Delete/ }) as HTMLButtonElement).disabled).toBe(true);

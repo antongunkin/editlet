@@ -8,7 +8,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDevHandler } from './devHandler';
 
-import { DEV_API_BASE, type DevCommitRequest, type DevErrorResponse, type DevFilesResponse } from '../core/devApi';
+import {
+  DEV_API_BASE,
+  type DevCommitRequest,
+  type DevErrorResponse,
+  type DevFilesResponse,
+  type DevVersionsResponse,
+} from '../core/devApi';
 import { gitBlobSha } from '../core/sha';
 import type { FileHistory } from '../core/source';
 
@@ -34,6 +40,13 @@ afterEach(async () => {
 
 function fileUrl(path: string): string {
   return `${ORIGIN}${DEV_API_BASE}/file?path=${encodeURIComponent(path)}`;
+}
+
+function versionsUrl(path: string, limit?: string): string {
+  return `${ORIGIN}${DEV_API_BASE}/versions?${new URLSearchParams({ path, ...(limit ? { limit } : {}) })}`;
+}
+function versionUrl(path: string, commit: string): string {
+  return `${ORIGIN}${DEV_API_BASE}/version?${new URLSearchParams({ path, commit })}`;
 }
 
 async function setup() {
@@ -393,6 +406,125 @@ describe('createDevHandler', () => {
     });
   });
 
+  describe('GET versions and version', () => {
+    const POST = 'cms/content/post/hello-world.md';
+    /** A checkout with two commits of POST: init and second. */
+    async function withHistory() {
+      const ctx = await setup();
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-c', 'user.name=Ann', '-c', 'user.email=a@t', ...args], { cwd: ctx.root })
+          .toString()
+          .trim();
+      git('init', '-b', 'main');
+      git('add', '.');
+      git('commit', '-m', 'init');
+      const first = await readFile(join(ctx.root, POST), 'utf8');
+      await writeFile(join(ctx.root, POST), `${first}\nMore.\n`);
+      git('commit', '-am', 'second');
+      return { ...ctx, git, first };
+    }
+
+    it('is an empty list outside a git checkout, and 404 for a version', async () => {
+      const { handler } = await setup();
+      expect(await (await handler(new Request(versionsUrl(POST)))).json()).toEqual({ versions: [] });
+      expect((await handler(new Request(versionUrl(POST, 'a'.repeat(40))))).status).toBe(404);
+    });
+
+    it('lists the commits of one file, newest first, with the blob sha after each', async () => {
+      const { handler, git, sha } = await withHistory();
+      const { versions } = (await (await handler(new Request(versionsUrl(POST)))).json()) as DevVersionsResponse;
+      expect(versions.map((v) => v.message)).toEqual(['second', 'init']);
+      expect(versions[0]).toMatchObject({
+        actor: { name: 'Ann' },
+        commit: git('rev-parse', 'HEAD'),
+        sha: await sha(POST),
+      });
+      expect(versions[1]!.sha).toBe(git('rev-parse', `HEAD~1:${POST}`));
+      expect(versions[0]!.date).toMatch(/^\d{4}-\d\d-\d\dT/);
+      const one = (await (await handler(new Request(versionsUrl(POST, '1')))).json()) as DevVersionsResponse;
+      expect(one.versions).toHaveLength(1);
+    });
+
+    it('marks the commit that deleted the file with a null sha', async () => {
+      const { handler, git, root, first } = await withHistory();
+      git('rm', '-q', POST);
+      git('commit', '-m', 'remove');
+      await writeFile(join(root, POST), first);
+      git('add', POST);
+      git('commit', '-m', 'back');
+      const { versions } = (await (await handler(new Request(versionsUrl(POST)))).json()) as DevVersionsResponse;
+      expect(versions.map((v) => [v.message, v.sha === null])).toEqual([
+        ['back', false],
+        ['remove', true],
+        ['second', false],
+        ['init', false],
+      ]);
+    });
+
+    it('does not follow renames, even with log.follow in the git config', async () => {
+      const { handler, git, sha } = await withHistory();
+      const moved = 'cms/content/post/moved.md';
+      git('mv', POST, moved);
+      git('commit', '-m', 'move');
+      git('config', 'log.follow', 'true');
+      const { versions } = (await (await handler(new Request(versionsUrl(moved)))).json()) as DevVersionsResponse;
+      expect(versions.map((v) => v.message)).toEqual(['move']);
+      expect(versions[0]!.sha).toBe(await sha(moved));
+    });
+
+    it('serves the file as a commit left it, and 404 where it was not', async () => {
+      const { handler, git, first } = await withHistory();
+      const res = await handler(new Request(versionUrl(POST, git('rev-parse', 'HEAD~1'))));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('text/markdown; charset=utf-8');
+      expect(await res.text()).toBe(first);
+      await expectError(await handler(new Request(versionUrl(POST, git('rev-parse', '--short', 'HEAD')))), 400);
+      const missing = 'cms/content/post/nope.md';
+      expect((await handler(new Request(versionUrl(missing, git('rev-parse', 'HEAD'))))).status).toBe(404);
+      expect((await handler(new Request(versionUrl(POST, 'f'.repeat(40))))).status).toBe(404);
+    });
+
+    it('works when the site is a folder inside the repository', async () => {
+      const outer = await tempDir();
+      await cp(site, join(outer, 'site'), { recursive: true });
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-c', 'user.name=Ann', '-c', 'user.email=a@t', ...args], { cwd: outer })
+          .toString()
+          .trim();
+      git('init', '-b', 'main');
+      git('add', '.');
+      git('commit', '-m', 'init');
+      const handler = createDevHandler({ root: join(outer, 'site') });
+      const { versions } = (await (await handler(new Request(versionsUrl(POST)))).json()) as DevVersionsResponse;
+      expect(versions).toHaveLength(1);
+      expect(versions[0]!.sha).toBe(git('rev-parse', `HEAD:site/${POST}`));
+      const res = await handler(new Request(versionUrl(POST, versions[0]!.commit)));
+      expect(await res.text()).toBe(await readFile(join(outer, 'site', POST), 'utf8'));
+    });
+
+    it('needs a content path, a commit id, a limit in range and GET', async () => {
+      const { handler } = await setup();
+      await expectError(await handler(new Request(`${ORIGIN}${DEV_API_BASE}/versions`)), 400);
+      await expectError(await handler(new Request(versionsUrl('package.json'))), 400);
+      await expectError(await handler(new Request(versionsUrl('../x.md'))), 400);
+      await expectError(await handler(new Request(versionsUrl(POST, '0'))), 400);
+      await expectError(await handler(new Request(versionsUrl(POST, '101'))), 400);
+      await expectError(await handler(new Request(versionUrl('.env', 'a'.repeat(40)))), 400);
+      await expectError(await handler(new Request(versionsUrl('cms/content/post/a\nb.md'))), 400);
+      await expectError(await handler(new Request(versionUrl(POST, 'HEAD'))), 400);
+      await expectError(await handler(new Request(versionUrl(POST, '--output=x'))), 400);
+      expect((await handler(new Request(versionsUrl(POST), { method: 'POST' }))).status).toBe(405);
+      expect((await handler(new Request(versionsUrl('cms/schema.json')))).status).toBe(200);
+    });
+
+    it('answers 500 with the issues while the schema is broken', async () => {
+      const { root, handler } = await setup();
+      await writeFile(join(root, 'cms/schema.json'), '{ broken');
+      await expectError(await handler(new Request(versionsUrl(POST))), 500);
+      expect((await handler(new Request(versionsUrl('cms/schema.json')))).status).toBe(200);
+    });
+  });
+
   describe('GET git', () => {
     const gitUrl = `${ORIGIN}${DEV_API_BASE}/git`;
 
@@ -486,7 +618,7 @@ describe('createDevHandler', () => {
       const path = 'cms/content/post/hello-world/pic.png';
       const res = await commit({
         message: 'Image',
-        changes: [{ path, content: bytes.toBase64(), encoding: 'base64' }],
+        changes: [{ path, content: Buffer.from(bytes).toString('base64'), encoding: 'base64' }],
       });
       expect(res.status).toBe(204);
       expect(new Uint8Array(await readFile(join(root, path)))).toEqual(bytes);

@@ -10,6 +10,7 @@ describe('parseRoute', () => {
     expect(parseRoute('post/hello-world')).toEqual({ kind: 'entry', collection: 'post', slug: 'hello-world' });
     expect(parseRoute('schema')).toEqual({ kind: 'schema' });
     expect(parseRoute('media')).toEqual({ kind: 'media' });
+    expect(parseRoute('all-content')).toEqual({ kind: 'content' });
     expect(parseRoute('branch:x')).toEqual({ kind: 'branch', name: 'x' });
   });
 
@@ -23,7 +24,7 @@ describe('parseRoute', () => {
 
 describe('formatRoute', () => {
   it('round-trips every valid route', () => {
-    for (const raw of ['', 'post', 'post/hello-world', 'schema', 'media', 'branch:x']) {
+    for (const raw of ['', 'post', 'post/hello-world', 'schema', 'media', 'all-content', 'branch:x']) {
       expect(formatRoute(parseRoute(raw))).toBe(raw);
     }
   });
@@ -39,11 +40,13 @@ describe('parentRoute', () => {
       kind: 'collection',
       collection: 'post',
     });
-    expect(parentRoute({ kind: 'collection', collection: 'post' })).toEqual({ kind: 'home' });
+    expect(parentRoute({ kind: 'collection', collection: 'post' })).toEqual({ kind: 'content' });
   });
 
   it('sends the other screens Home, and Home has no parent', () => {
-    expect(parentRoute({ kind: 'schema' })).toEqual({ kind: 'home' });
+    expect(parentRoute({ kind: 'schema' })).toEqual({ kind: 'content' });
+    expect(parentRoute({ kind: 'media' })).toEqual({ kind: 'content' });
+    expect(parentRoute({ kind: 'content' })).toEqual({ kind: 'home' });
     expect(parentRoute({ kind: 'branch', name: 'x' })).toEqual({ kind: 'home' });
     expect(parentRoute({ kind: 'unknown', raw: 'a/b/c' })).toEqual({ kind: 'home' });
     expect(parentRoute({ kind: 'home' })).toBeNull();

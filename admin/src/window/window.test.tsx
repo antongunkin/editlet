@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createMemorySource } from '../../../core/source';
@@ -6,7 +6,7 @@ import { WINDOW_SOURCE, type PreviewState } from '../../../loader/window/channel
 import { SHEET_MEDIA } from '../../../loader/window/geometry';
 import { App } from '../App';
 import { createFakeWindow, ORIGIN } from '../test/fakeWindow';
-import { createTestQueryClient, fixtureFiles } from '../test/render';
+import { createTestQueryClient, fixtureFiles, HOME_LOADED, openCollection } from '../test/render';
 
 afterEach(() => {
   window.history.replaceState(null, '', '/');
@@ -22,7 +22,7 @@ async function openEmbedded() {
   const posted = vi.spyOn(window, 'postMessage').mockImplementation(() => undefined);
   render(<App source={createMemorySource(fixtureFiles())} win={fake.win} queryClient={createTestQueryClient()} />);
   act(() => fake.fromSite({ type: 'init', route: '', site: { origin: ORIGIN, href: `${ORIGIN}/` } }));
-  await within(screen.getByRole('main')).findByRole('link', { name: 'Post (1)' });
+  await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
   const fromPage = (data: unknown) =>
     act(() => {
       window.dispatchEvent(new MessageEvent('message', { data, origin: window.location.origin, source: window }));
@@ -51,22 +51,29 @@ describe('the window status bar', () => {
 });
 
 describe('the Back button', () => {
-  it('is absent on Home and goes one level up: entry → collection → Home', async () => {
+  it('is absent on Home and goes one level up: entry → collection → All content → Home', async () => {
     await openEmbedded();
     expect(screen.queryByRole('link', { name: 'Back' })).toBeNull();
 
-    fireEvent.click(within(screen.getByRole('main')).getByRole('link', { name: 'Post (1)' }));
-    const toHome = await screen.findByRole('link', { name: 'Back' });
-    expect(toHome.getAttribute('title')).toBe('Back to Home');
+    fireEvent.click(within(screen.getByRole('main')).getByRole('link', { name: HOME_LOADED }));
+    expect((await screen.findByRole('link', { name: 'Back' })).getAttribute('title')).toBe('Back to Home');
+    fireEvent.click(await within(screen.getByRole('main')).findByRole('link', { name: /^Post\s*1 entry/ }));
+    const toContent = await screen.findByRole('link', { name: 'Back' });
+    expect(toContent.getAttribute('title')).toBe('Back to All content');
+    fireEvent.click(toContent);
+    fireEvent.click(await within(screen.getByRole('main')).findByRole('link', { name: /^Post\s*1 entry/ }));
+    await within(screen.getByRole('main')).findByRole('heading', { name: 'Post' });
 
-    fireEvent.click(await within(screen.getByRole('main')).findByRole('link', { name: /hello/i }));
-    await within(screen.getByRole('main')).findByRole('form');
+    fireEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: /^hello/i }));
+    await within(screen.getByRole('main')).findByRole('group', { name: 'post/hello-world fields' });
     expect(screen.getByRole('link', { name: 'Back' }).getAttribute('title')).toBe('Back to Post');
 
     fireEvent.click(screen.getByRole('link', { name: 'Back' }));
     expect(await within(screen.getByRole('main')).findByRole('heading', { name: 'Post' })).toBeDefined();
     fireEvent.click(screen.getByRole('link', { name: 'Back' }));
-    expect(await within(screen.getByRole('main')).findByRole('link', { name: 'Post (1)' })).toBeDefined();
+    expect(await within(screen.getByRole('main')).findByRole('heading', { name: 'All content' })).toBeDefined();
+    fireEvent.click(screen.getByRole('link', { name: 'Back' }));
+    expect(await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED })).toBeDefined();
     expect(screen.queryByRole('link', { name: 'Back' })).toBeNull();
   });
 });
@@ -75,7 +82,7 @@ describe('the bottom sheet', () => {
   it('keeps the move button and the eight resize zones on a wide page', async () => {
     await openEmbedded();
     expect(screen.getByRole('button', { name: 'Move window' })).toBeDefined();
-    expect(document.querySelectorAll('.editlet-window__edge')).toHaveLength(8);
+    expect(document.querySelectorAll('[data-editlet="window-edge"]')).toHaveLength(8);
   });
 
   it('drops them on a page narrower than SHEET_MEDIA (window.js resizes the sheet)', async () => {
@@ -87,7 +94,7 @@ describe('the bottom sheet', () => {
     }));
     await openEmbedded();
     expect(screen.queryByRole('button', { name: 'Move window' })).toBeNull();
-    expect(document.querySelectorAll('.editlet-window__edge')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-editlet="window-edge"]')).toHaveLength(0);
   });
 });
 
@@ -97,7 +104,7 @@ describe('the pill', () => {
 
   it('tells window.js when the pointer enters and leaves a resize edge', async () => {
     const { posted } = await openEmbedded();
-    const edge = document.querySelector('.editlet-window__edge--e')!;
+    const edge = document.querySelector('[data-editlet="window-edge"][data-edge="e"]')!;
     fireEvent.pointerEnter(edge);
     expect(windowMessages(posted).at(-1)).toMatchObject({ type: 'edge', hover: true });
     fireEvent.pointerLeave(edge);
@@ -106,7 +113,7 @@ describe('the pill', () => {
 
   it('× collapses the window into the pill; Editlet expands it with the screen kept', async () => {
     const { posted } = await openEmbedded();
-    fireEvent.click(within(screen.getByRole('main')).getByRole('link', { name: 'Post (1)' }));
+    await openCollection(within(screen.getByRole('main')), 'Post');
     await within(screen.getByRole('main')).findByRole('heading', { name: 'Post' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Minimize' }));
@@ -119,5 +126,15 @@ describe('the pill', () => {
     expect(within(screen.getByRole('main')).getByRole('heading', { name: 'Post' })).toBeDefined();
     expect(screen.getByRole('main').closest('[inert]')).toBeNull();
     expect(screen.getByRole('button', { name: 'Close Editlet' }).closest('[inert]')).not.toBeNull();
+  });
+
+  it('puts the focus back on the Minimize button when Editlet expands the window', async () => {
+    await openEmbedded();
+    const minimize = screen.getByRole('button', { name: 'Minimize' });
+    minimize.focus();
+    fireEvent.click(minimize);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Editlet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Editlet' }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Minimize' })));
   });
 });

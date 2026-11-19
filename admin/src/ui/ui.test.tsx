@@ -1,10 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Button } from './Button';
 import { cn } from './cn';
-import { Dialog, DialogContent, DialogEdges, DialogFooter, DialogHeader, DialogTitle } from './Dialog';
 import { Field } from './Field';
+import { Button } from './primitives/button';
 import { StatusBadge } from './StatusBadge';
 import { Switcher, SwitcherItem } from './Switcher';
 
@@ -15,142 +14,14 @@ describe('cn', () => {
 });
 
 describe('Button', () => {
-  it('renders the variant and size classes', () => {
+  it('renders a button of type button with its label', () => {
     render(
       <Button variant="primary" size="sm">
         Save
       </Button>,
     );
     const button = screen.getByRole('button', { name: 'Save' });
-    expect(button.className).toContain('editlet-button');
-    expect(button.className).toContain('editlet-button--primary');
-    expect(button.className).toContain('editlet-button--sm');
     expect(button.getAttribute('type')).toBe('button');
-  });
-});
-
-describe('Dialog', () => {
-  it('shows its content when open and calls onOpenChange(false) from the close button', () => {
-    const onOpenChange = vi.fn();
-    const { rerender } = render(
-      <Dialog open={false} onOpenChange={onOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Review changes</DialogTitle>
-          </DialogHeader>
-          <DialogFooter>Footer</DialogFooter>
-        </DialogContent>
-      </Dialog>,
-    );
-    expect(screen.queryByText('Review changes')).toBeNull();
-
-    rerender(
-      <Dialog open onOpenChange={onOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Review changes</DialogTitle>
-          </DialogHeader>
-          <DialogFooter>Footer</DialogFooter>
-        </DialogContent>
-      </Dialog>,
-    );
-    expect(screen.getByText('Review changes')).toBeDefined();
-    expect(screen.getByRole('dialog', { hidden: true }).hasAttribute('open')).toBe(true);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close', hidden: true }));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it('closes on Escape', () => {
-    const onOpenChange = vi.fn();
-    render(
-      <Dialog open onOpenChange={onOpenChange}>
-        <DialogContent>
-          <DialogTitle>Title</DialogTitle>
-        </DialogContent>
-      </Dialog>,
-    );
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it('draws the window edges on its sheet, so the window resizes while it is open', () => {
-    render(
-      <DialogEdges.Provider value={<div data-testid="edge" />}>
-        <Dialog open onOpenChange={() => {}}>
-          <DialogContent>
-            <DialogTitle>Gallery</DialogTitle>
-          </DialogContent>
-        </Dialog>
-      </DialogEdges.Provider>,
-    );
-    const edge = screen.getByTestId('edge');
-    expect(edge.parentElement).toBe(screen.getByRole('dialog', { hidden: true }));
-  });
-
-  it('an alertdialog has no close button, ignores a click around it and closes on Escape', () => {
-    const onOpenChange = vi.fn();
-    render(
-      <Dialog open onOpenChange={onOpenChange}>
-        <DialogContent role="alertdialog">
-          <DialogTitle>Remove image?</DialogTitle>
-        </DialogContent>
-      </Dialog>,
-    );
-    const dialog = screen.getByRole('alertdialog');
-    fireEvent.click(dialog);
-    fireEvent.click(dialog.querySelector('.editlet-dialog__scroll')!);
-    expect(onOpenChange).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-});
-
-describe('Dialog in the window', () => {
-  function Window({ open }: { open: boolean }) {
-    return (
-      <div className="editlet-window">
-        <header>
-          <button type="button">Minimize</button>
-        </header>
-        <div className="editlet-window__main">
-          <div className="editlet-window__body">
-            <Dialog open={open} onOpenChange={() => {}}>
-              <DialogContent>
-                <DialogTitle>Sign in again</DialogTitle>
-              </DialogContent>
-            </Dialog>
-          </div>
-          <div className="editlet-window__dialogs" data-editlet-dialogs="" />
-        </div>
-      </div>
-    );
-  }
-
-  it('opens in the dialog layer over the body: the body goes inert, the bar does not', () => {
-    const { container, rerender } = render(<Window open />);
-    const dialog = screen.getByRole('dialog', { name: 'Sign in again' });
-    const body = container.querySelector<HTMLElement>('.editlet-window__body')!;
-    expect(dialog.parentElement).toBe(container.querySelector('[data-editlet-dialogs]'));
-    expect(dialog.getAttribute('aria-modal')).toBeNull();
-    expect(body.inert).toBe(true);
-    expect(screen.getByRole('button', { name: 'Minimize' }).closest('[inert]')).toBeNull();
-
-    rerender(<Window open={false} />);
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(body.inert).toBe(false);
-  });
-
-  it('is a modal over the page without a window', () => {
-    render(
-      <Dialog open onOpenChange={() => {}}>
-        <DialogContent>
-          <DialogTitle>Alone</DialogTitle>
-        </DialogContent>
-      </Dialog>,
-    );
-    expect(screen.getByRole('dialog', { name: 'Alone' }).getAttribute('aria-modal')).toBe('true');
   });
 });
 
@@ -161,7 +32,7 @@ describe('Field', () => {
         <input id="title" />
       </Field>,
     );
-    expect(screen.getByText('*').className).toBe('editlet-field__required');
+    expect(screen.getByText('*').getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByRole('alert').textContent).toContain('Required');
     expect(screen.getByLabelText(/Title/)).toBeDefined();
     // The hint sits in the same label as the name, on the same line.
@@ -199,9 +70,7 @@ function renderSwitcher(onKeyDown = vi.fn(), disabled = false) {
       <SwitcherItem disabled={disabled} onClick={() => onClick('b')}>
         B
       </SwitcherItem>
-      <SwitcherItem icon onClick={() => onClick('c')}>
-        C
-      </SwitcherItem>
+      <SwitcherItem onClick={() => onClick('c')}>C</SwitcherItem>
     </Switcher>,
   );
   return { onClick, onKeyDown, tab: (name: string) => screen.getByRole('tab', { name }) };
@@ -210,12 +79,9 @@ function renderSwitcher(onKeyDown = vi.fn(), disabled = false) {
 describe('Switcher', () => {
   it('renders a tablist of buttons that mark the active one', () => {
     const { tab } = renderSwitcher();
-    expect(screen.getByRole('tablist', { name: 'Mode' }).className).toBe('editlet-switcher');
     expect(tab('A').getAttribute('aria-selected')).toBe('true');
-    expect(tab('A').dataset.state).toBe('active');
-    expect(tab('B').dataset.state).toBe('inactive');
+    expect(tab('B').getAttribute('aria-selected')).toBe('false');
     expect(tab('A').getAttribute('type')).toBe('button');
-    expect(tab('C').className).toBe('editlet-switcher__item editlet-switcher__item--icon');
   });
 
   it('moves focus and selection with the arrows, Home and End, wrapping around', () => {

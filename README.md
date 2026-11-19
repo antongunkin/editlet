@@ -132,7 +132,7 @@ Check content with `node node_modules/editlet/skills/editlet/scripts/validate.mj
 | `editlet/loader/protocol` | The `postMessage` protocol between page and admin |
 | `editlet/admin/dist/*` | The prebuilt admin app (static files) |
 
-Browsers: Chrome 125+, Edge 125+, Firefox 126+, Safari 17.5+.
+Browsers: Chrome 125+, Edge 125+, Firefox 128+, Safari 17.5+.
 
 Documentation: https://editlet.gunkin.dev/docs/introduction
 

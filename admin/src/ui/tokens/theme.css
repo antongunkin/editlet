@@ -1,0 +1,288 @@
+/* Generated from design/tokens.json by packages/editlet/admin/scripts/tokens.ts (npm run design:tokens). Do not edit. */
+
+:root,
+[data-editlet-theme='light'] {
+  --background: #F5F5F4;
+  --card: #FFFFFF;
+  --foreground: #262626;
+  --muted-foreground: #71717A;
+  --tray-muted-foreground: #52525B;
+  --subtle: #A1A1AA;
+  --primary: #262626;
+  --primary-foreground: #FFFFFF;
+  --muted: #2626260D;
+  --accent: #26262612;
+  --secondary: #2626260D;
+  --border: #26262612;
+  --input: #2626268C;
+  --ring: #737373;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --chart-1: #B45309;
+  --chart-2: #15803D;
+  --chart-3: #4F46E5;
+  --chart-5: #0284C7;
+  --tint-unsaved: #B453091A;
+  --tint-success: #15803D1A;
+  --tint-review: #4F46E51A;
+  --tint-branch: #0284C714;
+  --tint-danger: #DC26261A;
+  --tint-unsaved-foreground: #92400E;
+  --tint-success-foreground: #166534;
+  --tint-review-foreground: #3730A3;
+  --tint-danger-foreground: #991B1B;
+  --tint-branch-foreground: #075985;
+  --primary-hover: #404040;
+  --primary-active: #171717;
+  --muted-active: #2626261F;
+  --destructive-hover: #B91C1C;
+  --destructive-active: #991B1B;
+  --sunken: #FAFAF9;
+  --track: #E7E5E4;
+  --backdrop: #1C1917;
+  --overlay: #1C191766;
+  --grabber: #78716C;
+  --highlight: #FDE68A80;
+  --on-ink: #FFFFFF;
+  --on-ink-muted: #D4D4D8;
+  --scrim: #FAFAF9D9;
+  --chart-4: #E11D48;
+  --resize: #8B5CF6;
+  --elevation-card: 0 1px 2px 0 #0000000A, 0 12px 32px -16px #1C19172E;
+  --elevation-raised: 0 1px 2px 0 #0000000F, 0 4px 8px -4px #1C19171F;
+  --elevation-raised-hover: 0 1px 3px 0 #0000001F, 0 6px 12px -4px #1C191726;
+  --elevation-raised-pressed: 0 1px 1px 0 #0000000F;
+  --elevation-sunken: inset 0 1px 2px 0 #0000001A;
+  --elevation-modal: 0 -12px 32px 0 #1C191733;
+  --elevation-bottom-bar: 0 -1px 0 0 #1C191714, 0 -8px 24px -8px #1C19171F;
+  --elevation-sheet-up: 0 -8px 24px -8px #1C191733;
+  --elevation-window: 0 1px 2px 0 #0000000A, 0 16px 40px -16px #1C19172E;
+  --elevation-toast: 0 1px 2px 0 #0000000F, 0 4px 8px -4px #1C19171F, 0 12px 24px -8px #1C19172E;
+  --elevation-ink-small: 0 1px 2px 0 #18181B33, 0 4px 8px -4px #18181B4D;
+  --elevation-ink-inset: inset 0 1px 0 0 #FFFFFF26, inset 0 -1px 0 0 #0000004D;
+  --elevation-ink-pressed: 0 1px 1px 0 #18181B33;
+  --elevation-button-primary: inset 0 1px 0 0 #FFFFFF40, inset 0 -1px 0 0 #0000004D, 0 1px 2px 0 #18181B33, 0 8px 16px -8px #18181B66;
+  --elevation-button-primary-pressed: inset 0 1px 0 0 #FFFFFF26, inset 0 -1px 0 0 #0000004D, 0 1px 1px 0 #18181B33;
+  --elevation-button-danger: inset 0 1px 0 0 #FFFFFF40, inset 0 -1px 0 0 #0000004D, 0 1px 2px 0 #B91C1C33, 0 8px 16px -8px #B91C1C59;
+  --elevation-button-danger-pressed: inset 0 1px 0 0 #FFFFFF26, inset 0 -1px 0 0 #0000004D, 0 1px 1px 0 #B91C1C33;
+  --elevation-pill: 0 0 0 1px #1C19171A, 0 12px 32px -8px #1C191733;
+  --elevation-logo: 0 8px 16px -8px #18181B66;
+  --gradient-ink: linear-gradient(#3F3F46, #18181B);
+  --gradient-ink-hover: linear-gradient(#52525B, #27272A);
+  --gradient-danger: linear-gradient(#DC2626, #991B1B);
+  --gradient-danger-hover: linear-gradient(#DC2626, #B91C1C);
+  --gradient-sheet-edge: linear-gradient(#1C191700, #1C19173D);
+}
+
+[data-editlet-theme='dark'] {
+  --background: #0A0A0A;
+  --card: #171717;
+  --foreground: #F5F5F5;
+  --muted-foreground: #A1A1AA;
+  --tray-muted-foreground: #A1A1AA;
+  --subtle: #71717A;
+  --primary: #F5F5F5;
+  --primary-foreground: #171717;
+  --muted: #FAFAFA0F;
+  --accent: #FAFAFA1A;
+  --secondary: #FAFAFA12;
+  --border: #FAFAFA14;
+  --input: #FAFAFA66;
+  --ring: #A3A3A3;
+  --destructive: #F87171;
+  --destructive-foreground: #0A0A0A;
+  --chart-1: #FBBF24;
+  --chart-2: #4ADE80;
+  --chart-3: #818CF8;
+  --chart-5: #38BDF8;
+  --tint-unsaved: #FBBF241F;
+  --tint-success: #4ADE801F;
+  --tint-review: #818CF826;
+  --tint-branch: #38BDF81A;
+  --tint-danger: #F871711F;
+  --tint-unsaved-foreground: #FCD34D;
+  --tint-success-foreground: #86EFAC;
+  --tint-review-foreground: #C7D2FE;
+  --tint-danger-foreground: #FCA5A5;
+  --tint-branch-foreground: #BAE6FD;
+  --primary-hover: #E5E5E5;
+  --primary-active: #D4D4D4;
+  --muted-active: #FAFAFA24;
+  --destructive-hover: #FCA5A5;
+  --destructive-active: #FECACA;
+  --sunken: #1C1917;
+  --track: #292524;
+  --backdrop: #000000;
+  --overlay: #00000099;
+  --grabber: #A8A29E;
+  --highlight: #FBBF2433;
+  --on-ink: #FFFFFF;
+  --on-ink-muted: #D4D4D8;
+  --scrim: #0A0A0AD9;
+  --chart-4: #FB7185;
+  --resize: #A78BFA;
+  --elevation-card: inset 0 1px 0 0 #FFFFFF0F, 0 1px 2px 0 #00000066, 0 12px 32px -16px #00000099;
+  --elevation-raised: inset 0 1px 0 0 #FFFFFF14, 0 1px 2px 0 #00000080, 0 4px 8px -4px #00000066;
+  --elevation-raised-hover: inset 0 1px 0 0 #FFFFFF1A, 0 1px 3px 0 #00000099, 0 6px 12px -4px #00000080;
+  --elevation-raised-pressed: inset 0 1px 0 0 #FFFFFF0D, 0 1px 1px 0 #00000080;
+  --elevation-sunken: inset 0 1px 2px 0 #00000099;
+  --elevation-modal: inset 0 1px 0 0 #FFFFFF14, 0 -12px 32px 0 #000000B3;
+  --elevation-bottom-bar: 0 -1px 0 0 #FFFFFF14, 0 -8px 24px -8px #00000099;
+  --elevation-sheet-up: inset 0 1px 0 0 #FFFFFF14, 0 -8px 24px -8px #000000B3;
+  --elevation-window: 0 0 0 1px #FFFFFF1A, 0 1px 2px 0 #00000066, 0 16px 40px -16px #000000B3;
+  --elevation-toast: inset 0 1px 0 0 #FFFFFF14, 0 1px 2px 0 #00000080, 0 4px 8px -4px #00000066, 0 12px 24px -8px #00000099;
+  --elevation-ink-small: 0 1px 2px 0 #00000080, 0 4px 8px -4px #00000099;
+  --elevation-ink-inset: inset 0 1px 0 0 #FFFFFF26, inset 0 -1px 0 0 #0000004D;
+  --elevation-ink-pressed: 0 1px 1px 0 #00000080;
+  --elevation-button-primary: inset 0 1px 0 0 #FFFFFF33, inset 0 -1px 0 0 #00000066, 0 1px 2px 0 #00000080, 0 8px 16px -8px #000000B3;
+  --elevation-button-primary-pressed: inset 0 1px 0 0 #FFFFFF1F, inset 0 -1px 0 0 #00000066, 0 1px 1px 0 #00000080;
+  --elevation-button-danger: inset 0 1px 0 0 #FFFFFF40, inset 0 -1px 0 0 #0000004D, 0 1px 2px 0 #00000080, 0 8px 16px -8px #7F1D1D99;
+  --elevation-button-danger-pressed: inset 0 1px 0 0 #FFFFFF26, inset 0 -1px 0 0 #0000004D, 0 1px 1px 0 #00000080;
+  --elevation-pill: 0 0 0 1px #FFFFFF26, 0 12px 32px -8px #00000099;
+  --elevation-logo: 0 8px 16px -8px #000000B3;
+  --gradient-ink: linear-gradient(#52525B, #27272A);
+  --gradient-ink-hover: linear-gradient(#52525B, #3F3F46);
+  --gradient-danger: linear-gradient(#DC2626, #991B1B);
+  --gradient-danger-hover: linear-gradient(#DC2626, #B91C1C);
+  --gradient-sheet-edge: linear-gradient(#00000000, #00000066);
+}
+
+@theme {
+  --*: initial;
+  --spacing: 0.25rem;
+  --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-mono: ui-monospace, sfmono-regular, menlo, monaco, consolas, 'Liberation Mono', monospace;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(16 / 12);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(20 / 14);
+  --text-base: 1rem;
+  --text-base--line-height: calc(24 / 16);
+  --text-lg: 1.125rem;
+  --text-lg--line-height: calc(28 / 18);
+  --text-xl: 1.25rem;
+  --text-xl--line-height: calc(28 / 20);
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: calc(32 / 24);
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: calc(36 / 30);
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --radius-md: 0.375rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 2rem;
+  --container-wide: 36rem;
+  --shadow-card: var(--elevation-card);
+  --shadow-raised: var(--elevation-raised);
+  --shadow-raised-hover: var(--elevation-raised-hover);
+  --shadow-raised-pressed: var(--elevation-raised-pressed);
+  --shadow-sunken: var(--elevation-sunken);
+  --shadow-modal: var(--elevation-modal);
+  --shadow-bottom-bar: var(--elevation-bottom-bar);
+  --shadow-sheet-up: var(--elevation-sheet-up);
+  --shadow-window: var(--elevation-window);
+  --shadow-toast: var(--elevation-toast);
+  --shadow-ink-small: var(--elevation-ink-small);
+  --shadow-ink-inset: var(--elevation-ink-inset);
+  --shadow-ink-pressed: var(--elevation-ink-pressed);
+  --shadow-button-primary: var(--elevation-button-primary);
+  --shadow-button-primary-pressed: var(--elevation-button-primary-pressed);
+  --shadow-button-danger: var(--elevation-button-danger);
+  --shadow-button-danger-pressed: var(--elevation-button-danger-pressed);
+  --shadow-pill: var(--elevation-pill);
+  --shadow-logo: var(--elevation-logo);
+  --ease-modal-in: cubic-bezier(.22,1,.36,1);
+  --duration-modal-in: 360ms;
+  --ease-modal-out: ease-in;
+  --duration-modal-out: 240ms;
+  --ease-scrim: ease;
+  --duration-scrim: 200ms;
+  --ease-press: ease-out;
+  --duration-press: 100ms;
+  --ease-release: cubic-bezier(.34,1.56,.64,1);
+  --duration-release: 220ms;
+  --ease-tab: cubic-bezier(.2,.8,.2,1);
+  --duration-tab: 200ms;
+  --ease-hover: ease;
+  --duration-hover: 150ms;
+  --ease-saved: ease-out;
+  --duration-saved: 240ms;
+  --ease-resize: ease-out;
+  --duration-resize: 150ms;
+  --ease-reduced: linear;
+  --duration-reduced: 120ms;
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-tray-muted-foreground: var(--tray-muted-foreground);
+  --color-subtle: var(--subtle);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-secondary: var(--secondary);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-5: var(--chart-5);
+  --color-tint-unsaved: var(--tint-unsaved);
+  --color-tint-success: var(--tint-success);
+  --color-tint-review: var(--tint-review);
+  --color-tint-branch: var(--tint-branch);
+  --color-tint-danger: var(--tint-danger);
+  --color-tint-unsaved-foreground: var(--tint-unsaved-foreground);
+  --color-tint-success-foreground: var(--tint-success-foreground);
+  --color-tint-review-foreground: var(--tint-review-foreground);
+  --color-tint-danger-foreground: var(--tint-danger-foreground);
+  --color-tint-branch-foreground: var(--tint-branch-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-muted-active: var(--muted-active);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-destructive-active: var(--destructive-active);
+  --color-sunken: var(--sunken);
+  --color-track: var(--track);
+  --color-backdrop: var(--backdrop);
+  --color-overlay: var(--overlay);
+  --color-grabber: var(--grabber);
+  --color-highlight: var(--highlight);
+  --color-on-ink: var(--on-ink);
+  --color-on-ink-muted: var(--on-ink-muted);
+  --color-scrim: var(--scrim);
+  --color-chart-4: var(--chart-4);
+  --color-resize: var(--resize);
+}
+
+@utility bg-gradient-ink {
+  background-image: var(--gradient-ink);
+}
+
+@utility bg-gradient-ink-hover {
+  background-image: var(--gradient-ink-hover);
+}
+
+@utility bg-gradient-danger {
+  background-image: var(--gradient-danger);
+}
+
+@utility bg-gradient-danger-hover {
+  background-image: var(--gradient-danger-hover);
+}
+
+@utility bg-gradient-sheet-edge {
+  background-image: var(--gradient-sheet-edge);
+}

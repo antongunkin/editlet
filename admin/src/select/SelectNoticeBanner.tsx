@@ -1,6 +1,6 @@
 import type { SelectNotice } from './useApplySelect';
 
-import { Button, Icon } from '../ui';
+import { Banner, Button } from '../ui';
 
 /**
  * The result of select-to-edit on the entry screen: found is only announced (the selection itself shows it), not
@@ -8,19 +8,11 @@ import { Button, Icon } from '../ui';
  */
 export function SelectNoticeBanner({ notice, dismiss }: { notice: SelectNotice | null; dismiss(): void }) {
   if (!notice) return null;
-  if (notice.found)
-    return (
-      <p role="status" className="editlet-sr-only">
-        {notice.text}
-      </p>
-    );
+  if (notice.found) return <output className="sr-only">{notice.text}</output>;
   return (
-    <div className="editlet-card editlet-card--banner editlet-entry__issues" role="status">
-      <Icon.Alert />
-      <span className="editlet-u-flex-1">{notice.text}</span>
-      <Button variant="outline" size="sm" onClick={dismiss}>
-        OK
-      </Button>
-    </div>
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- Banner is a component; `role` sets its live region
+    <Banner tone="unsaved" role="status" action={<Button onClick={dismiss}>OK</Button>}>
+      {notice.text}
+    </Banner>
   );
 }

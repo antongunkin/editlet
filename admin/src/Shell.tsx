@@ -2,22 +2,23 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { invalidateFiles, useFiles, useSchema, type SchemaData } from './data/queries';
-import { BranchScreen } from './github/BranchScreen';
+import { BranchScreen, BranchUnavailableScreen } from './github/BranchScreen';
 import { errorText } from './github/errors';
 import { useWorkspace, type Workspace } from './github/workspace';
 import { MediaScreen } from './media/MediaScreen';
 import { ContentModel } from './model/ContentModel';
 import { usePreviewNotice } from './preview/PreviewProvider';
 import type { Route } from './route';
-import { BrokenSchema, issueText, SchemaIssues } from './screens/BrokenSchema';
+import { AllContent } from './screens/AllContent';
+import { BrokenSchema, BrokenSchemaScreen, issueText } from './screens/BrokenSchema';
 import { Collection } from './screens/Collection';
 import { Entry } from './screens/EntryScreen';
+import { Loading } from './screens/GateLoading';
 import { Home } from './screens/Home';
 import { NotFound } from './screens/NotFound';
-import { Placeholder } from './screens/Placeholder';
 import { SelectProvider } from './select/SelectProvider';
-import { Button } from './ui/Button';
-import { Icon } from './ui/Icon';
+import { Banner, BannerRegion } from './ui/primitives/banner';
+import { Button } from './ui/primitives/button';
 import { useBridge, useRoute } from './useRoute';
 import { WindowFrame } from './window/WindowFrame';
 
@@ -31,6 +32,8 @@ function Screen({ route, schema }: { route: Route; schema: SchemaData }) {
   switch (route.kind) {
     case 'home':
       return <Home schema={schema} />;
+    case 'content':
+      return <AllContent schema={schema} />;
     case 'collection': {
       const c = collections[route.collection];
       if (!c || !Object.hasOwn(collections, route.collection)) return <NotFound />;
@@ -50,7 +53,7 @@ function Screen({ route, schema }: { route: Route; schema: SchemaData }) {
       return <MediaScreen schema={schema} />;
     case 'branch':
       if (workspace) return <BranchScreen name={route.name} />;
-      return <Placeholder title="Branch preview" text="Branch preview is available in production mode" />;
+      return <BranchUnavailableScreen title="Branch preview" text="Branch preview is available in production mode." />;
     case 'unknown':
       return <NotFound />;
   }
@@ -72,30 +75,34 @@ function RefreshBanner({
   schemaError: Error | null;
   onRetry?: () => void;
 }) {
-  if (!filesError && !schemaError) return null;
   return (
-    <div className="editlet-card editlet-card--banner editlet-shell__banner" role="alert">
-      <Icon.Alert />
-      {filesError ? (
-        <>
-          <span className="editlet-u-flex-1">{filesError}</span>
-          {onRetry ? (
-            <Button variant="outline" size="sm" onClick={onRetry}>
-              Try again
-            </Button>
-          ) : null}
-        </>
-      ) : (
-        <div className="editlet-u-flex-1 editlet-u-stack editlet-u-gap-1">
-          <strong>The schema has errors</strong>
-          <ul className="editlet-u-stack editlet-u-gap-1">
-            {issuesOf(schemaError!).map((issue, i) => (
-              <li key={i}>{issueText(issue)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+    <BannerRegion assertive className="not-empty:mx-4 not-empty:mt-3">
+      {filesError || schemaError ? (
+        <Banner
+          tone="danger"
+          action={
+            filesError && onRetry ? (
+              <Button size="md" onClick={onRetry}>
+                Try again
+              </Button>
+            ) : undefined
+          }
+        >
+          {filesError ? (
+            filesError
+          ) : (
+            <div className="flex flex-col gap-1">
+              <strong>The schema has errors</strong>
+              <ul className="flex flex-col gap-1">
+                {issuesOf(schemaError!).map((issue, i) => (
+                  <li key={i}>{issueText(issue)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Banner>
+      ) : null}
+    </BannerRegion>
   );
 }
 
@@ -109,8 +116,11 @@ function filesErrorText(error: Error, workspace: Workspace | null): string {
   return `Can't load from GitHub: ${errorText(error, { repo: `${workspace.config.owner}/${workspace.config.repo}` })}`;
 }
 
-/** The window chrome around the connection and branch banners and the routed screen. */
-export function Shell() {
+/**
+ * The window chrome around the connection and branch banners and the routed screen. `overlay`: a modal that lives
+ * inside the window's sheets (*Sign in again*, GitHubApp.tsx), so it pushes the screen back like the others.
+ */
+export function Shell({ overlay }: { overlay?: ReactNode } = {}) {
   const { route } = useRoute();
   const { status } = useBridge();
   const workspace = useWorkspace();
@@ -128,54 +138,30 @@ export function Shell() {
   // Keyed by the workspace's switches: a branch switch replaces the open screen (and its form) with the new branch's.
   if (schema.data) main = <Screen key={workspace?.switches ?? 0} route={route} schema={schema.data} />;
   else if (schema.error && schema.error !== files.error)
-    main = (
-      <section className="editlet-screen">
-        <SchemaIssues issues={issuesOf(schema.error)} />
-      </section>
-    );
-  else if (!filesError)
-    main = (
-      <p className="editlet-u-text-muted" role="status">
-        Loading…
-      </p>
-    );
+    main = <BrokenSchemaScreen issues={issuesOf(schema.error)} status />;
+  else main = <Loading loading={!filesError} status />;
 
   const banners = (
     <>
-      {status === 'disconnected' ? (
-        <div className="editlet-card editlet-card--banner editlet-shell__banner" role="status">
-          <Icon.Alert />
-          <span className="editlet-u-flex-1">Not connected to the site</span>
-        </div>
-      ) : null}
-      {workspace?.fallbackNotice ? (
-        <div className="editlet-card editlet-card--banner editlet-shell__banner" role="status">
-          <Icon.Alert />
-          <span className="editlet-u-flex-1">{workspace.fallbackNotice}</span>
-        </div>
-      ) : null}
-      {previewNotice ? (
-        <div className="editlet-card editlet-card--banner editlet-shell__banner" role="status">
-          <Icon.Alert />
-          <span className="editlet-u-flex-1">{previewNotice}</span>
-        </div>
-      ) : null}
-      {schema.data || workspace ? (
-        <RefreshBanner
-          filesError={filesError ? filesErrorText(filesError, workspace) : null}
-          schemaError={schema.refreshError}
-          onRetry={workspace ? () => void invalidateFiles(queryClient) : undefined}
-        />
-      ) : null}
+      <BannerRegion className="not-empty:mx-4 not-empty:mt-3">
+        {status === 'disconnected' ? <Banner tone="danger">Not connected to the site</Banner> : null}
+        {workspace?.fallbackNotice ? <Banner tone="branch">{workspace.fallbackNotice}</Banner> : null}
+        {previewNotice ? <Banner tone="branch">{previewNotice}</Banner> : null}
+      </BannerRegion>
+      <RefreshBanner
+        filesError={(schema.data || workspace) && filesError ? filesErrorText(filesError, workspace) : null}
+        schemaError={schema.data || workspace ? schema.refreshError : null}
+        onRetry={workspace ? () => void invalidateFiles(queryClient) : undefined}
+      />
     </>
   );
 
-  // The window chrome (in the loader's iframe) holds the navigation, the branch and the account.
+  // The window (in the loader's iframe); each screen draws its own header and bottom bar, with the banners.
   return (
     <SelectProvider>
-      <WindowFrame schema={schema.data} route={route}>
-        {banners}
-        <main className="editlet-page-content">{main}</main>
+      <WindowFrame banners={banners}>
+        <main>{main}</main>
+        {overlay}
       </WindowFrame>
     </SelectProvider>
   );

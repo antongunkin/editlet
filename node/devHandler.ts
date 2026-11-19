@@ -8,13 +8,26 @@ import { z } from 'zod';
 
 import { DEFAULT_SCHEMA_PATH, listFiles, loadProjectSchema } from './fs';
 
-import { DEV_API_BASE, type DevErrorResponse, type DevFilesResponse, type DevGitResponse } from '../core/devApi';
+import {
+  DEV_API_BASE,
+  type DevErrorResponse,
+  type DevFilesResponse,
+  type DevGitResponse,
+  type DevVersionsResponse,
+} from '../core/devApi';
 import { decodeUtf8 } from '../core/entryFile';
 import { EditletError, type Issue } from '../core/issues';
 import { isHiddenContentPath } from '../core/paths';
 import { parseSchemaText, type Schema } from '../core/schema';
 import { gitBlobSha } from '../core/sha';
-import type { FileChange, FileEvent, FileHistory } from '../core/source';
+import {
+  MAX_FILE_VERSIONS,
+  versionLimit,
+  type FileChange,
+  type FileEvent,
+  type FileHistory,
+  type FileVersion,
+} from '../core/source';
 import { isWritablePath, validateChanges, validateCommit, type ChangeContext } from '../core/writes';
 import { fromBase64 } from '../github/base64';
 
@@ -23,6 +36,14 @@ const FILE_ROUTE = `${DEV_API_BASE}/file`;
 const COMMIT_ROUTE = `${DEV_API_BASE}/commit`;
 const HISTORY_ROUTE = `${DEV_API_BASE}/history`;
 const GIT_ROUTE = `${DEV_API_BASE}/git`;
+const VERSIONS_ROUTE = `${DEV_API_BASE}/versions`;
+const VERSION_ROUTE = `${DEV_API_BASE}/version`;
+
+/** A full commit id (SHA-1 or SHA-256): never a ref name, an abbreviation or an option. */
+const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+/** A control character: a newline in a path would shift the `cat-file --batch-check` lines. */
+// oxlint-disable-next-line no-control-regex -- the control characters are what it finds
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
 const execFileAsync = promisify(execFile);
 
@@ -65,7 +86,7 @@ function contentType(path: string): string {
 
 function json(
   status: number,
-  body: DevFilesResponse | DevGitResponse | FileHistory | DevErrorResponse,
+  body: DevFilesResponse | DevGitResponse | FileHistory | DevVersionsResponse | DevErrorResponse,
   headers: Record<string, string> = {},
 ) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
@@ -339,12 +360,11 @@ export function createDevHandler(opts: {
 
   /** The checkout's branch and the number of uncommitted files under `contentDir`; empty when git is not usable. */
   async function gitRoute(): Promise<Response> {
-    const git = async (...args: string[]) => (await execFileAsync('git', ['-C', root, ...args])).stdout;
     let body: DevGitResponse = { branch: null, changes: 0 };
     try {
-      const branch = (await git('branch', '--show-current')).trim();
+      const branch = (await git(['branch', '--show-current'])).trim();
       const { schema } = await currentSchema();
-      const status = await git('status', '--porcelain', '-uall', '--', schema?.contentDir ?? '.');
+      const status = await git(['status', '--porcelain', '-uall', '--', schema?.contentDir ?? '.']);
       body = { branch: branch === '' ? null : branch, changes: status.split('\n').filter(Boolean).length };
     } catch {
       // not a git checkout, or no git binary
@@ -371,6 +391,82 @@ export function createDevHandler(opts: {
       // not a git checkout, or no git binary
     }
     return json(200, body);
+  }
+
+  /** Runs git in `root` (pathspecs literal: a `*` in a file name is not a glob). */
+  function git(args: string[], input?: string): Promise<string> {
+    const run = execFileAsync('git', ['-C', root, '--literal-pathspecs', ...args], { maxBuffer: 1 << 24 });
+    if (input !== undefined) run.child.stdin?.end(input);
+    return run.then((r) => r.stdout);
+  }
+
+  /** `git log` of one file, newest first, with the file's blob sha after each commit; `[]` when git is not usable. */
+  async function versionsRoute(path: string, limit: number): Promise<Response> {
+    let versions: FileVersion[] = [];
+    try {
+      const out = await git([
+        'log',
+        // A user's `log.follow` or `log.showSignature` would follow renames or print gpg lines among the commits.
+        '--no-follow',
+        '--no-show-signature',
+        `--max-count=${limit}`,
+        '--format=%H%x1f%an%x1f%aI%x1f%s',
+        '--',
+        path,
+      ]);
+      const commits = out
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const [commit = '', name = '', date = '', message = ''] = line.split('\x1f');
+          return { commit, actor: { name }, date, message };
+        });
+      if (commits.length > 0) {
+        // `git log` paths are relative to `root`; `<commit>:<path>` is relative to the top of the repository.
+        const prefix = (await git(['rev-parse', '--show-prefix'])).trim();
+        const objects = (
+          await git(['cat-file', '--batch-check'], commits.map((c) => `${c.commit}:${prefix}${path}\n`).join(''))
+        )
+          .split('\n')
+          .filter(Boolean);
+        versions = commits.map((c, i) => {
+          const [sha = '', type] = (objects[i] ?? '').split(' ');
+          return { ...c, sha: type === 'blob' ? sha : null };
+        });
+      }
+    } catch {
+      // not a git checkout, or no git binary
+    }
+    return json(200, { versions });
+  }
+
+  /** The file as `commit` left it; 404 when it is not a file in that commit (or git is not usable). */
+  async function versionRoute(path: string, commit: string): Promise<Response> {
+    try {
+      const prefix = (await git(['rev-parse', '--show-prefix'])).trim();
+      const { stdout } = await execFileAsync('git', ['-C', root, 'cat-file', 'blob', `${commit}:${prefix}${path}`], {
+        encoding: 'buffer',
+        maxBuffer: 1 << 26,
+      });
+      return new Response(new Uint8Array(stdout), {
+        status: 200,
+        headers: { 'Content-Type': contentType(path), ...FILE_HEADERS },
+      });
+    } catch {
+      return fail(404, `Not found in ${commit}: ${path}`);
+    }
+  }
+
+  /** The path of a /versions or /version request, or the error response. */
+  async function versionPath(url: URL): Promise<string | Response> {
+    const path = url.searchParams.get('path');
+    if (path === null || path === '') return fail(400, 'Missing "path" query parameter');
+    if (CONTROL.test(path)) return fail(400, 'Path not readable');
+    if (path === schemaPath) return path;
+    const { schema, issues } = await currentSchema();
+    if (schema === null) return json(500, { issues });
+    if (!isWritablePath(schema, schemaPath, path)) return fail(400, 'Path not readable');
+    return path;
   }
 
   async function handle(req: Request): Promise<Response> {
@@ -410,6 +506,23 @@ export function createDevHandler(opts: {
       if (path === null || path === '') return fail(400, 'Missing "path" query parameter');
       if (path.startsWith('/') || path.split('/').includes('..')) return fail(400, 'Path not readable');
       return historyRoute(path);
+    }
+
+    if (url.pathname === VERSIONS_ROUTE || url.pathname === VERSION_ROUTE) {
+      if (req.method !== 'GET') return fail(405, 'Method not allowed', { Allow: 'GET' });
+      const path = await versionPath(url);
+      if (typeof path !== 'string') return path;
+      if (url.pathname === VERSIONS_ROUTE) {
+        const raw = url.searchParams.get('limit');
+        const limit = raw === null ? undefined : Number(raw);
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > MAX_FILE_VERSIONS)) {
+          return fail(400, `Bad "limit": an integer from 1 to ${MAX_FILE_VERSIONS}`);
+        }
+        return versionsRoute(path, versionLimit(limit));
+      }
+      const commit = url.searchParams.get('commit') ?? '';
+      if (!COMMIT_ID.test(commit)) return fail(400, 'Bad "commit": a full commit id');
+      return versionRoute(path, commit);
     }
 
     if (url.pathname === COMMIT_ROUTE) {

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { describedBy, fieldProps, invalid } from './shared';
 import type { WidgetProps } from './types';
 
-import { cn, Field, Icon } from '../ui';
+import { Field, Icon, IconButton, Input } from '../ui';
 
 /** List of strings: type a value and press Enter (or blur) to add a row; × removes a row. */
 export function StringListField({ name, field, value, onChange, onBlur, error }: WidgetProps<string[]>) {
@@ -18,9 +18,9 @@ export function StringListField({ name, field, value, onChange, onBlur, error }:
 
   return (
     <Field {...fieldProps(field, error, name)} htmlFor={name}>
-      <input
+      <Input
         id={name}
-        className={cn('editlet-ff-list__add-input', invalid(error) && 'editlet-ff-list__add-input--error')}
+        className="mb-2"
         type="text"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -41,20 +41,16 @@ export function StringListField({ name, field, value, onChange, onBlur, error }:
         aria-required={field.required || undefined}
       />
       {value.length > 0 ? (
-        <ul className="editlet-ff-list__items">
+        <ul className="mb-2 flex flex-col gap-1.5">
           {value.map((item, i) => (
             // oxlint-disable-next-line no-array-index-key -- rows may repeat; position is the identity
-            <li key={i} className="editlet-ff-list__item">
-              <span className="editlet-ff-list__item-value">{item}</span>
-              <span className="editlet-ff-list__item-sep" aria-hidden />
-              <button
-                type="button"
+            <li key={i} className="flex items-center rounded-xl bg-muted text-base">
+              <span className="min-w-0 flex-1 truncate px-3 py-2">{item}</span>
+              <IconButton
+                label={`Remove ${item}`}
                 onClick={() => onChange(value.filter((_, j) => j !== i))}
-                className="editlet-ff-list__item-remove"
-                aria-label={`Remove ${item}`}
-              >
-                <Icon.X size={14} />
-              </button>
+                icon={<Icon name="x" size={16} />}
+              />
             </li>
           ))}
         </ul>

@@ -1,6 +1,6 @@
 {
   "name": "editlet",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.0",
   "description": "Git-based, file-based CMS for Next.js and Astro: Markdown content with YAML frontmatter and a schema in your repo, an editor overlay on your own site, every edit a commit.",
   "keywords": [
     "cms",
@@ -31,7 +31,7 @@
   "browserslist": [
     "chrome 125",
     "edge 125",
-    "firefox 126",
+    "firefox 128",
     "safari 17.5"
   ],
   "files": [
@@ -136,6 +136,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
+    "@base-ui/react": "^1.9.0",
     "@milkdown/core": "^7.23.0",
     "@milkdown/ctx": "^7.23.0",
     "@milkdown/plugin-clipboard": "^7.23.0",
@@ -146,6 +147,7 @@
     "@milkdown/transformer": "^7.23.0",
     "@milkdown/utils": "^7.23.0",
     "@size-limit/preset-small-lib": "^14.3.0",
+    "@tailwindcss/vite": "^4.3.5",
     "@tanstack/react-form": "^1.33.5",
     "@tanstack/react-query": "^5.107.1",
     "@types/node": "^26.6.6",
@@ -154,6 +156,8 @@
     "@vitejs/plugin-react": "^6.3.0",
     "approx-string-match": "^2.0.3",
     "astro": "^7.4.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "diff": "^9.0.0",
     "esbuild": "^0.28.2",
     "fake-indexeddb": "^6.2.8",
@@ -166,7 +170,10 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "size-limit": "^14.3.0",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.5",
     "tsdown": "0.23.7",
+    "tw-animate-css": "^1.4.0",
     "typescript": "~7.0.2",
     "vite": "^8.3.8"
   },

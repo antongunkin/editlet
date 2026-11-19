@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { issuesByField, relativeSrc, uniqueAssetPath } from './changes';
+import { issuesByField, relativeSrc, requiredFieldKeys, uniqueAssetPath } from './changes';
 import { schema } from './testSchema';
 
 import { resolveAssetPath } from '../../../core/paths';
@@ -49,5 +49,18 @@ describe('relativeSrc', () => {
       ['cms/content/home/index.md', 'cms/content/x.png'],
     ];
     for (const [entry, asset] of cases) expect(resolveAssetPath(schema, entry, relativeSrc(entry, asset))).toBe(asset);
+  });
+});
+
+describe('requiredFieldKeys', () => {
+  it('names the rows that still miss a required value, nested ones under their row', () => {
+    const issues = [
+      { path: 'title', message: 'Required' },
+      { path: 'seo.title', message: 'Required' },
+      { path: 'content.2.text', message: 'Required' },
+      { path: 'tags', message: 'Too many' },
+      { path: '', message: 'Required' },
+    ];
+    expect([...requiredFieldKeys(issues)].sort()).toEqual(['content', 'seo', 'title']);
   });
 });

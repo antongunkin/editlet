@@ -1,231 +1,267 @@
 import type { ReactNode } from 'react';
 
-import { CopyButton } from './CopyButton';
-import {
-  fieldRows,
-  incoming,
-  outgoing,
-  type ChatPrompt,
-  type FieldMark,
-  type ModelChanges,
-  type ReferenceEdge,
-} from './model';
+import type { ChatPrompt, FieldMark, FieldRow } from './model';
+import type { ProblemFile } from './problems';
 
-import type { Schema } from '../../../core/schema';
+import type { Issue } from '../../../core/issues';
 import { RouteLink } from '../RouteLink';
-import { Icon } from '../ui/Icon';
+import { issueText } from '../screens/BrokenSchema';
+import { Card } from '../ui/parts/card';
+import { PromptRow, Row } from '../ui/parts/rows';
+import { Sheet } from '../ui/parts/sheet';
+import { Badge } from '../ui/primitives/badge';
 
-export const sectionId = (key: string) => `editlet-model-c-${key}`;
+// The parts of the content model screen (FigCraft *Content model*, *· collection*, *· Ask Claude Code*, *· problems*):
+// a collection's row, the problems card, one field of a collection, and the two sheets. Data in, nodes out; the
+// container (ContentModel.tsx) has the schema, the entries and the clipboard.
 
-/** Opens a collection's block, scrolls it into view and moves focus to its summary. */
-function jumpTo(key: string) {
-  const block = document.getElementById(sectionId(key));
-  const details = block?.querySelector('details');
-  if (details) details.open = true;
-  block?.scrollIntoView({ block: 'start' });
-  details?.querySelector('summary')?.focus({ preventScroll: true });
-}
-
-function JumpLink({ to, children }: { to: string; children: ReactNode }) {
-  return (
-    <button type="button" className="editlet-model__jump" onClick={() => jumpTo(to)}>
-      {children}
-    </button>
-  );
-}
-
-function Badge({ children, mark }: { children: ReactNode; mark?: FieldMark }) {
-  return (
-    <span className={`editlet-chip editlet-model__badge${mark ? ` editlet-model__badge--${mark}` : ''}`}>
-      {children}
-    </span>
-  );
-}
+export const MARK_TONE = { new: 'success', changed: 'unsaved' } as const;
+export const MARK_TEXT = { new: 'New', changed: 'Changed' } as const;
 
 const BADGE_TEXT = { title: 'Title', slugSource: 'Slug source', body: 'Body' } as const;
 
-/** Copyable prompts: a title, the prompt itself (two lines at most; the whole text is copied) and Copy. */
-export function PromptList({ prompts, idPrefix }: { prompts: ChatPrompt[]; idPrefix: string }) {
+/** `post · 9 entries · 14 fields`: the line under a collection's name. */
+export function collectionLine(key: string, singleton: boolean, count: number | undefined, fields: number): string {
+  const parts = [key];
+  if (singleton) {
+    if (count === 0) parts.push('index.md missing');
+  } else if (count !== undefined) {
+    parts.push(count === 1 ? '1 entry' : `${count} entries`);
+  }
+  parts.push(fields === 1 ? '1 field' : `${fields} fields`);
+  return parts.join(' · ');
+}
+
+export function SectionTitle({ children }: { children: ReactNode }) {
+  return <h2 className="m-0 px-4 pb-2 text-sm font-medium text-tray-muted-foreground">{children}</h2>;
+}
+
+/** One collection of the list: its name, the line under it, *Singleton* and the mark of a change. Opens its sheet. */
+export function CollectionRow({
+  label,
+  line,
+  singleton,
+  mark,
+  onOpen,
+}: {
+  label: string;
+  line: string;
+  singleton: boolean;
+  mark?: FieldMark;
+  onOpen: () => void;
+}) {
   return (
-    <ul className="editlet-model__prompts">
-      {prompts.map((p) => {
-        const id = `${idPrefix}-${p.id}`;
-        return (
-          <li key={p.id} className="editlet-model__prompt">
-            <div className="editlet-model__prompt-text-area">
-              <strong id={id}>{p.title}</strong>
-              <span className="editlet-model__prompt-text" title={p.text}>
-                {p.text}
-              </span>
-            </div>
-            <CopyButton text={p.text} describedBy={id} />
-          </li>
-        );
-      })}
-    </ul>
+    <Row
+      title={label}
+      sub={line}
+      onClick={onOpen}
+      trail={
+        singleton || mark ? (
+          <span className="flex gap-1">
+            {singleton ? <Badge>Singleton</Badge> : null}
+            {mark ? <Badge tone={MARK_TONE[mark]}>{MARK_TEXT[mark]}</Badge> : null}
+          </span>
+        ) : undefined
+      }
+    />
   );
 }
 
-function ReferenceBlock({
-  out,
-  inc,
-  label,
-}: {
-  out: ReferenceEdge[];
-  inc: ReferenceEdge[];
-  label: (key: string) => string;
-}) {
-  if (out.length === 0 && inc.length === 0) return null;
+const issueLine = (issue: Issue) => (issue.path ? `${issue.path} — ${issue.message}` : issue.message);
+
+/**
+ * What is wrong (FigCraft *Content model · problems*): the schema file that has errors (the last valid version is
+ * shown), and each entry file that fails the schema, with a link to it and its issues.
+ */
+export function ProblemsCard({ schemaIssues, problems }: { schemaIssues: Issue[] | null; problems: ProblemFile[] }) {
   return (
-    <div className="editlet-model__refs">
-      {out.length > 0 ? (
-        <div>
-          <h4 className="editlet-model__subheading">References →</h4>
-          <ul>
-            {out.map((e) => (
-              <li key={`${e.field}>${e.to}`}>
-                <span className="editlet-u-mono">{e.field}</span> → <JumpLink to={e.to}>{label(e.to)}</JumpLink> (
-                {e.many ? 'many' : 'one'})
-              </li>
+    <section
+      aria-label="Problems"
+      className="flex flex-col gap-4 rounded-2xl bg-tint-danger p-4 text-sm text-tint-danger-foreground"
+    >
+      {schemaIssues ? (
+        <div className="flex flex-col gap-2">
+          <strong className="font-medium">The schema file has errors. Showing the last valid version.</strong>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0 break-words">
+            {schemaIssues.map((issue, i) => (
+              <li key={i}>{issueText(issue)}</li>
             ))}
           </ul>
         </div>
       ) : null}
-      {inc.length > 0 ? (
-        <div>
-          <h4 className="editlet-model__subheading">Referenced by ←</h4>
-          <ul>
-            {inc.map((e) => (
-              <li key={`${e.from}.${e.field}`}>
-                <JumpLink to={e.from}>{label(e.from)}</JumpLink>
-                <span className="editlet-u-mono">.{e.field}</span> ({e.many ? 'many' : 'one'})
-              </li>
+      {problems.map((p) => (
+        <div key={p.file} className="flex flex-col gap-2">
+          {p.entry ? (
+            <RouteLink
+              to={{ kind: 'entry', collection: p.entry.collection, slug: p.entry.slug }}
+              className="inline-flex min-h-11 items-center self-start rounded-md font-mono text-sm font-medium break-all underline outline-none focused:outline-2 focused:outline-offset-2 focused:outline-ring"
+            >
+              {p.file}
+            </RouteLink>
+          ) : (
+            <span className="font-mono text-sm font-medium break-all">{p.file}</span>
+          )}
+          <ul className="m-0 flex list-none flex-col gap-1 p-0 break-words">
+            {p.issues.map((issue, i) => (
+              <li key={i}>{issueLine(issue)}</li>
             ))}
           </ul>
         </div>
-      ) : null}
-    </div>
+      ))}
+    </section>
   );
+}
+
+/** What the line under a field says: its key, its type and where it points, then what it needs. */
+export function fieldLine(row: FieldRow): string {
+  const type = row.targets.length > 0 ? `${row.type} → ${row.targets.join(', ')}` : row.type;
+  return [row.key, type, row.many ? 'many' : null, row.required ? 'Required' : null, ...row.details]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
+}
+
+/** One field of a collection (FigCraft `def_row`): read-only, so a plain row with no chevron. */
+export function FieldDefRow({ row, mark }: { row: FieldRow; mark?: FieldMark }) {
+  return (
+    <li className="flex items-start gap-3 px-4 py-3">
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="text-base font-medium break-words">{row.label}</span>
+        <span className="text-sm break-words text-muted-foreground">{fieldLine(row)}</span>
+        {row.hint ? <span className="text-sm break-words text-muted-foreground">{row.hint}</span> : null}
+      </span>
+      {row.badges.length > 0 || mark ? (
+        <span className="flex flex-wrap justify-end gap-1">
+          {row.badges.map((b) => (
+            <Badge key={b}>{BADGE_TEXT[b]}</Badge>
+          ))}
+          {mark ? <Badge tone={MARK_TONE[mark]}>{MARK_TEXT[mark]}</Badge> : null}
+        </span>
+      ) : null}
+    </li>
+  );
+}
+
+export interface ReferencedBy {
+  from: string;
+  label: string;
+  field: string;
+  many: boolean;
 }
 
 /**
- * One collection as a collapsed block, like an FAQ entry. The summary: label, key, Singleton / New / Changed and the
- * counts. Open: where its files live, its fields, its references, and prompts to change it. A block whose collection
- * changed while the screen is open opens by itself.
+ * One collection in a sheet (FigCraft *Content model · collection*): its fields, who points at it, a way to change it
+ * with the coding agent, and the CTA that opens its entries (`cta`, in the bar). `children`: the sheet it opens.
  */
-export function CollectionBlock({
-  schema,
-  collectionKey,
-  edges,
-  changes,
-  count,
-  prompts,
+export function CollectionSheet({
+  open,
+  onOpenChange,
+  title,
+  sub,
+  rows,
+  marks,
+  references,
+  referencedBy,
+  onOpenOther,
+  askLabel,
+  onAsk,
+  bar,
+  children,
 }: {
-  schema: Schema;
-  collectionKey: string;
-  edges: ReferenceEdge[];
-  changes: ModelChanges | null;
-  /** Entry count; `undefined` while the file list loads. */
-  count: number | undefined;
-  prompts: ChatPrompt[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  sub: string;
+  rows: FieldRow[];
+  marks?: Map<string, FieldMark>;
+  /** The collections this one points at, one row per reference field and target. */
+  references?: ReferencedBy[];
+  referencedBy: ReferencedBy[];
+  /** Another collection (a row of *References* or *Referenced by*): the sheet shows it instead. */
+  onOpenOther: (key: string) => void;
+  askLabel: string;
+  onAsk: () => void;
+  bar?: ReactNode;
+  children?: ReactNode;
 }) {
-  const collection = schema.collections[collectionKey]!;
-  const mark = changes?.collections.get(collectionKey);
-  const fieldMarks = changes?.fields.get(collectionKey);
-  const id = sectionId(collectionKey);
-  const titleId = `${id}-title`;
-  const label = (key: string) => schema.collections[key]?.label ?? key;
-  const rows = fieldRows(collection);
-  const counts = [
-    collection.singleton
-      ? count === 0
-        ? 'index.md missing'
-        : null
-      : count === undefined
-        ? null
-        : count === 1
-          ? '1 entry'
-          : `${count} entries`,
-    rows.length === 1 ? '1 field' : `${rows.length} fields`,
-  ].filter((c): c is string => c !== null);
-
   return (
-    <section id={id} aria-labelledby={titleId} className="editlet-model__collection">
-      <details className="editlet-model__block" open={mark ? true : undefined}>
-        <summary className="editlet-model__summary">
-          <Icon.ChevronRight size={16} className="editlet-model__chevron" />
-          <span className="editlet-model__summary-title">
-            <span id={titleId} className="editlet-model__name">
-              {collection.label}
-            </span>
-            <span className="editlet-u-mono editlet-u-text-muted editlet-model__key">{collectionKey}</span>
-            {collection.singleton ? <Badge>Singleton</Badge> : null}
-            {mark ? <Badge mark={mark}>{mark === 'new' ? 'New' : 'Changed'}</Badge> : null}
-          </span>
-          <span className="editlet-model__counts">{counts.join(', ')}</span>
-        </summary>
-        <div className="editlet-model__block-body">
-          <p className="editlet-model__meta">
-            <span className="editlet-u-mono">
-              {schema.contentDir}/{collectionKey}/
-            </span>
-            {collection.titleField ? <span>Title from {collection.titleField}</span> : null}
-            {collection.slugFrom ? <span>Slug from {collection.slugFrom}</span> : null}
-            <RouteLink
-              to={{ kind: 'collection', collection: collectionKey }}
-              className="editlet-link editlet-model__open"
-            >
-              Open entries
-            </RouteLink>
-          </p>
-          <ul className="editlet-model__fields" aria-label={`${collection.label} fields`}>
-            {rows.map((row) => {
-              const fieldMark = fieldMarks?.get(row.key);
-              return (
-                <li key={row.key} className="editlet-model__field">
-                  <div className="editlet-model__field-head">
-                    <span className="editlet-model__field-name">
-                      <span>{row.label}</span>
-                      <span className="editlet-u-mono editlet-u-text-muted editlet-model__key">{row.key}</span>
-                      {row.badges.map((b) => (
-                        <Badge key={b}>{BADGE_TEXT[b]}</Badge>
-                      ))}
-                      {fieldMark ? <Badge mark={fieldMark}>{fieldMark === 'new' ? 'New' : 'Changed'}</Badge> : null}
-                    </span>
-                    <span className="editlet-model__type">
-                      {row.type}
-                      {row.targets.length > 0 ? (
-                        <>
-                          {' → '}
-                          {row.targets.map((t, i) => (
-                            <span key={t}>
-                              {i > 0 ? ', ' : null}
-                              <JumpLink to={t}>{label(t)}</JumpLink>
-                            </span>
-                          ))}
-                          {row.many ? ', many' : null}
-                        </>
-                      ) : null}
-                    </span>
-                  </div>
-                  <div className="editlet-model__field-meta">
-                    <span>{row.required ? 'Required' : 'Optional'}</span>
-                    {row.details.map((d) => (
-                      <span key={d}>{d}</span>
-                    ))}
-                    {row.hint ? <span className="editlet-model__hint">{row.hint}</span> : null}
-                  </div>
+    <Sheet open={open} onOpenChange={onOpenChange} title={title} sub={sub} bar={bar}>
+      <div className="flex flex-col gap-4 px-4 pb-8">
+        <Card as="ul" aria-label={`${title} fields`}>
+          {rows.map((row) => (
+            <FieldDefRow key={row.key} row={row} mark={marks?.get(row.key)} />
+          ))}
+          <li>
+            <Row lead="zap" title={askLabel} sub="Add, rename or remove a field" onClick={onAsk} />
+          </li>
+        </Card>
+        {references && references.length > 0 ? (
+          <div>
+            <SectionTitle>References</SectionTitle>
+            <Card as="ul" aria-label={`Collections that ${title} points at`}>
+              {references.map((e) => (
+                <li key={`${e.field}>${e.from}`}>
+                  <Row
+                    title={e.label}
+                    sub={`${e.field} → · ${e.many ? 'many' : 'one'}`}
+                    size={56}
+                    onClick={() => onOpenOther(e.from)}
+                  />
                 </li>
-              );
-            })}
-          </ul>
-          <ReferenceBlock out={outgoing(edges, collectionKey)} inc={incoming(edges, collectionKey)} label={label} />
-          <div className="editlet-u-stack editlet-u-gap-2">
-            <h4 className="editlet-model__subheading">Change {collection.label} with your agent</h4>
-            <PromptList prompts={prompts} idPrefix={`${id}-prompt`} />
+              ))}
+            </Card>
           </div>
-        </div>
-      </details>
-    </section>
+        ) : null}
+        {referencedBy.length > 0 ? (
+          <div>
+            <SectionTitle>Referenced by</SectionTitle>
+            <Card as="ul" aria-label={`Collections that point at ${title}`}>
+              {referencedBy.map((e) => (
+                <li key={`${e.from}.${e.field}`}>
+                  <Row
+                    title={e.label}
+                    sub={`.${e.field} · ${e.many ? 'many' : 'one'}`}
+                    size={56}
+                    onClick={() => onOpenOther(e.from)}
+                  />
+                </li>
+              ))}
+            </Card>
+          </div>
+        ) : null}
+      </div>
+      {children}
+    </Sheet>
+  );
+}
+
+/** Copyable prompts (FigCraft *Content model · Ask Claude Code*): a title, the prompt (two lines) and Copy. */
+export function AskSheet({
+  open,
+  onOpenChange,
+  sub = 'Copy a prompt and paste it in Claude Code',
+  prompts,
+  copied,
+  onCopy,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sub?: string;
+  prompts: ChatPrompt[];
+  /** The id of the prompt that was just copied. */
+  copied: string | null;
+  onCopy: (prompt: ChatPrompt) => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange} title="Ask Claude Code" sub={sub}>
+      <div className="px-4 pb-8">
+        <Card as="ul" aria-label="Prompts">
+          {prompts.map((p) => (
+            <li key={p.id}>
+              <PromptRow title={p.title} body={p.text} copied={copied === p.id} onCopy={() => onCopy(p)} />
+            </li>
+          ))}
+        </Card>
+      </div>
+    </Sheet>
   );
 }

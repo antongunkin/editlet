@@ -1,13 +1,9 @@
-import { BooleanField } from './BooleanField';
 import { ColorField } from './ColorField';
-import { DatetimeField } from './DatetimeField';
 import { ImageField } from './ImageField';
 import { JsonField } from './JsonField';
 import { MarkdownField } from './MarkdownField';
 import { NumberField } from './NumberField';
-import { BlocksField, ObjectField, ObjectListField } from './ObjectField';
-import { MultiReferenceField, ReferenceField } from './ReferenceField';
-import { MultiSelectField, SelectField } from './SelectField';
+import { MultiSelectField } from './SelectField';
 import { asString, asStringList } from './shared';
 import { StringField } from './StringField';
 import { StringListField } from './StringListField';
@@ -22,11 +18,11 @@ function asImage(v: unknown): ImageValue {
   return { src: asString(o.src), alt: asString(o.alt) };
 }
 
-const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-const asRecord = (v: unknown): Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-
-/** Picks the widget for `field.type` and coerces the UI value to the widget's value type. */
+/**
+ * The widget for a field that edits in its own modal (screens/FieldRows.tsx), with the UI value coerced to its type.
+ * A boolean (a switch in its row), a single select, a reference, a date, an object and the blocks have their editors in
+ * FieldRows.tsx, so they render nothing here.
+ */
 export function FieldWidget(props: WidgetProps<unknown>) {
   const { field, value } = props;
   const p = <V,>(v: V) => ({ ...props, value: v, onChange: props.onChange as (v: V) => void });
@@ -37,18 +33,10 @@ export function FieldWidget(props: WidgetProps<unknown>) {
       return <TextField {...p(asString(value))} />;
     case 'markdown':
       return <MarkdownField {...p(asString(value))} />;
-    case 'boolean':
-      return <BooleanField {...p(typeof value === 'boolean' ? value : undefined)} />;
     case 'select':
-      return field.multiple ? (
-        <MultiSelectField {...p(asStringList(value))} />
-      ) : (
-        <SelectField {...p(asString(value))} />
-      );
+      return field.multiple ? <MultiSelectField {...p(asStringList(value))} /> : null;
     case 'number':
       return <NumberField {...p(asString(value))} />;
-    case 'datetime':
-      return <DatetimeField {...p(asString(value))} />;
     case 'json':
       return <JsonField {...p(asString(value))} />;
     case 'url':
@@ -57,15 +45,11 @@ export function FieldWidget(props: WidgetProps<unknown>) {
       return <ColorField {...p(asString(value))} />;
     case 'image':
       return <ImageField {...p(asImage(value))} />;
+    case 'boolean':
+    case 'datetime':
     case 'reference':
-      return field.multiple ? (
-        <MultiReferenceField {...p(asStringList(value))} />
-      ) : (
-        <ReferenceField {...p(asString(value))} />
-      );
     case 'object':
-      return field.list ? <ObjectListField {...p(asList(value))} /> : <ObjectField {...p(asRecord(value))} />;
     case 'blocks':
-      return <BlocksField {...p(asList(value))} />;
+      return null;
   }
 }

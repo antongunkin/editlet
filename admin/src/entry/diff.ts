@@ -1,6 +1,6 @@
 import { stringify } from 'yaml';
 
-import { deepEqual, type DataBody } from './values';
+import { BODY_KEY, deepEqual, DRAFT_KEY, type DataBody } from './values';
 
 import { markdownFieldKey, type Collection, type FieldType } from '../../../core/schema';
 
@@ -19,6 +19,17 @@ export function valueText(v: unknown): string {
   if (typeof v === 'string') return v;
   if (typeof v === 'object') return stringify(v, { lineWidth: 0 }).replace(/\n$/, '');
   return String(v);
+}
+
+/**
+ * The form key that holds a diff row's value (`entryToForm`): the body for the markdown field and `__body`, the draft
+ * flag, a schema field's own key; `null` for a key outside the schema (the form does not edit it).
+ */
+export function formKeyOf(collection: Collection, rowKey: string): string | null {
+  if (rowKey === BODY_KEY || rowKey === DRAFT_KEY) return rowKey;
+  const field = collection.fields[rowKey];
+  if (!field || !Object.hasOwn(collection.fields, rowKey)) return null;
+  return field.type === 'markdown' ? BODY_KEY : rowKey;
 }
 
 /** Changed fields only, in schema order, then keys outside the schema (sorted), then `draft`. */

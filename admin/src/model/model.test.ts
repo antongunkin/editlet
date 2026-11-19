@@ -59,6 +59,23 @@ describe('fieldRows', () => {
     expect(rowOf('a', select).type).toBe('select, multiple');
   });
 
+  it('says the group of a top-level field when the collection has groups', () => {
+    const rows = fieldRows({
+      label: 'Page',
+      groups: { content: { label: 'Content' }, media: { label: 'Media' } },
+      fields: {
+        title: { type: 'string', label: 'Title' },
+        seo: { type: 'object', label: 'SEO', group: 'media', fields: { t: { type: 'string', label: 'T' } } },
+      },
+    });
+    expect(rows.map((r) => [r.key, r.details.filter((d) => d.startsWith('group'))])).toEqual([
+      ['title', ['group: Content']],
+      ['seo', ['group: Media']],
+      ['seo.t', []],
+    ]);
+    expect(fieldRows({ label: 'P', fields: { t: { type: 'string', label: 'T' } } })[0]!.details).toEqual([]);
+  });
+
   it('describes details per type', () => {
     const options = [
       { label: 'Draft', value: 'draft' },

@@ -1,5 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
+
+import { BranchSheet } from './BranchSheet';
 
 import type { CommitSubject } from '../../../core/gitStyle';
 import { GitHubError } from '../../../github';
@@ -11,7 +13,8 @@ import { BRANCHES_KEY, useWorkspace } from '../github/workspace';
 import { useSiteRefresh } from '../preview/PreviewProvider';
 import { useSource } from '../source/context';
 import type { SourceChange } from '../source/local';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui';
+import { Confirm } from '../ui';
+import { FieldInSheet } from '../ui/Field';
 
 export type MediaCommitPlan = {
   /** What the dialog calls the change (its title when there is no `confirm`). */
@@ -101,29 +104,44 @@ export function useMediaCommit(): MediaCommit {
     else void execute(plan);
   };
 
-  const confirm = asking?.confirm;
-  const dialog = (
-    <Dialog open={asking !== null} onOpenChange={(open) => !open && !busy && setAsking(null)}>
-      <DialogContent role={confirm?.destructive ? 'alertdialog' : 'dialog'}>
-        <DialogHeader>
-          <DialogTitle>{confirm?.title ?? asking?.message}</DialogTitle>
-          <DialogDescription>{confirm?.description ?? 'The change is committed to a new branch.'}</DialogDescription>
-        </DialogHeader>
+  const lastAsked = useRef<MediaCommitPlan | null>(null);
+  if (asking) lastAsked.current = asking;
+  const plan = asking ?? lastAsked.current;
+  const confirm = plan?.confirm;
+  const needsName = newBranch.needed && newBranch.branch === undefined;
+  const close = (open: boolean) => {
+    if (!open && !busy) setAsking(null);
+  };
+  const branchNote = newBranch.needed ? ' on branch' : '';
+  // A delete asks first (a card docked at the bottom, FigCraft *Media · delete*); an upload or a replace on the base
+  // branch only needs the new branch's name (a modal, *Media · upload on main*).
+  const dialog = confirm ? (
+    <Confirm
+      open={asking !== null}
+      onOpenChange={close}
+      title={confirm.title}
+      description={confirm.description}
+      confirmLabel={confirm.label + branchNote}
+      pending={busy}
+      confirmDisabled={needsName}
+      onConfirm={() => asking && void execute(asking)}
+    >
+      <NewBranchField {...newBranch} />
+    </Confirm>
+  ) : (
+    <BranchSheet
+      open={asking !== null}
+      onOpenChange={close}
+      title={plan?.message ?? ''}
+      busy={busy}
+      disabled={needsName}
+      label={`Commit${branchNote}`}
+      onSubmit={() => asking && void execute(asking)}
+    >
+      <FieldInSheet.Provider value>
         <NewBranchField {...newBranch} />
-        <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={() => setAsking(null)}>
-            Cancel
-          </Button>
-          <Button
-            variant={confirm?.destructive ? 'destructive' : 'primary'}
-            disabled={busy || (newBranch.needed && newBranch.branch === undefined)}
-            onClick={() => asking && void execute(asking)}
-          >
-            {(confirm?.label ?? 'Commit') + (newBranch.needed ? ' on branch' : '')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </FieldInSheet.Provider>
+    </BranchSheet>
   );
 
   return { request, busy, error, clearError: () => setError(null), dialog };

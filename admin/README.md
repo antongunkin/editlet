@@ -11,7 +11,7 @@ Astro adapters serve that folder at `/editlet/`. They find it relative to the pa
 module location, Next.js by resolving `editlet/next/config`), so no import of the admin is needed. In the published
 tarball the built admin lives at `dist/admin/dist/`; the package export `editlet/admin/dist/*` points there.
 
-It supports Chrome 125+, Edge 125+, Firefox 126+ and Safari 17.5+ (`browserslist` in the package's `package.json`; the
+It supports Chrome 125+, Edge 125+, Firefox 128+ and Safari 17.5+ (`browserslist` in the package's `package.json`; the
 build targets them, nothing is polyfilled): [browser support](../../../docs/admin/ui.md#browser-support).
 
 It has two modes with the same screens:
@@ -28,7 +28,7 @@ It has two modes with the same screens:
    Otherwise it reads `config.json` next to itself (written by the adapter: repo, auth URL), signs the editor in, checks
    write access, and uses the GitHub source of the active branch.
 2. It reads the schema and the entry files through that source. In dev it polls the file list every 2 seconds.
-3. The `?editlet` value picks the screen: home, a collection, one entry, the content model (`schema`), media (`media`),
+3. The `?editlet` value picks the screen: home, a collection, one entry, the content model (`schema`), media (`media`), All content (`all-content`),
    or a branch review (`branch:<name>`, production).
 4. On an entry, the form shows the fields from the schema. **Save** validates, shows a diff, and commits the entry
    file and any new images in one change.
@@ -41,20 +41,29 @@ It has two modes with the same screens:
 |---|---|
 | Mode detection, local content source, `sha` conflict check, polling | [docs/admin/modes-and-source.md](../../../docs/admin/modes-and-source.md) |
 | `?editlet` routes, navigation, protocol bridge, unsaved-changes guard | [docs/admin/routing-and-bridge.md](../../../docs/admin/routing-and-bridge.md) |
-| Collection list: sortable table (title, updated, by, status), pages, New entry | [docs/admin/collection.md](../../../docs/admin/collection.md) |
-| Entry form: values, validation, new entry, draft, delete, conflicts | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md) |
-| References: combobox search, Open link, broken references, **Used by**, Rename, delete with the references removed | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#used-by) |
-| `object` and `blocks`: groups, item cards, Add block, move and remove, nested errors and images | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#widgets) |
+| Accessibility checks at every screen key: axe, 44 px targets, focus ring, 320 px reflow; the exceptions list; the VoiceOver smoke tests (`npm run e2e:voiceover`, a Mac) | [docs/admin/accessibility.md](../../../docs/admin/accessibility.md) |
+| Home (your changes, All content, the account button), the All content list, the collapsed pill | [docs/admin/home.md](../../../docs/admin/home.md) |
+| Search (⌘K) over the entries' titles and addresses, from Home's header or the keyboard | [docs/admin/search.md](../../../docs/admin/search.md) |
+| The account sheet: who, role, Appearance (System, Light, Dark), Reviewers, Sign out | [docs/admin/account.md](../../../docs/admin/account.md) |
+| Collection list: filter chips, entries as rows (title, status, when it changed), New post | [docs/admin/collection.md](../../../docs/admin/collection.md) |
+| Entry form: values, validation, new entry, Duplicate, Set as draft, delete, conflicts | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md) |
+| Field groups as tabs (`groups` in the schema), a dot on a changed or invalid tab | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#field-groups) |
+| References: search and pick in a modal, Open link, broken references, **Used by**, Rename, delete with the references removed | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#used-by) |
+| `object` and `blocks`: fields as rows one level down, drag or arrow keys to move, Add block, remove, nested errors and images | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#widgets) |
 | Image fields: upload staging, naming, limits, choose existing (`MediaPicker`) | [docs/admin/images.md](../../../docs/admin/images.md) |
 | Media at `?editlet=media`: usage index, upload, replace, alt text across uses, delete unused, SVG cleaning, large uploads | [docs/admin/media.md](../../../docs/admin/media.md) |
 | Markdown body: Rich (Milkdown, block splice, raw blocks, toolbar, links, images) and Source | [docs/admin/rich-text.md](../../../docs/admin/rich-text.md) |
 | Select to edit: open the entry and select the words from the page (matching, Source and Rich) | [docs/admin/select.md](../../../docs/admin/select.md) |
-| Review dialog, what a save commits, commit messages | [docs/admin/review-and-save.md](../../../docs/admin/review-and-save.md) |
+| History: the entry's versions from git, a version's diff, Restore as an unsaved edit | [docs/admin/history.md](../../../docs/admin/history.md) |
+| Your changes (the review sheet), what a save commits, commit messages, Revert this change per field, the commit Note | [docs/admin/review-and-save.md](../../../docs/admin/review-and-save.md) |
 | Dev host and the Vite dev server, end-to-end test | [docs/admin/dev-host.md](../../../docs/admin/dev-host.md) |
 | Content model at `?editlet=schema`: fields, references, problems, live update, chat prompts | [docs/admin/content-model.md](../../../docs/admin/content-model.md) |
 | Components, CSS, tokens, dark and light, narrow side layout | [docs/admin/ui.md](../../../docs/admin/ui.md) |
+| Screens of the redesign: view and container, the screen's own header and bottom bar, the keyboard on a phone | [docs/admin/ui.md](../../../docs/admin/ui.md#screens) |
+| The iOS Simulator pass of each screen | [docs/admin/ios-simulator.md](../../../docs/admin/ios-simulator.md) |
+| The redesign's theme generated from `design/tokens.json` (`npm run design:tokens`), token contrast tests | [docs/admin/ui.md](../../../docs/admin/ui.md#generated-theme-the-redesign) |
 | Production mode: `config.json`, auth handler hosting, sign-in, token storage and refresh, access check | [docs/admin/production.md](../../../docs/admin/production.md) |
-| Branches: active branch, picker, save on main, branch screen, pull request, preview, conflicts | [docs/admin/branches.md](../../../docs/admin/branches.md) |
+| Branches: active branch, picker, save on main, branch screen, pull request, preview, conflicts (Compare changes, pick per field) | [docs/admin/branches.md](../../../docs/admin/branches.md) |
 | Roles: admins and editors through GitHub teams, `CODEOWNERS` and rulesets | [docs/admin/roles.md](../../../docs/admin/roles.md) |
 | Every screen and state, the Playwright suite, screenshots and visual regression | [docs/admin/screens.md](../../../docs/admin/screens.md) |
 | Using the admin from an agent with a browser: `/editlet/?editlet=…`, roles and names | [docs/admin/agents.md](../../../docs/admin/agents.md) |
@@ -83,7 +92,7 @@ Set `EDITLET_ROOT` to a real project folder to edit its files. Without it, your 
 
 ```bash
 npx vitest run packages/editlet/admin
-npm run e2e:admin        # from the repo root: every screen in Chromium, desktop and mobile
+npm run e2e:admin        # from the repo root: every screen, desktop and mobile in Chromium and phone in WebKit
 npm run screenshots      # the same in light and dark, every screen as a PNG in screenshots/
 ```
 
@@ -99,17 +108,17 @@ from `github/test/fakeGitHub.ts` (`src/test/fakeGitHub.ts`, `src/test/liveApp.ts
 
 | Path | Role |
 |---|---|
-| `src/App.tsx`, `src/Shell.tsx` | Mode pick, providers, header, collection nav, screen switch |
+| `src/App.tsx`, `src/Shell.tsx` | Mode pick, providers, the banners, screen switch |
 | `src/route.ts`, `src/bridge.ts`, `src/useRoute.ts` | `?editlet` routes, loader protocol, navigation and guard |
 | `src/source/` | `detectMode`, `createLocalSource`, `SourceProvider` |
-| `src/github/` | Production mode: `GitHubApp`, session and auth, sign-in, workspace (active branch), branch chip and picker, save-on-main field, branch screen, deploy status, error text |
+| `src/github/` | Production mode: `GitHubApp`, session and auth, sign-in, workspace (active branch), branch chip and picker (`BranchesSheet`), save-on-main field, branch screen (`BranchView` + `BranchScreen`), preview step, error text |
 | `config.ts` | `config.json`: `ADMIN_CONFIG_FILE`, `buildAdminConfig` (adapters), `parseAdminConfig` (admin) |
 | `src/data/` | TanStack Query hooks over the source; image previews |
 | `src/entry/` | Pure entry model: form values, diff rows, issues, image paths |
-| `src/screens/` | Home, Collection, Entry, New entry dialog, placeholders, error screens |
-| `src/fields/`, `src/ui/`, `src/diff/` | Field widgets, UI primitives, `DiffHunk` and the review dialog |
+| `src/screens/` | Home, Collection (`CollectionView`), Entry, New entry (`NewEntryView`), placeholders, error screens |
+| `src/fields/`, `src/ui/`, `src/diff/` | Field widgets, UI primitives, `DiffHunk`, `FieldDiff` and *Your changes* (`ReviewDialog`, a sheet) |
 | `src/preview/` | Page preview snapshot: `PreviewProvider`, `GitHubPreviewSync`, `fieldPreviews`; preview route calls (`previewRoute.ts`) |
-| `src/styles.css` | All admin CSS |
+| `src/app.css` | All admin CSS: Tailwind v4 with its preflight, the generated theme (`src/ui/tokens/theme.css` from `design/tokens.json`), the state variants and named utilities ([UI § CSS](../../../docs/admin/ui.md#css)); the rich-text document's styles are `src/richtext/richtext.css` |
 | `dev/` | Dev hosts (local and fake GitHub), demo site, dev API middleware, fixture copy |
 
 Design records: `docs/superpowers/specs/2026-11-10-octocms-v2-p6-admin-dev-design.md` (dev mode) and

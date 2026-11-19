@@ -9,6 +9,20 @@
     "name": "editlet window.js (select-to-edit, window geometry)",
     "path": "dist/admin/dist/window.js",
     "gzip": true,
-    "limit": "4 KB"
+    "limit": "4476 B"
+  },
+  {
+    "name": "editlet admin entry JS (index-*.js)",
+    "path": "dist/admin/dist/assets/index-*.js",
+    "gzip": true,
+    "limit": "360334 B",
+    "rolldown": false
+  },
+  {
+    "name": "editlet admin entry CSS (index-*.css)",
+    "path": "dist/admin/dist/assets/index-*.css",
+    "gzip": true,
+    "limit": "11414 B",
+    "rolldown": false
   }
 ]

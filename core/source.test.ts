@@ -2,7 +2,13 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { EditletError } from './issues';
 import { gitBlobSha } from './sha';
-import { createMemorySource, type ContentSource } from './source';
+import {
+  createMemorySource,
+  DEFAULT_FILE_VERSIONS,
+  MAX_FILE_VERSIONS,
+  versionLimit,
+  type ContentSource,
+} from './source';
 
 const SCHEMA = JSON.stringify({
   contentDir: 'cms/content',
@@ -134,5 +140,21 @@ describe('createMemorySource', () => {
     const blocked = await source.commit([{ path: 'cms/content/author/a.md', content: JANE }], 'x');
     expect(blocked.issues).toHaveLength(1);
     expect(await source.commit([{ path: 'cms/schema.json', content: SCHEMA }], 'Fix schema')).toEqual({ issues: [] });
+  });
+});
+
+describe('versionLimit', () => {
+  it('defaults, keeps an integer in range and caps a large one', () => {
+    expect(versionLimit(undefined)).toBe(DEFAULT_FILE_VERSIONS);
+    expect(versionLimit(0)).toBe(DEFAULT_FILE_VERSIONS);
+    expect(versionLimit(2.5)).toBe(DEFAULT_FILE_VERSIONS);
+    expect(versionLimit(7)).toBe(7);
+    expect(versionLimit(1000)).toBe(MAX_FILE_VERSIONS);
+  });
+
+  it('leaves the history reads out of the memory source', () => {
+    const source = createMemorySource({});
+    expect(source.listVersions).toBeUndefined();
+    expect(source.readVersion).toBeUndefined();
   });
 });

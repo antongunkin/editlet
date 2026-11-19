@@ -69,7 +69,7 @@ describe('Media on GitHub', () => {
     await waitFor(() => expect(has(fake, 'editlet/spring-images', UPLOAD)).toBe(true));
     expect(fake.state.refs.get('main')).toBe(mainHead);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(await screen.findByRole('button', { name: 'Branch' })).toHaveProperty(
+    expect(await screen.findByRole('button', { name: /^Branch / })).toHaveProperty(
       'textContent',
       'editlet/spring-images',
     );

@@ -1,5 +1,5 @@
 import type { Issue } from './issues';
-import type { FileRef } from './source';
+import type { FileRef, FileVersion } from './source';
 
 export const DEV_API_BASE = '/__editlet';
 
@@ -10,6 +10,9 @@ export const DEV_API_BASE = '/__editlet';
 // POST   /__editlet/commit                → 204 | 400 | 409 | 422 { issues: Issue[] }   body = DevCommitRequest (JSON)
 // GET    /__editlet/git                   → 200 DevGitResponse   (read-only: the checkout's branch and uncommitted content files)
 // GET    /__editlet/history?path=<path>   → 200 FileHistory      (read-only: `git log` of one file; empty without git)
+// GET    /__editlet/versions?path=<path>[&limit=<n>] → 200 DevVersionsResponse (read-only: `git log` of one file,
+//                                            newest first, with the file's blob sha per commit; [] without git)
+// GET    /__editlet/version?path=<path>&commit=<id>  → 200 raw bytes | 404   (read-only: the file as that commit left it)
 //
 // Notes:
 // - The listing includes every non-hidden file under contentDir, also stray files that are neither entries nor
@@ -25,6 +28,10 @@ export const DEV_API_BASE = '/__editlet';
 // - Only reachable in dev, on localhost / 127.0.0.1 / [::1] / *.localhost (plus configured hosts), same-origin.
 //   Adapters must build `req.url` from the real Host header (the host check reads it from the URL). The admin must
 //   not run in a sandboxed (opaque-origin) iframe: browsers then send `Origin: null`, which gets 403.
+// - /versions and /version take entry and image paths under contentDir and the schema path (else 400), a `limit` of
+//   1..100 (default 30) and a full commit id (40 or 64 hex digits; else 400). /version answers 404 when the file is not in that
+//   commit, the commit is unknown or there is no git. While the schema is broken, both answer 500 with its issues
+//   for any other path.
 // - Other errors (400 / 403 / 404 / 405 / 500) carry a DevErrorResponse body.
 
 export interface DevFilesResponse {
@@ -36,6 +43,10 @@ export interface DevGitResponse {
   branch: string | null;
   /** Files under `contentDir` with uncommitted changes (modified, added, deleted or untracked). */
   changes: number;
+}
+
+export interface DevVersionsResponse {
+  versions: FileVersion[];
 }
 
 export interface DevErrorResponse {

@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 
@@ -29,7 +30,7 @@ function editletDevApi(): Plugin {
 export default defineConfig(({ command }) => ({
   root: adminRoot,
   base: './',
-  plugins: [react(), ...(command === 'serve' ? [editletDevApi()] : [])],
+  plugins: [react(), tailwindcss(), ...(command === 'serve' ? [editletDevApi()] : [])],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

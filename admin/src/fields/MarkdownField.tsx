@@ -5,7 +5,7 @@ import type { WidgetProps } from './types';
 
 import type { Projection } from '../select/match';
 import { projectMarkdown, selectInControl } from '../select/project';
-import { cn, Field, FIELD_TEXTAREA_CLASS, Switcher, SwitcherItem } from '../ui';
+import { Field, Switcher, SwitcherItem, Textarea } from '../ui';
 
 /** The Milkdown editor is a separate chunk: it loads the first time a body is shown in Rich mode. */
 const RichEditor = lazy(() => import('../richtext/RichEditor'));
@@ -36,7 +36,7 @@ function storeMode(mode: MarkdownMode) {
  * in Source with a note; the Source textarea also stands in while the rich editor loads.
  */
 export function MarkdownField({ name, field, value, onChange, onBlur, error, ctx }: WidgetProps<string>) {
-  const [mode, setMode] = useState<MarkdownMode>(readMode);
+  const [mode, setMode] = useState<MarkdownMode>(() => ctx.markdownMode ?? readMode());
   const [fallback, setFallback] = useState<string | null>(null);
   const rich = mode === 'rich' && fallback === null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -60,10 +60,10 @@ export function MarkdownField({ name, field, value, onChange, onBlur, error, ctx
   };
 
   const textarea = (
-    <textarea
+    <Textarea
       ref={textareaRef}
       id={name}
-      className={cn(FIELD_TEXTAREA_CLASS, 'editlet-ff-markdown__textarea', invalid(error) && 'editlet-textarea--error')}
+      className="min-h-80 resize-y font-mono text-sm leading-6"
       name={name}
       rows={16}
       value={value}
@@ -80,8 +80,8 @@ export function MarkdownField({ name, field, value, onChange, onBlur, error, ctx
   );
 
   return (
-    <Field {...fieldProps(field, error, name)} htmlFor={rich ? undefined : name} className="editlet-ff-markdown">
-      <Switcher className="editlet-ff-markdown__mode" aria-label="Editor mode">
+    <Field {...fieldProps(field, error, name)} htmlFor={rich ? undefined : name}>
+      <Switcher aria-label="Editor mode">
         <SwitcherItem active={rich} onClick={() => choose('rich')}>
           Rich
         </SwitcherItem>
@@ -89,11 +89,7 @@ export function MarkdownField({ name, field, value, onChange, onBlur, error, ctx
           Source
         </SwitcherItem>
       </Switcher>
-      {fallback ? (
-        <p className="editlet-ff-markdown__note" role="status">
-          {fallback}
-        </p>
-      ) : null}
+      {fallback ? <output className="m-0 block px-1 text-sm text-tray-muted-foreground">{fallback}</output> : null}
       {rich ? (
         <Suspense fallback={textarea}>
           <RichEditor

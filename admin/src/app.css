@@ -1,0 +1,387 @@
+/* The admin's CSS (spec 2026-11-18, docs/admin/ui.md#css): Tailwind v4 with its preflight, the theme generated from
+   design/tokens.json (src/ui/tokens/theme.css), the few base rules below, and named utilities for what classes cannot
+   say without arbitrary values. The rich-text document's styles are in richtext/richtext.css. */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/preflight.css' layer(base);
+@import './ui/tokens/theme.css';
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import 'tw-animate-css';
+
+/* What preflight leaves to the page: the admin fills its iframe (or the standalone page), with the theme's font, ink
+   and card; thin scrollbars; no textarea resize handle (fields grow by themselves); the focus ring is drawn by each
+   control (`focused:`), so the browser's outline is off; reduced motion stops every animation. */
+@layer base {
+  /* Native controls and scrollbars follow the theme (window/settings.ts sets `data-editlet-theme` on <html>). */
+  :root,
+  [data-editlet-theme='light'] {
+    color-scheme: light;
+  }
+  [data-editlet-theme='dark'] {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  html {
+    font-size: var(--text-base);
+    font-family: var(--font-sans);
+    font-weight: var(--font-weight-normal);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scrollbar-color: var(--input) transparent;
+  }
+
+  body {
+    color: var(--foreground);
+    background: var(--card);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizelegibility;
+  }
+
+  /* `scrollbar-width` is not inherited, so it goes on every element; the colour is inherited from <html>. */
+  * {
+    scrollbar-width: thin;
+  }
+
+  textarea {
+    resize: none;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+  }
+
+  /* The window scrolls inside its screen, never the document. Collapsed, the (invisible) window is larger than the
+     pill-sized iframe: without this, the document's scrollbars would cut into the pill. */
+  html:has([data-editlet='window']) {
+    overflow: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* The spinner of a busy button: Tailwind's own animation, which the theme reset removes (not a design value). */
+@theme {
+  --animate-spin: spin 1s linear infinite;
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+@custom-variant dark (&:where([data-editlet-theme='dark'], [data-editlet-theme='dark'] *));
+
+/* Interaction states that the /design boards can force: each matches the real pseudo-class, or `data-state` set by a
+   board to show every state at once (docs/admin/ui.md). Hover only with a pointer that hovers, and never on a control
+   that is disabled or busy. */
+@custom-variant hovered {
+  @media (hover: hover) {
+    &:hover:not(:disabled, [data-disabled], [aria-busy='true']) {
+      @slot;
+    }
+  }
+  &[data-state='hover'] {
+    @slot;
+  }
+}
+@custom-variant pressed {
+  &:active:not(:disabled, [data-disabled], [aria-busy='true']) {
+    @slot;
+  }
+  &[data-state='active'] {
+    @slot;
+  }
+}
+@custom-variant focused {
+  &:focus-visible {
+    @slot;
+  }
+  &[data-state='focus'] {
+    @slot;
+  }
+}
+
+/* `wide:` inside an `@container` (the media grid): the width of the window or sheet itself, not the viewport, because
+   the admin is a 375 px sheet or a 600 px window in a larger page. `--container-wide` (36rem, 576 px, from
+   design/tokens.json `scale.container`) lies between the two (docs/admin/media.md). */
+@custom-variant wide {
+  @container (min-width: --theme(--container-wide)) {
+    @slot;
+  }
+}
+
+/* The same states on a part inside a control that carries the `group` class (a track or a pill inside a 44 px hit
+   area): `group-hovered:`, `group-pressed:`, `group-focused:`. */
+@custom-variant group-hovered {
+  @media (hover: hover) {
+    &:is(:where(.group):hover:not(:disabled, [data-disabled]) *) {
+      @slot;
+    }
+  }
+  &:is(:where(.group)[data-state='hover'] *) {
+    @slot;
+  }
+}
+@custom-variant group-pressed {
+  &:is(:where(.group):active:not(:disabled, [data-disabled]) *) {
+    @slot;
+  }
+  &:is(:where(.group)[data-state='active'] *) {
+    @slot;
+  }
+}
+@custom-variant group-focused {
+  &:is(:where(.group):focus-visible *) {
+    @slot;
+  }
+  &:is(:where(.group)[data-state='focus'] *) {
+    @slot;
+  }
+}
+
+@source './';
+
+/* Sheets (ui/parts/sheet.tsx). Base UI's drawer exposes its swipe as CSS variables, which classes cannot take without
+   arbitrary values, so the motion is named here. Values from the design: the sheet rises with `modal-in` and leaves
+   with `modal-out` (faster after a strong swipe); the screen under it is pushed back to scale .915 (inset 16 px on a
+   375 px screen), 12 px down, radius 24. Reduced motion: no movement, a fade. */
+@utility sheet-motion {
+  transform: translateY(var(--drawer-swipe-movement-y, 0px));
+  transition: transform var(--duration-modal-in) var(--ease-modal-in);
+  &[data-swiping] {
+    transition: none;
+    user-select: none;
+  }
+  &[data-starting-style],
+  &[data-ending-style] {
+    transform: translateY(100%);
+  }
+  &[data-ending-style] {
+    transition-duration: calc(var(--drawer-swipe-strength, 1) * var(--duration-modal-out));
+    transition-timing-function: var(--ease-modal-out);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transform: none;
+    transition: opacity var(--duration-modal-in) linear;
+    &[data-starting-style],
+    &[data-ending-style] {
+      transform: none;
+      opacity: 0;
+    }
+  }
+}
+@utility sheet-scrim {
+  opacity: calc(1 - var(--drawer-swipe-progress, 0));
+  transition: opacity var(--duration-modal-in) var(--ease-modal-in);
+  &[data-swiping] {
+    transition: none;
+  }
+  &[data-starting-style],
+  &[data-ending-style] {
+    opacity: 0;
+  }
+}
+@utility sheet-pushed {
+  transform-origin: 50% 0;
+  transition:
+    transform var(--duration-modal-in) var(--ease-modal-in),
+    border-radius var(--duration-modal-in) var(--ease-modal-in);
+  &[data-active] {
+    transform: translateY(12px) scale(0.915);
+    border-radius: var(--radius-3xl);
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+}
+/* What shows around the pushed-back screen (Drawer.IndentBackground): the backdrop fill, under everything, faded in
+   while a sheet is open. */
+@utility sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-modal-in) var(--ease-modal-in);
+  &[data-active] {
+    opacity: 1;
+  }
+}
+
+/* The bottom bar (ui/parts/bottom-bar.tsx) clears the home indicator and rides on the on-screen keyboard. Inside the
+   loader's iframe neither is visible, so the site page measures them (loader/window/viewport.ts) and the admin sets
+   `--safe-bottom` and `--keyboard` on its root (window/channel.ts `usePageViewport`). Standalone, the admin's own safe
+   area applies and there is no keyboard offset. */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --keyboard: 0px;
+}
+@utility pb-safe {
+  padding-bottom: max(--spacing(3), var(--safe-bottom));
+}
+/* The keyboard's height below the bar: as the last item of a flex column, the bar rises and the content above it
+   shrinks (a translated bar would cover the focused field). */
+@utility mb-keyboard {
+  margin-bottom: var(--keyboard);
+}
+
+/* Safari on iOS and iPadOS floats its form accessory (previous, next, ✓) and the address pill over the page, right above
+   the keyboard, and the page cannot measure them: the visual viewport ends at the keyboard (seen in the iOS Simulator,
+   wave 4.1; docs/admin/ui.md#the-keyboard-and-the-form-accessory). So on iOS, while the on-screen keyboard is up
+   (`data-keyboard`, set from the page's `viewport` message) and a text field has the focus, the bottom bar hides (the
+   accessory's ✓ is Done; Enter in a one-line field is Done too), and the rich-text formatting bar rises above them by
+   `--accessory`. Android has no accessory: its bar rides on the keyboard as everywhere else. */
+:root {
+  --accessory: --spacing(32);
+}
+/* Only the bar of the sheet (or screen) that has the focused field: a bar under an open sheet stays, so what it holds
+   stays mounted and visible to Base UI (the branch chip owns the Branches sheet; hiding it closed that sheet on the first
+   tap into its search field, wave 4.4). A sheet's bar is a child of its popup, a screen's of its section. */
+:root[data-ios][data-keyboard] {
+  & :is([role='dialog'], [data-editlet='screen'], [data-editlet='branch-screen']):has(:is(input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']), textarea, [contenteditable='true']):focus)
+    > [data-slot='bottom-bar'] {
+    display: none;
+  }
+  &:has(:is(input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']), textarea, [contenteditable='true']):focus) [data-slot='toolbar-slot'] {
+    margin-bottom: calc(var(--keyboard) + var(--accessory));
+  }
+}
+
+/* Collapsing into the pill (window/WindowFrame.tsx, window/Pill.tsx), the motion of window.js's `morph` (0.4 s, the
+   same easing): the window fades out with a blur while window.js shrinks the dialog onto the pill, and the pill fades
+   and grows in at the iframe's top left, where the dialog lands. Expanding runs it backwards. */
+@utility morph {
+  transition-property: opacity, filter, transform, scale, visibility;
+  transition-duration: 0.4s;
+  transition-timing-function: cubic-bezier(0.455, 0.03, 0.515, 0.955);
+}
+@utility morph-out {
+  visibility: hidden;
+  opacity: 0;
+  filter: blur(10px);
+}
+/* The real close: the pill shrinks and fades out (0.2 s), then the admin sends `close`. */
+@utility pill-closing {
+  animation: pill-close 0.2s forwards;
+}
+@keyframes pill-close {
+  to {
+    opacity: 0;
+    filter: blur(10px);
+    scale: 0.8;
+  }
+}
+
+/* The window's resize zones (WindowFrame's `ResizeEdge`): invisible, only the cursor shows them. The edges are 4 px
+   strips along the window's sides; the corners are 20 px squares (the window's radius) that pull two edges at once,
+   each clipped to the 4 px band along the rounded corner, so a button in the corner never loses a click to them. The
+   path draws the bottom-right corner; `scale` mirrors it into the others. Hovering any zone (or pulling one) draws a
+   2 px line in the ring colour along every zone, so the whole outline shows what resizes; window.js lights the sides
+   the zone moves in the site page (docs/loader/window.md#resizing). Plain CSS keyed on the zone's hook: a clip path is
+   not a design value. */
+@layer components {
+  [data-editlet='window-edge'] {
+    position: absolute;
+    z-index: 1;
+    touch-action: none;
+    transition: box-shadow 150ms ease;
+
+    &:is([data-edge='n'], [data-edge='s']) {
+      right: --spacing(5);
+      left: --spacing(5);
+      height: --spacing(1);
+      cursor: ns-resize;
+    }
+    &:is([data-edge='e'], [data-edge='w']) {
+      top: --spacing(5);
+      bottom: --spacing(5);
+      width: --spacing(1);
+      cursor: ew-resize;
+    }
+    &[data-edge='n'] {
+      top: 0;
+    }
+    &[data-edge='s'] {
+      bottom: 0;
+    }
+    &[data-edge='e'] {
+      right: 0;
+    }
+    &[data-edge='w'] {
+      left: 0;
+    }
+    &:is([data-edge='ne'], [data-edge='nw'], [data-edge='se'], [data-edge='sw']) {
+      width: --spacing(5);
+      height: --spacing(5);
+      clip-path: path('M16 0H20V20H0V16A16 16 0 0 0 16 0Z');
+
+      /* The corner's 2 px line: the outer half of its 4 px band. */
+      &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        clip-path: path('M18 0H20V20H0V18A18 18 0 0 0 18 0Z');
+        transition: background-color 150ms ease;
+      }
+    }
+    &[data-edge='se'] {
+      right: 0;
+      bottom: 0;
+      cursor: nwse-resize;
+    }
+    &[data-edge='nw'] {
+      top: 0;
+      left: 0;
+      scale: -1 -1;
+      cursor: nwse-resize;
+    }
+    &[data-edge='ne'] {
+      top: 0;
+      right: 0;
+      scale: 1 -1;
+      cursor: nesw-resize;
+    }
+    &[data-edge='sw'] {
+      bottom: 0;
+      left: 0;
+      scale: -1 1;
+      cursor: nesw-resize;
+    }
+  }
+
+  [data-editlet='window']:has(> [data-editlet='window-edge']:is(:hover, :active)) > [data-editlet='window-edge'] {
+    &[data-edge='n'] {
+      box-shadow: inset 0 2px var(--ring);
+    }
+    &[data-edge='s'] {
+      box-shadow: inset 0 -2px var(--ring);
+    }
+    &[data-edge='e'] {
+      box-shadow: inset -2px 0 var(--ring);
+    }
+    &[data-edge='w'] {
+      box-shadow: inset 2px 0 var(--ring);
+    }
+    &:is([data-edge='ne'], [data-edge='nw'], [data-edge='se'], [data-edge='sw'])::before {
+      background: var(--ring);
+    }
+  }
+}

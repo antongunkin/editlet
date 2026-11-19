@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { EditletError } from './issues';
-import { loadSchema, markdownFieldKey } from './schema';
+import { fieldGroups, loadSchema, markdownFieldKey } from './schema';
 
 function fixture(): any {
   return {
@@ -223,5 +223,84 @@ describe('markdownFieldKey', () => {
   });
   it('returns undefined when none', () => {
     expect(markdownFieldKey(loadSchema(fixture()).collections.author)).toBeUndefined();
+  });
+});
+
+describe('field groups', () => {
+  const grouped = () => {
+    const fx = fixture();
+    fx.collections.post.groups = { content: { label: 'Content' }, media: { label: 'Media' }, seo: { label: 'SEO' } };
+    fx.collections.post.fields.cover = { type: 'image', label: 'Cover', group: 'media' };
+    fx.collections.post.fields.tags.group = 'seo';
+    return fx;
+  };
+
+  it('accepts groups and a group on a top-level field', () => {
+    expect(() => loadSchema(grouped())).not.toThrow();
+  });
+
+  it('rejects a group the collection does not declare', () => {
+    const fx = grouped();
+    fx.collections.post.fields.title.group = 'meta';
+    expect(issuesOf(fx)).toContainEqual({
+      path: 'collections.post.fields.title.group',
+      message: 'unknown group "meta" (add it to post.groups)',
+    });
+    const none = fixture();
+    none.collections.post.fields.title.group = 'content';
+    expect(issuesOf(none).map((i) => i.path)).toEqual(['collections.post.fields.title.group']);
+  });
+
+  it('rejects a group on a nested field', () => {
+    const fx = grouped();
+    fx.collections.post.fields.seo = {
+      type: 'object',
+      label: 'SEO',
+      fields: { title: { type: 'string', label: 'Title', group: 'seo' } },
+    };
+    expect(issuesOf(fx)).toContainEqual({
+      path: 'collections.post.fields.seo.fields.title.group',
+      message: 'group is only for top-level fields',
+    });
+  });
+
+  it('rejects a bad group key and an empty label', () => {
+    const fx = grouped();
+    fx.collections.post.groups['bad-key'] = { label: 'Bad' };
+    fx.collections.post.groups.media.label = '';
+    const paths = issuesOf(fx).map((i) => i.path);
+    expect(paths).toContain('collections.post.groups.bad-key');
+    expect(paths).toContain('collections.post.groups.media.label');
+  });
+
+  it('rejects an unknown key in a group', () => {
+    const fx = grouped();
+    fx.collections.post.groups.media.icon = 'image';
+    expect(issuesOf(fx)).toContainEqual({ path: 'collections.post.groups.media.icon', message: 'unknown key "icon"' });
+  });
+
+  it('puts fields without a group into the first one, in schema order, and drops empty groups', () => {
+    const fx = grouped();
+    fx.collections.post.groups.empty = { label: 'Empty' };
+    expect(fieldGroups(loadSchema(fx).collections.post)).toEqual([
+      { key: 'content', label: 'Content', fields: ['title', 'body', 'author'] },
+      { key: 'media', label: 'Media', fields: ['cover'] },
+      { key: 'seo', label: 'SEO', fields: ['tags'] },
+    ]);
+  });
+
+  it('uses own keys only: a prototype name is no group, but may be a group key', () => {
+    const fx = grouped();
+    fx.collections.post.fields.title.group = 'toString';
+    expect(issuesOf(fx).map((i) => i.path)).toEqual(['collections.post.fields.title.group']);
+    const own = grouped();
+    own.collections.post.groups = { constructor: { label: 'Main' }, media: { label: 'Media' }, seo: { label: 'SEO' } };
+    expect(fieldGroups(loadSchema(own).collections.post).map((g) => g.key)).toEqual(['constructor', 'media', 'seo']);
+  });
+
+  it('is one group of every field without groups', () => {
+    expect(fieldGroups(loadSchema(fixture()).collections.post)).toEqual([
+      { key: '', label: '', fields: ['title', 'body', 'tags', 'author'] },
+    ]);
   });
 });

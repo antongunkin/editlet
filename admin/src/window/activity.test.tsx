@@ -31,7 +31,7 @@ function setup({ syncing = true } = {}) {
     </QueryClientProvider>,
   );
   /** The indicator's text; '' while idle (nothing is shown). */
-  const text = () => document.querySelector('.editlet-window__activity')?.textContent ?? '';
+  const text = () => document.querySelector('[data-editlet="activity"]')?.textContent ?? '';
   const refetch = () => void client.refetchQueries({ queryKey: ['x'] });
   return { load, save, next, refetch, mutate: () => mutate(), text };
 }

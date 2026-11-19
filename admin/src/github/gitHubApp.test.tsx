@@ -6,6 +6,7 @@ import { tokenSession, writeSession } from './session';
 import { createAdminFakeGitHub, type AdminFakeGitHub } from '../test/fakeGitHub';
 import { fixtureFiles } from '../test/fixture';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
+import { HOME_LOADED } from '../test/render';
 
 // The live-site gate: access check, then the git style read from the base branch's schema.
 
@@ -29,8 +30,10 @@ describe('GitHubApp', () => {
   it('shows the Admin role to a repository admin', async () => {
     open(createAdminFakeGitHub({ admin: true }));
     const main = await screen.findByRole('main');
-    expect(await within(main).findByRole('link', { name: 'Post (1)' })).toBeDefined();
-    expect(screen.getByText('Admin')).toBeDefined();
+    expect(await within(main).findByRole('link', { name: HOME_LOADED })).toBeDefined();
+    // The role is in the account sheet the header's avatar opens.
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+    expect(await screen.findByText('Admin')).toBeDefined();
     expect(screen.queryByText('Editor')).toBeNull();
   });
 
@@ -65,6 +68,6 @@ describe('GitHubApp', () => {
     failing = false;
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     const main = await screen.findByRole('main');
-    await waitFor(() => expect(within(main).getByRole('link', { name: 'Post (1)' })).toBeDefined());
+    await waitFor(() => expect(within(main).getByRole('link', { name: HOME_LOADED })).toBeDefined());
   });
 });

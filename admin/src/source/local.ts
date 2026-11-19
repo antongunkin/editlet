@@ -1,13 +1,21 @@
-import { DEV_API_BASE, type DevCommitChange, type DevCommitRequest, type DevFilesResponse } from '../../../core/devApi';
+import {
+  DEV_API_BASE,
+  type DevCommitChange,
+  type DevCommitRequest,
+  type DevFilesResponse,
+  type DevVersionsResponse,
+} from '../../../core/devApi';
 import { EditletError, type Issue } from '../../../core/issues';
-import type { ContentSource, FileChange } from '../../../core/source';
+import { versionLimit, type ContentSource, type FileChange } from '../../../core/source';
 
 /** A `FileChange` with an optional expected blob sha (`null` = the file must not exist yet). */
 export type SourceChange = FileChange & { sha?: string | null };
 
-/** A `ContentSource` whose `commit` also takes per-change expected shas. */
+/** A `ContentSource` whose `commit` also takes per-change expected shas; it always has the history reads. */
 export type LocalSource = ContentSource & {
   commit(changes: SourceChange[], message: string): Promise<{ issues: Issue[] }>;
+  listVersions: NonNullable<ContentSource['listVersions']>;
+  readVersion: NonNullable<ContentSource['readVersion']>;
 };
 
 export interface LocalSourceOptions {
@@ -72,6 +80,22 @@ export function createLocalSource({
         return { issues };
       }
       throw new Error(`Dev API ${res.status}`);
+    },
+
+    async listVersions(path, limit) {
+      const query = new URLSearchParams({ path, limit: String(versionLimit(limit)) });
+      const res = await fetchFn(`${base}/versions?${query}`);
+      if (res.status !== 200) throw new Error(`Dev API ${res.status}`);
+      return ((await res.json()) as DevVersionsResponse).versions;
+    },
+
+    async readVersion(path, commit) {
+      const res = await fetchFn(`${base}/version?${new URLSearchParams({ path, commit })}`);
+      if (res.status === 404) {
+        throw new EditletError([{ file: path, path: '', message: `Not in ${commit.slice(0, 7)}: ${path}` }]);
+      }
+      if (res.status !== 200) throw new Error(`Dev API ${res.status}`);
+      return new Uint8Array(await res.arrayBuffer());
     },
   };
 }

@@ -1,7 +1,7 @@
 import { describedBy, fieldProps, invalid } from './shared';
 import type { WidgetProps } from './types';
 
-import { cn, Field, FIELD_INPUT_CLASS } from '../ui';
+import { Field, Input, Swatch, SwatchInput } from '../ui';
 
 const PICKER_FALLBACK = '#000000';
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -10,24 +10,24 @@ const HEX = /^#[0-9a-f]{6}$/i;
 export function ColorField({ name, field, value, onChange, onBlur, error }: WidgetProps<string>) {
   return (
     <Field {...fieldProps(field, error, name)} htmlFor={name}>
-      <div className="editlet-ff-color__row">
-        <input
-          type="color"
-          className="editlet-ff-color__picker"
-          value={HEX.test(value) ? value.toLowerCase() : PICKER_FALLBACK}
-          onChange={(e) => onChange(e.target.value.toLowerCase())}
-          onBlur={onBlur}
-          aria-invalid={invalid(error)}
-          aria-describedby={describedBy(name, field, error)}
-          aria-required={field.required || undefined}
-          aria-label={`${field.label} color picker`}
-        />
-        <div className="editlet-ff-color__input-wrap">
-          <input
+      <div className="flex flex-wrap items-center gap-3">
+        <Swatch color={HEX.test(value) ? value.toLowerCase() : PICKER_FALLBACK}>
+          <SwatchInput
+            value={HEX.test(value) ? value.toLowerCase() : PICKER_FALLBACK}
+            onChange={(e) => onChange(e.target.value.toLowerCase())}
+            onBlur={onBlur}
+            aria-invalid={invalid(error)}
+            aria-describedby={describedBy(name, field, error)}
+            aria-required={field.required || undefined}
+            aria-label={`${field.label} color picker`}
+          />
+        </Swatch>
+        <div className="flex-1">
+          <Input
             id={name}
             type="text"
             name={name}
-            className={cn(FIELD_INPUT_CLASS, 'editlet-ff-color__hex-input')}
+            className="font-mono"
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onBlur={onBlur}

@@ -1,10 +1,10 @@
-import { useId, useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { EditletError } from '../../../core/issues';
 import { planRename, type RenamePlan } from '../../../core/rename';
 import type { Schema } from '../../../core/schema';
 import type { PlanFile, ReferrerItem } from '../data/queries';
-import { AlertDialog, Field, FIELD_INPUT_CLASS } from '../ui';
+import { Confirm, Field, Input } from '../ui';
 
 type Props = {
   open: boolean;
@@ -22,6 +22,8 @@ type Props = {
   onConfirm(plan: RenamePlan<PlanFile>): void;
   /** The new-branch field (GitHub on the base branch). */
   children?: ReactNode;
+  /** The slug the field starts with (the entry's own); /design shows it typed. */
+  initialSlug?: string;
 };
 
 /** The plan for `slug`, or why it cannot be renamed to it. */
@@ -43,13 +45,14 @@ function tryPlan(props: Props, slug: string): { plan: RenamePlan<PlanFile> } | {
 export function RenameDialog(props: Props) {
   const { open, onOpenChange, self, pending, blocked, onConfirm, children } = props;
   const inputId = useId();
-  const [slug, setSlug] = useState(self.slug);
+  const field = useRef<HTMLInputElement>(null);
+  const [slug, setSlug] = useState(props.initialSlug ?? self.slug);
   const result = useMemo(() => (slug === self.slug ? null : tryPlan(props, slug)), [props, slug, self.slug]);
   const plan = result && 'plan' in result ? result.plan : null;
   const error = result && 'error' in result ? result.error : undefined;
   const others = plan ? plan.write.filter((w) => w.entry.path !== self.path) : [];
   return (
-    <AlertDialog
+    <Confirm
       open={open}
       onOpenChange={(next) => {
         if (!next) setSlug(self.slug);
@@ -61,11 +64,12 @@ export function RenameDialog(props: Props) {
       pending={pending}
       confirmDisabled={blocked || plan === null}
       onConfirm={() => plan && onConfirm(plan)}
+      initialFocus={field}
     >
       <Field label="New slug" htmlFor={inputId} error={error} describedById={inputId}>
-        <input
+        <Input
+          ref={field}
           id={inputId}
-          className={FIELD_INPUT_CLASS}
           value={slug}
           autoComplete="off"
           spellCheck={false}
@@ -75,7 +79,10 @@ export function RenameDialog(props: Props) {
         />
       </Field>
       {plan ? (
-        <ul className="editlet-rename__plan" aria-label="Rename plan">
+        <ul
+          className="flex flex-col gap-1 rounded-xl bg-muted px-4 py-3 font-mono text-xs wrap-anywhere"
+          aria-label="Rename plan"
+        >
           <li>
             {self.path} → {plan.write[0]!.path}
           </li>
@@ -93,6 +100,6 @@ export function RenameDialog(props: Props) {
         </ul>
       ) : null}
       {children}
-    </AlertDialog>
+    </Confirm>
   );
 }

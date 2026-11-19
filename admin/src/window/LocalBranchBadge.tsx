@@ -3,8 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DraftBadge, UnsavedLink, useEntryStatus } from './entryStatus';
 
 import { DEV_API_BASE, type DevGitResponse } from '../../../core/devApi';
-import { Button } from '../ui/Button';
-import { Icon } from '../ui/Icon';
+import { BranchChip, StatusChip } from '../ui/parts/status-chips';
 
 const POLL_MS = 3000;
 
@@ -25,37 +24,40 @@ function useLocalGit(): DevGitResponse | null {
 }
 
 /**
- * Dev server: the checked-out git branch, as the same small button as GitHub mode's branch picker, disabled (there is
- * nothing to pick: the dev server works on whatever is checked out). The icon shows git only: green when everything is committed, orange when
- * files are saved to disk and not committed. Unsaved form edits are a separate link next to it, one qualifier at most.
+ * Dev server: the checked-out git branch as the design's branch chip (FigCraft *Entry · saved (dev)*), disabled: there
+ * is nothing to pick, the dev server works on whatever is checked out. Its description says whether everything is
+ * committed. After it, one qualifier at most: the open entry's unsaved edits, or the files saved to disk and not
+ * committed (*1 uncommitted*).
  */
 export function LocalBranchBadge() {
   const git = useLocalGit();
   const entry = useEntryStatus();
   const unsaved = entry !== null && (entry.dirty || entry.isNew);
   const uncommitted = git ? `${git.changes} uncommitted` : '';
-  const tone = (git?.changes ?? 0) > 0 ? 'changed' : 'ok';
+  const state = git
+    ? git.changes === 0
+      ? `${git.branch}: all changes committed`
+      : `${git.branch}: ${uncommitted}`
+    : '';
   return (
     <>
       {git ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="editlet-branch-chip"
-          icon={<Icon.GitBranch size={14} />}
+        <BranchChip
+          name={git.branch ?? ''}
           disabled
-          data-tone={tone}
-          title={git.changes === 0 ? `${git.branch}: all changes committed` : `${git.branch}: ${uncommitted}`}
-        >
-          <span className="editlet-branch-chip__name">{git.branch}</span>
-        </Button>
+          // The name says it is the branch and which (*Branch main*); GitHub mode's chip opens the picker instead.
+          aria-label={`Branch ${git.branch}`}
+          description={state}
+          title={state}
+          className="max-w-64"
+        />
       ) : (
-        <span className="editlet-window__status-text">Local files</span>
+        <span className="text-sm text-muted-foreground">Local files</span>
       )}
       {unsaved ? (
         <UnsavedLink entry={entry} />
       ) : git && git.changes > 0 ? (
-        <span className="editlet-branch-chip__changes">{uncommitted}</span>
+        <StatusChip tone="unsaved">{uncommitted}</StatusChip>
       ) : null}
       {entry ? <DraftBadge entry={entry} /> : null}
     </>

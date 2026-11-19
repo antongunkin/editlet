@@ -340,6 +340,53 @@ describe('history across several commits', () => {
   });
 });
 
+describe('listVersions and readVersion', () => {
+  const HELLO_PATH = 'cms/content/post/hello.md';
+  const AGAIN = '---\ntitle: Hello again\nauthor: author/jane\n---\n';
+
+  it('lists the commits of the branch that touched a file, newest first, with its blob sha', async () => {
+    const { source, fake } = setup();
+    const second = fake.commit('main', { [HELLO_PATH]: AGAIN }, 'Say hello again');
+    fake.commit('main', { 'cms/content/post/world.md': '---\ntitle: Other\n---\n' });
+    const versions = await source.listVersions(HELLO_PATH);
+    expect(versions.map((v) => v.message)).toEqual(['Say hello again', 'Initial main']);
+    expect(versions[0]).toMatchObject({
+      commit: second,
+      sha: await gitBlobSha(bytesOf(AGAIN)),
+      actor: { name: 'Jane Doe', login: 'jane', avatarUrl: 'https://avatars.test/jane' },
+      url: `https://github.test/${second}`,
+    });
+    expect(await source.listVersions(HELLO_PATH, 1)).toHaveLength(1);
+  });
+
+  it('is empty for a path no commit touched', async () => {
+    const { source } = setup();
+    expect(await source.listVersions('cms/content/post/nope.md')).toEqual([]);
+  });
+
+  it('gives a null sha for the commit that deleted the file', async () => {
+    const { source, fake } = setup();
+    fake.commit('main', { [HELLO_PATH]: null }, 'Remove hello');
+    fake.commit('main', { [HELLO_PATH]: HELLO }, 'Bring hello back');
+    const versions = await source.listVersions(HELLO_PATH);
+    expect(versions.map((v) => [v.message, v.sha === null])).toEqual([
+      ['Bring hello back', false],
+      ['Remove hello', true],
+      ['Initial main', false],
+    ]);
+  });
+
+  it('reads the file as a commit left it, and rejects where it was not a file', async () => {
+    const { source, fake } = setup();
+    const first = fake.state.refs.get('main')!;
+    fake.commit('main', { [HELLO_PATH]: AGAIN });
+    expect(new TextDecoder().decode(await source.readVersion(HELLO_PATH, first))).toBe(HELLO);
+    expect(await rejection(source.readVersion('cms/content/post/nope.md', first))).toBeInstanceOf(EditletError);
+    expect(await rejection(source.readVersion('cms/content/post', first))).toBeInstanceOf(EditletError);
+    expect(await rejection(source.readVersion(HELLO_PATH, 'f'.repeat(40)))).toBeInstanceOf(GitHubError);
+  });
+});
+
 describe('a branch without a readable schema', () => {
   it.each([
     ['invalid JSON', '{'],

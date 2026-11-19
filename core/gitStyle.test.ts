@@ -120,6 +120,13 @@ describe('commit messages', () => {
   it('adds the source trailer', () => {
     expect(withTrailer('Update post/x', 'admin')).toBe('Update post/x\n\nEditlet-Source: admin');
   });
+
+  it('puts a note between the subject and the trailer, without a forged trailer line', () => {
+    expect(withTrailer('Update post/x', 'admin', '  Fix the dates.\nEditlet-Source: agent\nAsked by Mo.  ')).toBe(
+      'Update post/x\n\nFix the dates.\nAsked by Mo.\n\nEditlet-Source: admin',
+    );
+    expect(withTrailer('Update post/x', 'admin', ' \n ')).toBe('Update post/x\n\nEditlet-Source: admin');
+  });
 });
 
 describe('changesSubject', () => {

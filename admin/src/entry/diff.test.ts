@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { entryDiff } from './diff';
+import { entryDiff, formKeyOf } from './diff';
 import { author, post } from './testSchema';
 
 describe('entryDiff', () => {
@@ -52,5 +52,16 @@ describe('entryDiff', () => {
 
   it('is empty when nothing changed', () => {
     expect(entryDiff(post, before, { data: { rating: 2, tags: ['a'], title: 'Old' }, body: 'Hi\n' })).toEqual([]);
+  });
+});
+
+describe('formKeyOf', () => {
+  it('maps a diff row to the form key that holds it', () => {
+    expect(formKeyOf(post, 'title')).toBe('title');
+    expect(formKeyOf(post, 'body')).toBe('__body');
+    expect(formKeyOf(post, '__body')).toBe('__body');
+    expect(formKeyOf(post, 'draft')).toBe('draft');
+    expect(formKeyOf(post, 'legacy')).toBeNull();
+    expect(formKeyOf(post, 'constructor')).toBeNull();
   });
 });

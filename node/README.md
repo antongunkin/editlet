@@ -27,7 +27,7 @@ import { readProject, validateProject, writeTypes, createDevHandler } from 'edit
 | Feature | Doc |
 |---|---|
 | Reading and validating a repo, writing types, the skill scripts | [docs/project.md](../../../docs/node/project.md) |
-| Dev file API: routes, statuses, `If-Match`, security | [docs/dev-api.md](../../../docs/node/dev-api.md) |
+| Dev file API: routes (files, commit, git, history, file versions), statuses, `If-Match`, security | [docs/dev-api.md](../../../docs/node/dev-api.md) |
 
 ## Scripts
 

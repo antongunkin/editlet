@@ -1,18 +1,10 @@
 import { useForm, useStore } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  createContext,
-  createElement,
-  useContext,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { createContext, createElement, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import { EntryMeta } from './EntryMeta';
+import { EntryDetails, EntryUpdated, useEntryHistory } from './EntryMeta';
+import { EntryView } from './EntryView';
+import { FieldRows, type FieldItem } from './FieldRows';
 import { RenameDialog } from './RenameDialog';
 import { ReferrerList, UsedBy } from './UsedBy';
 
@@ -23,10 +15,10 @@ import type { Issue } from '../../../core/issues';
 import { entryFilePath, isHiddenContentPath, isImagePath, parseEntryPath, resolveAssetPath } from '../../../core/paths';
 import { referenceFields } from '../../../core/references';
 import { planRemove, type RenamePlan } from '../../../core/rename';
-import { markdownFieldKey, type Collection, type Field, type Schema } from '../../../core/schema';
+import { fieldGroups, markdownFieldKey, type Collection, type Field, type Schema } from '../../../core/schema';
 import { initialData, validateEntry } from '../../../core/validate';
 import { GitHubError } from '../../../github';
-import { PreviewImage } from '../data/PreviewImage';
+import { ImagePlaceholder, PreviewImage } from '../data/PreviewImage';
 import {
   invalidateFiles,
   IssuesError,
@@ -40,11 +32,16 @@ import {
   type PlanFile,
 } from '../data/queries';
 import { AssetPreview, canOpenInWindow, mimeType } from '../data/useAssetUrl';
-import { ReviewDialog } from '../diff/ReviewDialog';
-import { issuesByField, relativeSrc, uniqueAssetPath } from '../entry/changes';
-import { entryDiff } from '../entry/diff';
-import { pendingNewEntries } from '../entry/pending';
+import { CompareSheet } from '../diff/CompareSheet';
+import { reviewEntries, ReviewDialog, useWide } from '../diff/ReviewDialog';
+import { issuesByField, relativeSrc, requiredFieldKeys, uniqueAssetPath } from '../entry/changes';
+import { conflictFields, defaultPicks, mergeConflict, type ConflictPick } from '../entry/conflict';
+import { entryDiff, formKeyOf, type FieldDiffRow } from '../entry/diff';
+import { copyData, copySlug } from '../entry/duplicate';
+import { groupOf, groupTabs } from '../entry/groups';
+import { pendingCopies, pendingNewEntries } from '../entry/pending';
 import { removeChanges, removeIssues, renameChanges } from '../entry/plans';
+import { itemTitle } from '../entry/summary';
 import {
   BODY_KEY,
   DRAFT_KEY,
@@ -54,21 +51,41 @@ import {
   serializeEntry,
   type FormValues,
 } from '../entry/values';
-import { FieldWidget, type FieldContext } from '../fields';
+import type { FieldContext } from '../fields';
+import { routeFromBranch } from '../github/branchName';
 import { errorText } from '../github/errors';
 import { NewBranchField, useNewBranch } from '../github/NewBranchField';
-import { ApprovalNote, useCodeowners, useCommitMessage } from '../github/style';
+import { ApprovalNote, useCodeowners, useCommitMessage, useSaveTo } from '../github/style';
 import { BRANCHES_KEY, useWorkspace } from '../github/workspace';
+import { EntryHistory, hasHistory } from '../history/EntryHistory';
 import { imageBytes, imageFileError } from '../media/edits';
 import { usePreview, useSiteRefresh } from '../preview/PreviewProvider';
 import { fieldPreviews } from '../preview/snapshot';
+import { parentRoute } from '../route';
 import { RouteLink } from '../RouteLink';
 import { SelectNoticeBanner } from '../select/SelectNoticeBanner';
 import { useApplySelect, type SelectTarget } from '../select/useApplySelect';
 import { useSource } from '../source/context';
 import type { SourceChange } from '../source/local';
-import { AlertDialog, Button, Icon } from '../ui';
+import {
+  ActionRow,
+  Badge,
+  Banner,
+  Button,
+  buttonVariants,
+  cn,
+  Confirm,
+  FieldRow,
+  Icon,
+  IconButton,
+  Sheet,
+} from '../ui';
+import { ActionSheet } from '../ui/parts/action-sheet';
+import { Checkbox } from '../ui/primitives/checkbox';
+import { toastManager } from '../ui/primitives/toast';
+import { StatusBadge } from '../ui/StatusBadge';
 import { useBridge, useRoute } from '../useRoute';
+import { useScreenChrome, type ScreenChrome } from '../window/chrome';
 import { useReportEntryStatus } from '../window/entryStatus';
 
 /** The GitHub source's conflict issues: shown as `GITHUB_CONFLICT_TEXT`, with Reload. */
@@ -78,6 +95,11 @@ const GITHUB_CONFLICT_MESSAGES = new Set([
 ]);
 const GITHUB_CONFLICT_TEXT =
   'This entry changed on GitHub since you opened it. Reload to read it, then review your change again.';
+/** A save refused because the file is newer than the form's: the newer file is read and the CTA compares. */
+const COMPARE_MESSAGES = new Set([
+  'File changed since it was read',
+  'Changed on GitHub since it was read; reload and review',
+]);
 const RELOAD_MESSAGES = new Set([
   'File changed since it was read',
   'File already exists',
@@ -101,11 +123,13 @@ function StagedImage({
   bytes,
   alt,
   openable,
+  className,
 }: {
   path: string;
   bytes: Uint8Array;
   alt: string;
   openable?: boolean;
+  className?: string;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -114,20 +138,28 @@ function StagedImage({
     setUrl(next);
     return () => URL.revokeObjectURL(next);
   }, [path, bytes]);
-  if (url) return <PreviewImage url={url} alt={alt} openable={openable && canOpenInWindow(path)} />;
-  return (
-    <div className="editlet-ff-image__empty" role="img" aria-label={alt || 'No image'}>
-      <Icon.Image size={16} />
-    </div>
-  );
+  if (url)
+    return <PreviewImage url={url} alt={alt} className={className} openable={openable && canOpenInWindow(path)} />;
+  return <ImagePlaceholder alt={alt} className={className} />;
 }
 
 /** Preview for a repo path: staged bytes (object URL) when staged, else the listed file. */
-function EntryPreview({ path, alt, openable }: { path: string | null; alt: string; openable?: boolean }) {
+function EntryPreview({
+  path,
+  alt,
+  openable,
+  className,
+}: {
+  path: string | null;
+  alt: string;
+  openable?: boolean;
+  className?: string;
+}) {
   const staged = useContext(StagedContext);
   const bytes = path === null ? undefined : staged.get(path);
-  if (path !== null && bytes) return <StagedImage path={path} bytes={bytes} alt={alt} openable={openable} />;
-  return createElement(AssetPreview, { path, alt, openable });
+  if (path !== null && bytes)
+    return <StagedImage path={path} bytes={bytes} alt={alt} openable={openable} className={className} />;
+  return createElement(AssetPreview, { path, alt, openable, className });
 }
 
 /** Repo paths that the entry's image fields and body images point at (`findImageRefs`). */
@@ -160,6 +192,22 @@ type EntryFormProps = {
   onCommitStart(): void;
   onCommitEnd(ok: boolean): void;
   onReload(): void;
+  /** The screen's chrome from the window (the header actions, the status line, the shell's banners). */
+  chrome: ScreenChrome;
+  /** Notices of the screen around the form: changed on disk, a file error. */
+  notices?: ReactNode;
+  /** The chosen field group (`null`: the first); kept by the screen, so a save or Reload keeps the tab. */
+  group: string | null;
+  onGroupChange(key: string): void;
+  /**
+   * The file is newer than the one the form was opened on (another save), and the form has edits: the CTA compares
+   * them field by field (Conflict · compare). `null` when it is not.
+   */
+  newer: EntryFileData | null;
+  /** Apply the comparison: the form starts again on `file` from these values and staged uploads. */
+  onRebase(file: EntryFileData, values: FormValues, staged: Map<string, Uint8Array>): void;
+  /** Values and staged uploads to start from (after a rebase); else the file's own. */
+  start?: { values: FormValues; staged: Map<string, Uint8Array> };
 };
 
 function EntryForm({
@@ -173,6 +221,13 @@ function EntryForm({
   onCommitStart,
   onCommitEnd,
   onReload,
+  chrome,
+  notices,
+  group,
+  onGroupChange,
+  newer,
+  onRebase,
+  start,
 }: EntryFormProps) {
   const def = schema.collections[collection];
   const ref = `${collection}/${slug}`;
@@ -184,6 +239,8 @@ function EntryForm({
   const workspace = useWorkspace();
   const commitMessage = useCommitMessage();
   const codeowners = useCodeowners();
+  const saveTo = useSaveTo();
+  const wide = useWide();
   const { navigate } = useRoute();
   const { setGuard } = useBridge();
   const refreshSite = useSiteRefresh();
@@ -191,7 +248,7 @@ function EntryForm({
   const source = useSource();
 
   const [initialValues] = useState<FormValues>(() => entryToForm(def, initial));
-  const form = useForm({ defaultValues: initialValues });
+  const form = useForm({ defaultValues: start?.values ?? initialValues });
   const values = useStore(form.store, (s) => s.values);
 
   // After a successful save the submitted entry is the baseline, so the form is clean before the saved file loads.
@@ -201,17 +258,35 @@ function EntryForm({
   const dirty = isEntryChanged(current, baseline);
   const savable = isNew || dirty;
 
-  const [staged, setStaged] = useState<Staged>(() => new Map());
+  const [staged, setStaged] = useState<Staged>(() => start?.staged ?? new Map());
   const stagedRef = useRef(staged);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [conflict, setConflict] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // *Your changes* › Note: the next commit's body (GitHub mode); cleared after a save.
+  const [note, setNote] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [removeRefs, setRemoveRefs] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
-  const moreId = useId();
-  const moreMenu = useRef<HTMLDivElement>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // The field whose modal is open (one field per modal): a row's tap, the Fix CTA, select-to-edit.
+  const [openField, setOpenField] = useState<string | null>(null);
+  const openFieldRef = useRef(openField);
+  openFieldRef.current = openField;
+  // Field groups (tabs): the chosen one shows its rows; opening a field elsewhere chooses its tab first.
+  const groups = useMemo(() => fieldGroups(def), [def]);
+  const tabbed = groups.length > 1;
+  // `?? ''`: a collection with `groups` and no fields has no group at all.
+  const activeGroup = group !== null && groups.some((g) => g.key === group) ? group : (groups[0]?.key ?? '');
+  const activeGroupRef = useRef(activeGroup);
+  activeGroupRef.current = activeGroup;
+  const openAt = (key: string | null) => {
+    if (key !== null && tabbed) onGroupChange(groupOf(groups, key));
+    setOpenField(key);
+  };
 
   // Guard: site navigate, close-request, close(), in-app navigation and page unload.
   const dirtyRef = useRef(dirty);
@@ -304,6 +379,7 @@ function EntryForm({
       entries: (cs) => entryOptions.filter((o) => cs.includes(o.ref.slice(0, o.ref.indexOf('/')))),
       entriesPending: files.data === undefined,
       images,
+      contentDir: schema.contentDir,
       entryPath: path,
       async stageUpload(file) {
         const invalid = imageFileError(file);
@@ -317,6 +393,7 @@ function EntryForm({
         return relativeSrc(path, assetPath);
       },
       resolveSrc: (src) => resolveAssetPath(schema, path, src),
+      isStaged: (p) => stagedRef.current.has(p),
       toSrc: (p) => relativeSrc(path, p),
       Preview: EntryPreview,
       EntryLink: RouteLink,
@@ -326,10 +403,34 @@ function EntryForm({
       },
     };
   }, [schema, listed, staged, entryOptions, files.data, path, collection, slug, selectTargets]);
-  const selectNotice = useApplySelect(ref, def, () => form.state.values, selectTargets);
+  const mdKey = markdownFieldKey(def);
+  // After a rebase the form may hold a body the newer file has not (kept from yours): its row shows too.
+  const showBody = Object.hasOwn(start?.values ?? initialValues, BODY_KEY);
+  const bodyKey = mdKey ?? (showBody ? BODY_KEY : undefined);
+  const selectNotice = useApplySelect(
+    ref,
+    def,
+    () => form.state.values,
+    selectTargets,
+    openAt,
+    bodyKey === undefined ? [] : [bodyKey],
+    () => openFieldRef.current,
+    () => {
+      const from = activeGroupRef.current;
+      return () => {
+        if (tabbed) onGroupChange(from);
+      };
+    },
+  );
 
   const { fields: fieldErrors, general: generalIssues } = issuesByField(issues);
-  const general = [...new Set(generalIssues.map((m) => (GITHUB_CONFLICT_MESSAGES.has(m) ? GITHUB_CONFLICT_TEXT : m)))];
+  const general = [
+    ...new Set(
+      generalIssues
+        .filter((m) => !(newer && COMPARE_MESSAGES.has(m)))
+        .map((m) => (GITHUB_CONFLICT_MESSAGES.has(m) ? GITHUB_CONFLICT_TEXT : m)),
+    ),
+  ];
 
   const clearIssues = (key: string) =>
     setIssues((prev) => {
@@ -357,8 +458,63 @@ function EntryForm({
   /** Back to the saved file: the form, staged uploads and issues. The page preview follows the form. */
   const onDiscard = () => {
     form.reset(initialValues);
+    // The ref too: the next upload builds on it, and must not bring the dropped files back.
+    stagedRef.current = new Map();
     setStaged(new Map());
     setIssues([]);
+  };
+
+  /** *Revert this change*: one field back to the saved value (an existing entry only; a new one has none). */
+  const onRevert = (_entry: string, row: FieldDiffRow) => {
+    const key = formKeyOf(def, row.key);
+    if (key === null) return;
+    form.setFieldValue(key, entryToForm(def, baseline)[key]);
+    clearIssues(row.key);
+  };
+  // Nothing left to save (every field reverted): *Your changes* closes, the entry is clean.
+  if (reviewOpen && !savable && !commit.isPending) setReviewOpen(false);
+  /** History's *Restore this version*: the version's values become the form's, an unsaved edit saved as usual. */
+  const onRestore = (restored: FormValues) => {
+    form.reset(restored, { keepDefaultValues: true });
+    setIssues([]);
+    // An older commit can hold the saved file again (a revert): then nothing is left to save.
+    const changed = isEntryChanged(formToEntry(def, restored), baseline);
+    toastManager.add({
+      title: changed ? 'Version restored · save to keep it' : 'Version restored: it is the saved file',
+    });
+  };
+
+  /** ⋯ → Duplicate: the saved entry as a new, unsaved one at `<slug>-copy`; the toast's Undo comes back here. */
+  const onDuplicate = () => {
+    // The file list says which addresses are taken: without it a copy could open an entry that exists.
+    if (!loaded || files.data === undefined) return;
+    const taken = new Set<string>();
+    for (const p of listed) {
+      const parsed = parseEntryPath(schema, p);
+      if (parsed?.collection === collection) taken.add(parsed.slug);
+    }
+    const to = copySlug(slug, taken);
+    // Right after a save the loaded file is still the old one until the new sha loads: copy what was saved.
+    const file = saved ?? loaded.file;
+    pendingCopies.set(`${collection}/${to}`, { data: copyData(def, file.data), body: file.body });
+    navigate({ kind: 'entry', collection, slug: to });
+    const id = toastManager.add({
+      title: 'Duplicated',
+      actionProps: {
+        children: 'Undo',
+        onClick: () => {
+          toastManager.close(id);
+          navigate({ kind: 'entry', collection, slug });
+        },
+      },
+    });
+  };
+
+  /** ⋯ → Set as draft / Set as published: the `draft` flag as an unsaved edit. */
+  const onToggleDraft = () => {
+    const next = form.state.values[DRAFT_KEY] !== true;
+    form.setFieldValue(DRAFT_KEY, next);
+    toastManager.add({ title: `${next ? 'Set as draft' : 'Set as published'} · save to keep it` });
   };
 
   const onSave = () => {
@@ -380,8 +536,29 @@ function EntryForm({
         ? error.message
         : String(error);
     const list: Issue[] = error instanceof IssuesError ? error.issues : [{ path: '', message }];
+    // Refused for a newer file: read it; once the screen has it, Compare changes replaces this banner (`general`).
+    if (loaded && list.some((i) => COMPARE_MESSAGES.has(i.message))) void invalidateFiles(client);
     setIssues(list);
     setConflict(list.some((i) => RELOAD_MESSAGES.has(i.message)));
+  };
+
+  // Conflict · compare: the fields the newer file changed that differ from the form, and the editor's picks.
+  const [compareOpen, setCompareOpen] = useState(false);
+  const theirs = useMemo(() => (newer ? newer.file : null), [newer]);
+  const conflicts = useMemo(
+    () => (theirs ? conflictFields(def, baseline, theirs, current) : []),
+    [theirs, def, baseline, current],
+  );
+  const [picks, setPicks] = useState<Record<string, ConflictPick>>({});
+  const openCompare = () => {
+    setPicks(defaultPicks(conflicts));
+    setCompareOpen(true);
+  };
+  const applyCompare = () => {
+    if (!newer) return;
+    const values = mergeConflict(def, baseline, newer.file, current, form.state.values, picks);
+    setCompareOpen(false);
+    onRebase(newer, values, stagedRef.current);
   };
 
   const blocked = newBranch.needed && newBranch.branch === undefined;
@@ -398,7 +575,7 @@ function EntryForm({
     try {
       await commit.mutateAsync({
         changes,
-        message: commitMessage(entrySubject(isNew ? 'create' : 'update', collection, slug)),
+        message: commitMessage(entrySubject(isNew ? 'create' : 'update', collection, slug), '', note),
         newBranch: newBranch.branch,
       });
     } catch (error) {
@@ -416,6 +593,9 @@ function EntryForm({
     onCommitEnd(true);
     setReviewOpen(false);
     setIssues([]);
+    setNote('');
+    // The first confirmation of the redesign (FigCraft *Saved*): a toast, polite, gone after a few seconds.
+    toastManager.add({ title: workspace ? 'Saved · 1 commit' : 'Saved to disk' });
     void refreshSite();
   };
 
@@ -467,162 +647,302 @@ function EntryForm({
     void refreshSite();
   };
 
-  const mdKey = markdownFieldKey(def);
-  const showBody = Object.hasOwn(initialValues, BODY_KEY);
   const draft = values[DRAFT_KEY] === true;
   const changes = useMemo(
     () => (dirty ? entryDiff(def, loaded ? baseline : null, current).length : 0),
     [dirty, def, loaded, baseline, current],
   );
-  useReportEntryStatus({ draft, dirty, isNew, changes }, onSave);
+  // The status line's *Unsaved changes* link: with a newer file a save would be refused, so it compares too.
+  useReportEntryStatus({ draft, dirty, isNew, changes }, newer && dirty ? openCompare : onSave);
 
-  const renderField = (key: string, field: Field, valueKey: string) => (
-    <form.Field key={key} name={valueKey}>
-      {(f) => (
-        <FieldWidget
-          name={key}
-          field={field}
-          value={f.state.value}
-          onChange={(v) => {
-            f.handleChange(v);
-            clearIssues(key);
-          }}
-          onBlur={f.handleBlur}
-          error={fieldErrors[key]}
-          ctx={ctx}
-        />
-      )}
-    </form.Field>
+  const history = useEntryHistory(path, isNew ? null : shaOf(loaded));
+  const changedKeys = useMemo(
+    () => new Set(dirty && loaded ? entryDiff(def, baseline, current).map((r) => r.key) : []),
+    [dirty, loaded, def, baseline, current],
+  );
+  const item = (key: string, field: Field, valueKey: string): FieldItem => ({
+    key,
+    name: key,
+    field,
+    value: values[valueKey],
+    onChange: (v) => {
+      form.setFieldValue(valueKey, v);
+      clearIssues(key);
+    },
+    error: fieldErrors[key],
+    changed: changedKeys.has(key),
+  });
+  // Frontmatter fields first, then the body: the rows follow the file's own order.
+  const items: FieldItem[] = [
+    ...Object.entries(def.fields).flatMap(([key, field]) => (field.type === 'markdown' ? [] : [item(key, field, key)])),
+    ...(mdKey !== undefined ? [item(mdKey, def.fields[mdKey]!, BODY_KEY)] : []),
+    ...(mdKey === undefined && showBody ? [item(BODY_KEY, BODY_FIELD, BODY_KEY)] : []),
+  ];
+  const titles = useMemo(() => new Map(entryOptions.map((o) => [o.ref, o.title])), [entryOptions]);
+  const titleOf = (r: string) => titles.get(r) ?? (files.data === undefined ? r : `Not found: ${r}`);
+  const titleValue = def.titleField ? values[def.titleField] : itemTitle(def.fields, values);
+  const entryTitle = typeof titleValue === 'string' && titleValue.trim() !== '' ? titleValue.trim() : slug;
+  const invalidItems = items.filter((i) => (i.error?.length ?? 0) > 0);
+  // A new, blank entry: the required fields still empty. The CTA walks to them one by one (FigCraft *New post*), before
+  // a save attempt marks them as errors.
+  // A required field inside an object or a block counts for its row (`seo.title` → `seo`). Only when the values change.
+  /* oxlint-disable react-hooks/exhaustive-deps -- `validate` reads the form's values, which `values` mirrors */
+  const requiredKeys = useMemo(
+    () => (isNew ? requiredFieldKeys(validate()) : null),
+    // `validate` reads the form's values, which `values` mirrors.
+    [isNew, values],
+  );
+  /* oxlint-enable react-hooks/exhaustive-deps */
+  const emptyRequired = requiredKeys ? items.filter((i) => requiredKeys.has(i.key)) : [];
+  const shownItems = tabbed ? items.filter((i) => groupOf(groups, i.key) === activeGroup) : items;
+
+  const parent = parentRoute(def.singleton ? { kind: 'collection', collection } : { kind: 'entry', collection, slug });
+  const back = parent ? (
+    <RouteLink
+      to={parent}
+      className={cn(buttonVariants({ variant: 'ghost' }), 'size-11 px-0')}
+      aria-label="Back"
+      title={`Back to ${def.singleton ? 'All content' : def.label}`}
+    >
+      <Icon name="chevron-left" size={20} />
+    </RouteLink>
+  ) : null;
+
+  const cta = commit.isPending ? (
+    <Button variant="primary" size="lg" full loading busyLabel="Saving…">
+      Saving…
+    </Button>
+  ) : newer && dirty ? (
+    // FigCraft *Entry · conflict*: the edits are kept, the one CTA opens the comparison.
+    <Button variant="primary" size="lg" full aria-haspopup="dialog" onClick={openCompare}>
+      Compare changes
+    </Button>
+  ) : invalidItems.length > 0 ? (
+    // The CTA takes you to the field that blocks saving (FigCraft *Entry · blocked*).
+    <Button variant="primary" size="lg" full onClick={() => openAt(invalidItems[0]!.key)}>
+      Fix {invalidItems.length} {invalidItems.length === 1 ? 'field' : 'fields'}
+    </Button>
+  ) : emptyRequired.length > 0 ? (
+    <Button variant="primary" size="lg" full onClick={() => openAt(emptyRequired[0]!.key)}>
+      Fill {emptyRequired.length} required {emptyRequired.length === 1 ? 'field' : 'fields'}
+    </Button>
+  ) : savable ? (
+    <Button variant="primary" size="lg" full onClick={onSave}>
+      {isNew ? 'Save' : `Save ${changes} ${changes === 1 ? 'change' : 'changes'}`}
+    </Button>
+  ) : workspace && !workspace.onBase ? (
+    <RouteLink
+      to={{ kind: 'branch', name: routeFromBranch(workspace.active, workspace.prefix) }}
+      className={buttonVariants({ variant: 'primary', size: 'lg', full: true })}
+    >
+      <Icon name="eye" size={20} />
+      Review changes
+    </RouteLink>
+  ) : null;
+
+  const badge = isNew ? (
+    <Badge tone="unsaved">New</Badge>
+  ) : dirty ? (
+    <Badge tone="unsaved">Unsaved</Badge>
+  ) : (
+    <StatusBadge draft={draft} showPublished />
   );
 
-  // Save and, for a saved entry, a chevron that opens Discard changes and Delete: two default (ink) buttons joined
-  // into one split button.
-  const actionButtons = (
-    <div className="editlet-split">
-      <Button
-        variant="default"
-        icon={<Icon.Check size={16} />}
-        disabled={!savable || commit.isPending}
-        onClick={onSave}
-      >
-        Save
-      </Button>
-      {!isNew ? (
-        <>
-          <span className="editlet-split__divider" aria-hidden="true" />
-          <Button variant="default" iconOnly popoverTarget={moreId} aria-label="More actions" title="More actions">
-            <Icon.ChevronDown size={16} />
-          </Button>
-        </>
-      ) : null}
-    </div>
-  );
-  const moreActions = (
+  const banners = (
     <>
-      {!isNew ? (
-        <div className="editlet-menu editlet-menu--actions" id={moreId} popover="auto" ref={moreMenu}>
-          <button
-            type="button"
-            className="editlet-menu__item"
-            disabled={!dirty}
-            onClick={() => {
-              moreMenu.current?.hidePopover?.();
-              setDiscardOpen(true);
-            }}
-          >
-            <Icon.Undo size={16} />
-            Discard changes
-          </button>
-          {def.singleton ? null : (
-            <button
-              type="button"
-              className="editlet-menu__item"
-              disabled={dirty}
-              title={dirty ? 'Save or discard the changes first' : undefined}
-              onClick={() => {
-                moreMenu.current?.hidePopover?.();
-                setRenameOpen(true);
-              }}
-            >
-              <Icon.Pencil size={16} />
-              Rename…
-            </button>
-          )}
-          <button
-            type="button"
-            className="editlet-menu__item editlet-menu__item--destructive"
-            onClick={() => {
-              moreMenu.current?.hidePopover?.();
-              setRemoveRefs(false);
-              setDeleteOpen(true);
-            }}
-          >
-            <Icon.Trash size={16} />
-            Delete
-          </button>
-        </div>
+      {chrome.banners}
+      {notices}
+      <SelectNoticeBanner {...selectNotice} />
+      {invalidItems.length > 0 ? (
+        <Banner tone="danger">
+          {invalidItems.length === 1
+            ? `${invalidItems[0]!.field.label} needs a fix before you can save.`
+            : `${invalidItems.length} fields need a fix before you can save.`}
+        </Banner>
+      ) : null}
+      {general.length > 0 ? (
+        <Banner
+          tone="danger"
+          role="alert"
+          action={
+            conflict ? (
+              <Button size="md" onClick={onReload}>
+                Reload
+              </Button>
+            ) : undefined
+          }
+        >
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {general.map((m, i) => (
+              <li key={i}>{m}</li>
+            ))}
+          </ul>
+        </Banner>
       ) : null}
     </>
   );
 
   return (
     <StagedContext.Provider value={staged}>
-      <div className="editlet-page-row editlet-edit-post">
-        <div className="editlet-page-content">
-          <SelectNoticeBanner {...selectNotice} />
-          {general.length > 0 ? (
-            <div className="editlet-card editlet-card--banner editlet-entry__issues" role="alert">
-              <Icon.Alert />
-              <ul className="editlet-u-flex-1 editlet-u-stack editlet-u-gap-1">
-                {general.map((m, i) => (
-                  <li key={i}>{m}</li>
-                ))}
-              </ul>
-              {conflict ? (
-                <Button variant="outline" size="sm" onClick={onReload}>
-                  Reload
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          <form
-            className="editlet-edit-post__form-card"
-            aria-label={`${ref} fields`}
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (savable) onSave();
-            }}
-          >
-            <EntryMeta path={path} version={isNew ? null : shaOf(loaded)} />
-            {/* Frontmatter fields first, then the body: the form follows the file's own order. */}
-            {Object.entries(def.fields).map(([key, field]) =>
-              field.type === 'markdown' ? null : renderField(key, field, key),
+      <EntryView
+        section={def.singleton ? 'All content' : def.label}
+        back={back}
+        actions={
+          <>
+            {isNew ? null : (
+              <IconButton
+                label="More actions"
+                aria-haspopup="dialog"
+                onClick={() => setMoreOpen(true)}
+                icon={<Icon name="more" size={20} />}
+              />
             )}
-            {mdKey !== undefined ? renderField(mdKey, def.fields[mdKey]!, BODY_KEY) : null}
-            {mdKey === undefined && showBody ? renderField(BODY_KEY, BODY_FIELD, BODY_KEY) : null}
-          </form>
-          <UsedBy schema={schema} items={usedBy} />
-          {/* The form's split button, stuck to the bottom right of the window's scrolling body. */}
-          <div className="editlet-edit-post__actions">
-            {actionButtons}
-            {moreActions}
-          </div>
-        </div>
-      </div>
+            {chrome.windowActions}
+          </>
+        }
+        title={entryTitle}
+        badge={badge}
+        meta={<EntryUpdated history={history} />}
+        banners={banners}
+        groups={
+          tabbed ? { tabs: groupTabs(groups, items), value: activeGroup, onValueChange: onGroupChange } : undefined
+        }
+        fieldsLabel={`${ref} fields`}
+        fields={
+          <FieldRows items={shownItems} ctx={ctx} sub={entryTitle} open={openField} onOpen={openAt} title={titleOf} />
+        }
+        after={<UsedBy schema={schema} items={usedBy} />}
+        status={chrome.status}
+        cta={cta}
+      >
+        {isNew ? null : (
+          <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title={entryTitle}>
+            {def.singleton ? null : (
+              <ActionRow
+                icon="copy"
+                disabled={dirty || files.data === undefined}
+                note={dirty ? 'Save first' : undefined}
+                onClick={() => {
+                  setMoreOpen(false);
+                  onDuplicate();
+                }}
+              >
+                Duplicate
+              </ActionRow>
+            )}
+            <ActionRow
+              icon="undo"
+              disabled={!dirty}
+              onClick={() => {
+                setMoreOpen(false);
+                setDiscardOpen(true);
+              }}
+            >
+              Discard changes
+            </ActionRow>
+            <ActionRow
+              icon="file"
+              onClick={() => {
+                setMoreOpen(false);
+                setDetailsOpen(true);
+              }}
+            >
+              Details
+            </ActionRow>
+            {hasHistory(source) ? (
+              <ActionRow
+                icon="clock"
+                note={history.commits > 0 ? history.commits : undefined}
+                aria-haspopup="dialog"
+                onClick={() => {
+                  setMoreOpen(false);
+                  setHistoryOpen(true);
+                }}
+              >
+                History
+              </ActionRow>
+            ) : null}
+            {def.singleton ? null : (
+              <ActionRow
+                icon="pencil"
+                disabled={dirty}
+                note={dirty ? 'Save first' : undefined}
+                onClick={() => {
+                  setMoreOpen(false);
+                  setRenameOpen(true);
+                }}
+              >
+                Rename…
+              </ActionRow>
+            )}
+            <ActionRow
+              icon="file"
+              onClick={() => {
+                setMoreOpen(false);
+                onToggleDraft();
+              }}
+            >
+              {draft ? 'Set as published' : 'Set as draft'}
+            </ActionRow>
+            <ActionRow
+              icon="trash"
+              danger
+              onClick={() => {
+                setMoreOpen(false);
+                setRemoveRefs(false);
+                setDeleteOpen(true);
+              }}
+            >
+              Delete…
+            </ActionRow>
+          </ActionSheet>
+        )}
+        <Sheet open={detailsOpen} onOpenChange={setDetailsOpen} title="Details" sub={entryTitle}>
+          <EntryDetails history={history} />
+        </Sheet>
+        {isNew ? null : (
+          <EntryHistory
+            open={historyOpen}
+            onOpenChange={setHistoryOpen}
+            path={path}
+            sha={shaOf(loaded)}
+            entryTitle={entryTitle}
+            def={def}
+            current={current}
+            dirty={dirty}
+            historyUrl={history.historyUrl}
+            onRestore={onRestore}
+          />
+        )}
+      </EntryView>
       <ReviewDialog
         open={reviewOpen}
         onOpenChange={setReviewOpen}
-        rows={reviewOpen ? entryDiff(def, loaded ? baseline : null, current) : []}
+        entries={
+          reviewOpen ? reviewEntries(ref, entryTitle, def.label, entryDiff(def, loaded ? baseline : null, current)) : []
+        }
         newFiles={usedStaged}
-        confirmLabel={newBranch.needed ? 'Save to branch' : 'Save'}
+        saveTo={saveTo}
+        newBranch={newBranch.needed ? <NewBranchField {...newBranch} /> : undefined}
+        note={workspace ? <ApprovalNote paths={[path, ...usedStaged]} rules={codeowners} /> : undefined}
+        confirmLabel={isNew ? 'Save' : `Save ${changes} ${changes === 1 ? 'change' : 'changes'}`}
         busy={commit.isPending}
         confirmDisabled={blocked}
+        inline={wide}
         onConfirm={() => void confirmSave()}
-      >
-        <NewBranchField {...newBranch} />
-        {workspace ? <ApprovalNote paths={[path, ...usedStaged]} rules={codeowners} /> : null}
-      </ReviewDialog>
-      <AlertDialog
+        onRevert={isNew ? undefined : onRevert}
+        commitNote={workspace ? { value: note, onChange: setNote } : undefined}
+      />
+      <CompareSheet
+        open={compareOpen && newer !== null}
+        onOpenChange={setCompareOpen}
+        fields={conflicts}
+        picks={picks}
+        onPick={(key, pick) => setPicks((prev) => ({ ...prev, [key]: pick }))}
+        where={workspace ? 'github' : 'disk'}
+        onApply={applyCompare}
+      />
+      <Confirm
         open={discardOpen}
         onOpenChange={setDiscardOpen}
         title="Discard unsaved changes?"
@@ -630,7 +950,7 @@ function EntryForm({
         confirmLabel="Discard"
         onConfirm={onDiscard}
       />
-      <AlertDialog
+      <Confirm
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={`Delete ${ref}?`}
@@ -651,22 +971,22 @@ function EntryForm({
           <>
             <ReferrerList schema={schema} items={usedBy} />
             {removeProblems.length > 0 ? (
-              <div className="editlet-field__error" role="alert">
-                <Icon.X size={11} />
+              <div className="mt-2 inline-flex items-center gap-1.5 text-sm text-destructive" role="alert">
+                <Icon name="x" size={16} />
                 <span>
                   Removing the references would leave these entries invalid; fix them first: {removeProblems.join('; ')}
                 </span>
               </div>
             ) : (
-              <label className="editlet-u-row editlet-u-gap-2 editlet-u-text-sm">
-                <input type="checkbox" checked={removeRefs} onChange={(e) => setRemoveRefs(e.target.checked)} />
+              <label className="-ml-2.5 flex items-center text-sm">
+                <Checkbox checked={removeRefs} onCheckedChange={setRemoveRefs} />
                 Also remove the references from {usedBy.length} {usedBy.length === 1 ? 'entry' : 'entries'}
               </label>
             )}
           </>
         ) : null}
         <NewBranchField {...newBranch} />
-      </AlertDialog>
+      </Confirm>
       {self && !def.singleton ? (
         <RenameDialog
           open={renameOpen}
@@ -708,7 +1028,14 @@ export function Entry({ collection, slug }: { collection: string; slug: string }
 
   // New-entry values from the New entry dialog: read once, dropped when the screen closes.
   const [pending] = useState(() => pendingNewEntries.get(ref));
-  useEffect(() => () => void pendingNewEntries.delete(ref), [ref]);
+  const [copy] = useState(() => pendingCopies.get(ref));
+  useEffect(
+    () => () => {
+      pendingNewEntries.delete(ref);
+      pendingCopies.delete(ref);
+    },
+    [ref],
+  );
 
   useEffect(() => {
     if (status !== 'connected') return;
@@ -719,6 +1046,10 @@ export function Entry({ collection, slug }: { collection: string; slug: string }
   const [base, setBase] = useState<Base | undefined>(undefined);
   const [dirty, setDirty] = useState(false);
   const [expectChange, setExpectChange] = useState(false);
+  const [group, setGroup] = useState<string | null>(null);
+  // After Conflict · compare: the form that mounts on the newer file starts from the picks (keyed by that form).
+  const [carry, setCarry] = useState<{ key: string; values: FormValues; staged: Map<string, Uint8Array> } | null>(null);
+  const workspace = useWorkspace();
   const latest = fileQ.data;
 
   if (liveSchema && (schema === undefined || (liveSchema !== schema && !dirty))) {
@@ -742,8 +1073,9 @@ export function Entry({ collection, slug }: { collection: string; slug: string }
   const initial = useMemo<EntryFile | undefined>(() => {
     if (!def || base === undefined) return undefined;
     if (base.data) return base.data.file;
+    if (copy) return copy;
     return { data: { ...initialData(def), ...pending }, body: '' };
-  }, [def, base, pending]);
+  }, [def, base, pending, copy]);
 
   const reload = () => {
     if (liveSchema) setSchema(liveSchema);
@@ -752,58 +1084,111 @@ export function Entry({ collection, slug }: { collection: string; slug: string }
     void invalidateFiles(client);
   };
 
+  const chrome = useScreenChrome();
   const ready = schema && def && path && base && initial;
-  let content: ReactNode;
-  if (!ready && (schemaQ.error || fileQ.error)) {
-    content = (
-      <p className="editlet-u-text-danger" role="alert">
-        {(schemaQ.error ?? fileQ.error)?.message}
-      </p>
-    );
-  } else if (!ready) {
-    content = (
-      <p className="editlet-u-text-muted" role="status">
-        Loading…
-      </p>
-    );
-  } else {
-    content = (
-      <>
-        {fileQ.error ? (
-          <div className="editlet-card editlet-card--banner" role="alert">
-            <Icon.Alert />
-            <span className="editlet-u-flex-1">{fileQ.error.message}</span>
-          </div>
-        ) : null}
-        {(stale && !expectChange) || schemaStale ? (
-          <div className="editlet-card editlet-card--banner" role="status">
-            <Icon.Alert />
-            <span className="editlet-u-flex-1">
-              {stale && !expectChange ? 'This file changed on disk' : 'The schema changed on disk'}
-            </span>
-            <Button variant="outline" size="sm" onClick={reload}>
-              Reload
-            </Button>
-          </div>
-        ) : null}
-        <EntryForm
-          key={`${path}:${shaOf(base.data) ?? 'new'}:${base.generation}`}
-          schema={schema}
-          collection={collection}
-          slug={slug}
-          path={path}
-          loaded={base.data}
-          initial={initial}
-          onDirtyChange={setDirty}
-          onCommitStart={() => setExpectChange(true)}
-          onCommitEnd={(ok) => {
-            if (!ok) setExpectChange(false);
-          }}
-          onReload={reload}
-        />
-      </>
+  if (!ready) {
+    const failed = schemaQ.error ?? fileQ.error;
+    // Loading (or failed before anything loaded): the screen's frame with placeholder rows, so the bar stays put.
+    return (
+      <EntryView
+        section={def?.label ?? collection}
+        actions={chrome.windowActions}
+        title={slug}
+        banners={
+          <>
+            {chrome.banners}
+            {failed ? (
+              <Banner tone="danger" role="alert">
+                {failed.message}
+              </Banner>
+            ) : null}
+          </>
+        }
+        fieldsLabel={`${ref} fields`}
+        fields={
+          failed ? null : (
+            <>
+              <FieldRow label="Loading" loading />
+              <FieldRow label="Loading" loading />
+              <FieldRow label="Loading" loading />
+            </>
+          )
+        }
+        status={chrome.status}
+      />
     );
   }
-
-  return <section className="editlet-screen">{content}</section>;
+  // A newer version of a saved file while the form has edits: compare field by field (a deleted file, or a new entry
+  // whose path was taken meanwhile, keeps Reload: there is nothing to compare).
+  const newer = stale && !expectChange && dirty && base.data && latest ? latest : null;
+  const formKey = (data: EntryFileData | null, generation: number) => `${path}:${shaOf(data) ?? 'new'}:${generation}`;
+  const notices = (
+    <>
+      {fileQ.error ? (
+        <Banner tone="danger" role="alert">
+          {fileQ.error.message}
+        </Banner>
+      ) : null}
+      {newer ? (
+        // FigCraft *Entry · conflict* (GitHub) and *Entry · changed on disk* (dev, which keeps Reload).
+        <Banner
+          tone="unsaved"
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a prop of the Banner part (a div), which takes its live role from the caller
+          role="status"
+          action={
+            workspace ? undefined : (
+              <Button size="md" onClick={reload}>
+                Reload
+              </Button>
+            )
+          }
+        >
+          {workspace
+            ? 'Someone saved this entry on GitHub after you opened it. Your edits are kept.'
+            : 'This file changed on disk. Your edits are kept.'}
+        </Banner>
+      ) : (stale && !expectChange) || schemaStale ? (
+        <Banner
+          tone="unsaved"
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a prop of the Banner part (a div), which takes its live role from the caller
+          role="status"
+          action={
+            <Button size="md" onClick={reload}>
+              Reload
+            </Button>
+          }
+        >
+          {stale && !expectChange ? 'This file changed on disk' : 'The schema changed on disk'}
+        </Banner>
+      ) : null}
+    </>
+  );
+  return (
+    <EntryForm
+      key={formKey(base.data, base.generation)}
+      schema={schema}
+      collection={collection}
+      slug={slug}
+      path={path}
+      loaded={base.data}
+      initial={initial}
+      onDirtyChange={setDirty}
+      onCommitStart={() => setExpectChange(true)}
+      onCommitEnd={(ok) => {
+        if (!ok) setExpectChange(false);
+      }}
+      onReload={reload}
+      chrome={chrome}
+      notices={notices}
+      group={group}
+      onGroupChange={setGroup}
+      newer={newer}
+      start={carry?.key === formKey(base.data, base.generation) ? carry : undefined}
+      onRebase={(file, values, staged) => {
+        const generation = base.generation + 1;
+        setCarry({ key: formKey(file, generation), values, staged });
+        setBase({ data: file, generation });
+      }}
+    />
+  );
 }

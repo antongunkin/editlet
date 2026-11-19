@@ -31,3 +31,18 @@ export const asString = (v: unknown): string =>
   typeof v === 'string' ? v : v === undefined || v === null ? '' : String(v);
 
 export const asStringList = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x)) : []);
+
+/**
+ * Splits the messages of a container (`issuesByField` gives `title: Required`, `2.title: Required`) by their first
+ * path segment: `{ title: ['Required'], '2': ['title: Required'], '': [own messages] }`.
+ */
+export function splitErrors(error: string[] | undefined): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const message of error ?? []) {
+    const m = /^([A-Za-z0-9]+)(?:\.([^\s:]+))?: ([^]*)$/.exec(message);
+    const key = m ? m[1]! : '';
+    const text = !m ? message : m[2] ? `${m[2]}: ${m[3]}` : m[3]!;
+    (out[key] ??= []).push(text);
+  }
+  return out;
+}

@@ -1,127 +1,46 @@
-/* Declared here first so the layer order holds however the CSS files are ordered in the bundle. */
-@layer tokens, base, components, utilities;
+/* The rich-text document's reading styles: ProseMirror builds this DOM itself (richtext/editor.ts), outside React, so
+   its headings, lists, quotes, code and tables are styled here by element, with the theme's variables, like a `prose`
+   block. The only plain CSS of the admin besides app.css (docs/admin/ui.md#css). Declared here first so the layer
+   order holds however the CSS files are ordered in the bundle. */
+@layer theme, base, components, utilities;
 
 @layer components {
-  /* The markdown body's Rich / Source switch, above the editor. */
-  .editlet-ff-markdown__mode {
-    margin-bottom: calc(var(--editlet-spacing) * 2);
-  }
-
-  .editlet-ff-markdown__note {
-    margin-bottom: calc(var(--editlet-spacing) * 2);
-    font-size: var(--editlet-text-sm);
-    color: var(--editlet-muted-foreground);
-  }
-
-  /* The rich editor: a toolbar on top of the editable area, in one bordered box like the textarea. */
-  .editlet-rt {
-    border: 1px solid var(--editlet-input);
-    border-radius: var(--editlet-radius-lg);
-    background: var(--editlet-card);
-
-    &:focus-within {
-      border-color: var(--editlet-ring);
-    }
-  }
-
-  .editlet-rt-toolbar {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    display: flex;
-    flex-wrap: wrap;
-    gap: calc(var(--editlet-spacing) * 0.5);
-    align-items: center;
-    padding: calc(var(--editlet-spacing) * 1.5);
-    border-bottom: 1px solid var(--editlet-border);
-    border-radius: var(--editlet-radius-lg) var(--editlet-radius-lg) 0 0;
-    background: var(--editlet-card);
-  }
-
-  .editlet-rt-toolbar__select {
-    height: calc(var(--editlet-spacing) * 8);
-    margin-right: calc(var(--editlet-spacing) * 1);
-    padding: 0 calc(var(--editlet-spacing) * 2);
-    border: 1px solid var(--editlet-border);
-    border-radius: var(--editlet-radius-md);
-    background: var(--editlet-background);
-    color: var(--editlet-foreground);
-    font-size: var(--editlet-text-sm);
-  }
-
-  .editlet-rt-toolbar__button {
-    display: inline-grid;
-    place-items: center;
-    min-width: calc(var(--editlet-spacing) * 8);
-    height: calc(var(--editlet-spacing) * 8);
-    padding: 0 calc(var(--editlet-spacing) * 1.5);
-    border: 0;
-    border-radius: var(--editlet-radius-md);
-    background: transparent;
-    color: var(--editlet-muted-foreground);
-    cursor: pointer;
-
-    &:hover {
-      background: var(--editlet-accent);
-      color: var(--editlet-foreground);
-    }
-
-    &[aria-pressed='true'] {
-      background: var(--editlet-secondary);
-      color: var(--editlet-foreground);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--editlet-ring);
-      outline-offset: 1px;
-    }
-  }
-
-  .editlet-rt-toolbar__text {
-    font-size: var(--editlet-text-xs);
-    font-weight: var(--editlet-font-weight-medium);
-  }
-
-  .editlet-rt__body {
-    min-height: calc(var(--editlet-spacing) * 60);
-  }
-
   /* The editable document: plain reading styles for the markdown it shows. */
   .editlet-rt-content {
-    min-height: calc(var(--editlet-spacing) * 60);
-    padding: calc(var(--editlet-spacing) * 4);
+    min-height: calc(var(--spacing) * 60);
+    padding: calc(var(--spacing) * 4);
     outline: none;
-    color: var(--editlet-foreground);
-    font-size: var(--editlet-text-base);
-    line-height: var(--editlet-leading-relaxed);
+    color: var(--color-foreground);
+    font-size: var(--text-base);
+    line-height: 1.625;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
 
     & > * + * {
-      margin-top: calc(var(--editlet-spacing) * 3);
+      margin-top: calc(var(--spacing) * 3);
     }
 
     & h1 {
-      font-size: var(--editlet-text-2xl);
-      font-weight: var(--editlet-font-weight-semibold);
+      font-size: var(--text-2xl);
+      font-weight: var(--font-weight-semibold);
     }
 
     & h2 {
-      font-size: var(--editlet-text-xl);
-      font-weight: var(--editlet-font-weight-semibold);
+      font-size: var(--text-xl);
+      font-weight: var(--font-weight-semibold);
     }
 
     & h3,
     & h4,
     & h5,
     & h6 {
-      font-size: var(--editlet-text-lg);
-      font-weight: var(--editlet-font-weight-semibold);
+      font-size: var(--text-lg);
+      font-weight: var(--font-weight-semibold);
     }
 
     & ul,
     & ol {
-      padding-left: calc(var(--editlet-spacing) * 6);
+      padding-left: calc(var(--spacing) * 6);
     }
 
     & ul {
@@ -137,25 +56,25 @@
     }
 
     & blockquote {
-      padding-left: calc(var(--editlet-spacing) * 4);
-      border-left: 3px solid var(--editlet-border);
-      color: var(--editlet-muted-foreground);
+      padding-left: calc(var(--spacing) * 4);
+      border-left: 3px solid var(--color-border);
+      color: var(--color-muted-foreground);
     }
 
     & code {
-      padding: 0 calc(var(--editlet-spacing) * 1);
-      border-radius: var(--editlet-radius-sm);
-      background: var(--editlet-muted);
-      font-family: var(--editlet-font-mono);
-      font-size: var(--editlet-text-sm);
+      padding: 0 calc(var(--spacing) * 1);
+      border-radius: var(--radius-md);
+      background: var(--color-muted);
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
     }
 
     & pre {
-      padding: calc(var(--editlet-spacing) * 3);
-      border-radius: var(--editlet-radius-md);
-      background: var(--editlet-muted);
-      font-family: var(--editlet-font-mono);
-      font-size: var(--editlet-text-sm);
+      padding: calc(var(--spacing) * 3);
+      border-radius: var(--radius-md);
+      background: var(--color-muted);
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
       overflow-x: auto;
 
       & code {
@@ -165,13 +84,13 @@
     }
 
     & a {
-      color: var(--editlet-primary);
+      color: var(--color-primary);
       text-decoration: underline;
     }
 
     & hr {
       border: 0;
-      border-top: 1px solid var(--editlet-border);
+      border-top: 1px solid var(--color-border);
     }
 
     & table {
@@ -180,16 +99,16 @@
 
     & th,
     & td {
-      padding: calc(var(--editlet-spacing) * 1.5) calc(var(--editlet-spacing) * 2);
-      border: 1px solid var(--editlet-border);
+      padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+      border: 1px solid var(--color-border);
     }
 
     & th {
-      font-weight: var(--editlet-font-weight-semibold);
+      font-weight: var(--font-weight-semibold);
     }
 
     & .ProseMirror-selectednode {
-      outline: 2px solid var(--editlet-ring);
+      outline: 2px solid var(--color-ring);
     }
   }
 
@@ -202,45 +121,40 @@
     & img {
       display: block;
       max-width: 100%;
-      max-height: calc(var(--editlet-spacing) * 60);
-      border-radius: var(--editlet-radius-md);
-    }
-
-    & .editlet-ff-image__empty {
-      width: calc(var(--editlet-spacing) * 24);
-      height: calc(var(--editlet-spacing) * 16);
+      max-height: calc(var(--spacing) * 60);
+      border-radius: var(--radius-md);
     }
   }
 
   /* Markdown the rich editor keeps as text (HTML, link definitions…), edited in a textarea. */
   .editlet-rt-raw {
-    padding: calc(var(--editlet-spacing) * 2);
-    border: 1px dashed var(--editlet-border);
-    border-radius: var(--editlet-radius-md);
-    background: var(--editlet-muted);
+    padding: calc(var(--spacing) * 2);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-muted);
   }
 
-  .editlet-rt-raw__label {
-    margin-bottom: calc(var(--editlet-spacing) * 1);
-    font-size: var(--editlet-text-xs);
-    color: var(--editlet-muted-foreground);
+  .editlet-rt-raw-label {
+    margin-bottom: calc(var(--spacing) * 1);
+    font-size: var(--text-xs);
+    color: var(--color-muted-foreground);
   }
 
-  .editlet-rt-raw__text {
+  .editlet-rt-raw-text {
     display: block;
     width: 100%;
     resize: vertical;
     border: 0;
     background: transparent;
-    color: var(--editlet-foreground);
-    font-family: var(--editlet-font-mono);
-    font-size: var(--editlet-text-sm);
-    line-height: var(--editlet-leading-relaxed);
+    color: var(--color-foreground);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: 1.625;
     white-space: pre;
     overflow-x: auto;
 
     &:focus-visible {
-      outline: 2px solid var(--editlet-ring);
+      outline: 2px solid var(--color-ring);
     }
   }
 }

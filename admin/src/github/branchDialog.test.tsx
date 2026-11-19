@@ -7,6 +7,7 @@ import { activeBranchKey } from './workspace';
 import { withEditletRoute } from '../../../loader/protocol';
 import { createAdminFakeGitHub, type AdminFakeGitHub } from '../test/fakeGitHub';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
+import { closeSheets, rowText, setField, sheetElement } from '../test/render';
 
 const SPRING_POST = 'cms/content/post/spring.md';
 
@@ -41,22 +42,51 @@ function withIntercept(
 
 const reviewRoute = (link: HTMLElement) => new URL(link.getAttribute('href')!).searchParams.get('editlet');
 
-async function openApp(fake = seededFake(), route = '') {
+async function openApp(fake = seededFake(), route = '', homeLoaded = route === '') {
   window.history.replaceState(null, '', withEditletRoute('/editlet/', route));
   writeSession(window.sessionStorage, tokenSession('pat_1'));
   renderLiveApp(siteFetch(LIVE_CONFIG, fake));
-  const chip = await screen.findByRole('button', { name: 'Branch' });
-  return { fake, chip };
+  // Home is drawn again when it has loaded, and with it the chip and any sheet opened from it: wait for it first.
+  if (homeLoaded) await screen.findByRole('link', { name: /^All content/ });
+  await screen.findByRole('button', { name: /^Branch / });
+  return { fake };
 }
 
 const main = () => screen.getByRole('main');
+/**
+ * The branch chip of the open screen: the screen draws it (Home's bottom bar), so a re-render makes a new one. A sheet
+ * over it hides it from the accessibility tree.
+ */
+const chipNow = () => screen.getByRole('button', { name: /^Branch /, hidden: true });
+/** The entry count Home's *All content* row shows. */
+const contentCount = async () =>
+  Number((await within(main()).findByRole('link', { name: /^All content/ })).textContent!.match(/(\d+) entr/)![1]);
+/** The Review link of editlet/spring: *Review* and the branch in sr-only text (jsdom joins the two without a space). */
+const REVIEW_SPRING = /^Review ?editlet\/spring$/;
 
-async function openDialog(chip: HTMLElement) {
-  fireEvent.click(chip);
-  const dialog = await screen.findByRole('dialog');
+/** Opens the Branches sheet from the chip and waits for the listing. */
+async function openDialog() {
+  fireEvent.click(chipNow());
+  const dialog = await sheetElement('Branches');
   await within(dialog).findByRole('button', { name: /^editlet\/spring/ });
   return dialog;
 }
+
+/** Types `value` into the find field, clicks the *Create editlet/<name>* row and returns the New branch sheet. */
+async function openCreate(dialog: HTMLElement, value: string, name: string) {
+  fireEvent.change(within(dialog).getByRole('searchbox', { name: 'Find or create a branch' }), { target: { value } });
+  const row = within(dialog).getByRole('button', { name: new RegExp(`^Create ${name.replace(/[.]/g, '\\.')}`) });
+  expect(row.textContent).toContain('From main');
+  fireEvent.click(row);
+  const sheet = await sheetElement('New branch');
+  return { sheet, field: within(sheet).getByRole('textbox', { name: 'Branch name' }) as HTMLInputElement };
+}
+
+/** No modal sheet left open (a toast is a non-modal dialog). */
+const noSheets = () =>
+  waitFor(() =>
+    expect(screen.queryAllByRole('dialog').filter((d) => d.getAttribute('aria-modal') !== 'false')).toEqual([]),
+  );
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -69,9 +99,9 @@ afterEach(() => {
 
 describe('branch chip and picker', () => {
   it('shows the base branch as live, the login and no Review changes link', async () => {
-    const { chip } = await openApp();
-    expect(chip.textContent).toBe('main · live');
-    expect(screen.getByText('octocat')).toBeDefined();
+    await openApp();
+    expect(chipNow().textContent).toBe('main live');
+    expect(await screen.findByRole('button', { name: 'Account' })).toBeDefined();
     expect(screen.queryByRole('link', { name: 'Review changes' })).toBeNull();
   });
 
@@ -88,10 +118,10 @@ describe('branch chip and picker', () => {
       state: 'open',
     });
     fake.state.refs.set('editlet/plain', fake.state.refs.get('main')!);
-    const { chip } = await openApp(fake);
-    const dialog = await openDialog(chip);
+    await openApp(fake);
+    const dialog = await openDialog();
 
-    const rows = within(dialog).getAllByRole('listitem');
+    const rows = within(within(dialog).getByRole('list', { name: 'Branches' })).getAllByRole('listitem');
     expect(rows.map((r) => within(r).getAllByRole('button')[0]!.textContent)).toEqual([
       expect.stringContaining('main'),
       expect.stringContaining('editlet/draft'),
@@ -100,17 +130,22 @@ describe('branch chip and picker', () => {
     ]);
     expect(within(rows[0]!).getByText('Live site · edits here start a new branch')).toBeDefined();
     expect(within(rows[0]!).getByRole('button').getAttribute('aria-current')).toBe('true');
-    expect(within(rows[1]!).getByText('Draft PR #2')).toBeDefined();
-    expect(within(rows[2]!).getByText('No pull request')).toBeDefined();
-    expect(within(rows[3]!).getByText('PR #1')).toBeDefined();
-    const review = within(rows[3]!).getByRole('link', { name: 'Review' });
+    expect(within(rows[1]!).getByText(/^Draft pull request #2/)).toBeDefined();
+    expect(within(rows[1]!).getByText('Draft')).toBeDefined();
+    expect(within(rows[2]!).getByText(/^No pull request/)).toBeDefined();
+    expect(within(rows[3]!).getByText(/^Pull request #1/)).toBeDefined();
+    expect(within(rows[3]!).getByText('In review')).toBeDefined();
+    // The base branch has no Review link; each editlet/* branch has one to its branch screen.
+    expect(within(rows[0]!).queryByRole('link')).toBeNull();
+    // Its visible text is Review; the branch name is for screen readers.
+    const review = within(rows[3]!).getByRole('link', { name: REVIEW_SPRING });
     expect(reviewRoute(review)).toBe('branch:spring');
   });
 
   it('filters the editlet/* rows by the input and keeps the base row', async () => {
-    const { chip } = await openApp();
-    const dialog = await openDialog(chip);
-    const input = within(dialog).getByLabelText('Find or create a branch');
+    await openApp();
+    const dialog = await openDialog();
+    const input = within(dialog).getByRole('searchbox', { name: 'Find or create a branch' });
 
     fireEvent.change(input, { target: { value: 'SPR' } });
     expect(within(dialog).getByRole('button', { name: /^editlet\/spring/ })).toBeDefined();
@@ -120,110 +155,142 @@ describe('branch chip and picker', () => {
   });
 
   it('a row click switches the branch: chip, Review changes and the branch content follow', async () => {
-    const { chip } = await openApp();
-    expect(await within(main()).findByRole('link', { name: 'Post (1)' })).toBeDefined();
-    const dialog = await openDialog(chip);
+    await openApp();
+    const before = await contentCount();
+    const dialog = await openDialog();
 
     fireEvent.click(within(dialog).getByRole('button', { name: /^editlet\/spring/ }));
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(chip.textContent).toBe('editlet/spring #1');
+    expect(chipNow().textContent).toBe('editlet/spring #1');
     expect(window.localStorage.getItem(activeBranchKey('o', 'r'))).toBe('editlet/spring');
-    expect(await within(main()).findByRole('link', { name: 'Post (2)' })).toBeDefined();
+    // editlet/spring has one more post than main.
+    await waitFor(async () => expect(await contentCount()).toBe(before + 1));
     const review = screen.getByRole('link', { name: 'Review changes' });
     expect(reviewRoute(review)).toBe('branch:spring');
 
-    fireEvent.click(chip);
+    fireEvent.click(chipNow());
     const again = await screen.findByRole('dialog');
     const active = within(again).getByRole('button', { name: /^editlet\/spring/ });
     expect(active.getAttribute('aria-current')).toBe('true');
   });
 
-  it('the Review link opens the branch route and closes the dialog', async () => {
-    const { chip } = await openApp();
-    const dialog = await openDialog(chip);
+  it('the Review link opens the branch route and closes the Branches sheet', async () => {
+    await openApp();
+    const dialog = await openDialog();
     const row = within(dialog)
       .getByRole('button', { name: /^editlet\/spring/ })
       .closest('li')!;
-    fireEvent.click(within(row).getByRole('link', { name: 'Review' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(within(row).getByRole('link', { name: REVIEW_SPRING }));
+    await noSheets();
     expect(new URL(window.location.href).searchParams.get('editlet')).toBe('branch:spring');
-    expect(chip.textContent).toBe('main · live');
+    expect(chipNow().textContent).toBe('main live');
   });
 
   it('offers to create a typed branch from main and activates it', async () => {
-    const { fake, chip } = await openApp();
-    const dialog = await openDialog(chip);
-    fireEvent.change(within(dialog).getByLabelText('Find or create a branch'), { target: { value: 'New Idea' } });
+    const { fake } = await openApp();
+    const dialog = await openDialog();
+    // The create row names the normalised branch; New branch keeps the typed text and says what it creates.
+    const { sheet, field } = await openCreate(dialog, 'New Idea', 'editlet/new-idea');
+    expect(field.value).toBe('New Idea');
+    expect(within(sheet).getByText('Creates editlet/new-idea from main.')).toBeDefined();
 
-    const create = within(dialog).getByRole('button', { name: 'Create editlet/new-idea from main' });
-    await act(async () => fireEvent.click(create));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await act(async () => fireEvent.click(within(sheet).getByRole('button', { name: 'Create branch' })));
+    await noSheets();
     expect(fake.state.refs.get('editlet/new-idea')).toBe(fake.state.refs.get('main'));
-    expect(chip.textContent).toBe('editlet/new-idea');
+    expect(chipNow().textContent).toBe('editlet/new-idea');
   });
 
   it('does not offer to create a listed branch, and disables an invalid name', async () => {
-    const { chip } = await openApp();
-    const dialog = await openDialog(chip);
-    const input = within(dialog).getByLabelText('Find or create a branch');
+    await openApp();
+    const dialog = await openDialog();
+    const input = within(dialog).getByRole('searchbox', { name: 'Find or create a branch' });
 
     fireEvent.change(input, { target: { value: 'spring' } });
     expect(within(dialog).queryByRole('button', { name: /^Create/ })).toBeNull();
 
-    fireEvent.change(input, { target: { value: 'a..b' } });
-    const create = within(dialog).getByRole('button', { name: 'Create editlet/a..b from main' }) as HTMLButtonElement;
+    const { sheet, field } = await openCreate(dialog, 'a..b', 'editlet/a..b');
+    const create = within(sheet).getByRole('button', { name: 'Create branch' }) as HTMLButtonElement;
     expect(create.disabled).toBe(true);
-    expect(within(dialog).getByText('Use letters, digits and dashes')).toBeDefined();
+    expect(within(sheet).getByText('Use letters, digits and dashes')).toBeDefined();
+    // Enter in the field submits the form: still nothing is created.
+    fireEvent.submit(field.form!);
+    expect(within(sheet).queryByRole('alert')).toBeNull();
+    expect(sheet.isConnected).toBe(true);
+  });
+
+  it('New branch marks a listed name as taken before any request', async () => {
+    const { fake } = await openApp();
+    const dialog = await openDialog();
+    const { sheet, field } = await openCreate(dialog, 'fresh', 'editlet/fresh');
+    const before = fake.calls.length;
+    fireEvent.change(field, { target: { value: 'spring' } });
+    const create = within(sheet).getByRole('button', { name: 'Create branch' }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    expect(within(sheet).getByRole('alert').textContent).toBe('A branch with this name already exists');
+    fireEvent.submit(field.form!);
+    expect(fake.calls.slice(before).filter((c) => c.method !== 'GET')).toEqual([]);
+  });
+
+  it('Escape closes New branch first, then Branches', async () => {
+    await openApp();
+    const dialog = await openDialog();
+    const { sheet } = await openCreate(dialog, 'fresh', 'editlet/fresh');
+    fireEvent.keyDown(sheet, { key: 'Escape' });
+    await waitFor(() => expect(sheet.isConnected).toBe(false));
+    expect(dialog.isConnected).toBe(true);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(dialog.isConnected).toBe(false));
   });
 
   it('a branch created elsewhere meanwhile is reported as existing', async () => {
-    const { fake, chip } = await openApp();
-    const dialog = await openDialog(chip);
+    const { fake } = await openApp();
+    const dialog = await openDialog();
     fake.state.refs.set('editlet/late', fake.state.refs.get('main')!);
-    fireEvent.change(within(dialog).getByLabelText('Find or create a branch'), { target: { value: 'late' } });
+    const { sheet } = await openCreate(dialog, 'late', 'editlet/late');
 
-    await act(async () =>
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Create editlet/late from main' })),
-    );
-    expect(await within(dialog).findByText('A branch with this name already exists')).toBeDefined();
-    expect(chip.textContent).toBe('main · live');
+    await act(async () => fireEvent.click(within(sheet).getByRole('button', { name: 'Create branch' })));
+    expect((await within(sheet).findByRole('alert')).textContent).toBe('A branch with this name already exists');
+    expect(chipNow().textContent).toBe('main live');
   });
 
   it('asks the unsaved-changes guard before switching', async () => {
-    const { fake, chip } = await openApp(seededFake(), 'post/hello-world');
-    const title = await within(main()).findByLabelText(/^Title/);
-    fireEvent.change(title, { target: { value: 'Unsaved' } });
+    const { fake } = await openApp(seededFake(), 'post/hello-world');
+    await within(main()).findByRole('button', { name: /^Title/ });
+    await setField('Title', 'Unsaved');
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
-    const dialog = await openDialog(chip);
+    const dialog = await openDialog();
     fireEvent.click(within(dialog).getByRole('button', { name: /^editlet\/spring/ }));
     expect(confirm).toHaveBeenCalledWith('Discard unsaved changes?');
-    expect(chip.textContent).toBe('main · live');
-    expect((within(main()).getByLabelText(/^Title/) as HTMLInputElement).value).toBe('Unsaved');
+    expect(chipNow().textContent).toBe('main live');
 
-    fireEvent.change(within(dialog).getByLabelText('Find or create a branch'), { target: { value: 'other' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create editlet/other from main' }));
+    const { sheet } = await openCreate(dialog, 'other', 'editlet/other');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Create branch' }));
     expect(confirm).toHaveBeenCalledTimes(2);
-    expect(chip.textContent).toBe('main · live');
+    expect(chipNow().textContent).toBe('main live');
     expect(fake.state.refs.has('editlet/other')).toBe(false);
+    // The form under the sheets kept the edit.
+    await closeSheets();
+    expect(rowText('Title')).toContain('Unsaved');
   });
 });
 
-describe('user menu', () => {
-  it('shows the login initial when the avatar does not load', async () => {
+describe('account sheet', () => {
+  const openAccount = async () => {
     await openApp();
-    const menu = screen.getByTitle('octocat');
-    const img = menu.querySelector('img')!;
-    expect(img.getAttribute('src')).toBe('https://avatars.test/octocat.png');
-    fireEvent.error(img);
-    expect(menu.querySelector('img')).toBeNull();
-    expect(menu.querySelector('.editlet-user-menu__avatar')!.textContent).toBe('O');
-    expect(within(menu).getByRole('button', { name: 'Sign out', hidden: true })).toBeDefined();
+    fireEvent.click(await screen.findByRole('button', { name: 'Account' }));
+    return await screen.findByRole('dialog', { name: 'Account' });
+  };
+
+  it('shows the login and has Sign out', async () => {
+    const account = await openAccount();
+    expect(within(account).getByText('octocat')).toBeDefined();
+    expect(within(account).getByRole('button', { name: 'Sign out' })).toBeDefined();
   });
 
   it('Sign out clears the session and shows the sign-in screen', async () => {
-    await openApp();
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out', hidden: true }));
+    const account = await openAccount();
+    fireEvent.click(within(account).getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByLabelText('Personal access token')).toBeDefined();
     expect(readSession(window.sessionStorage)).toBeNull();
   });
@@ -241,16 +308,16 @@ describe('shell banners in github mode', () => {
       if (body.includes('refs/heads/editlet/gone')) goneFailed = true;
       return res;
     });
-    const { chip } = await openApp(fake);
-    expect(chip.textContent).toBe('editlet/gone');
+    await openApp(fake, '', false);
+    expect(chipNow().textContent).toBe('editlet/gone');
     await waitFor(() => expect(goneFailed).toBe(true));
     await act(async () => {});
     expect(screen.queryByRole('alert')).toBeNull();
 
     releaseBranches();
     expect(await screen.findByText('Branch editlet/gone no longer exists. Showing main.')).toBeDefined();
-    expect(chip.textContent).toBe('main · live');
-    expect(await within(main()).findByRole('link', { name: 'Post (1)' })).toBeDefined();
+    expect(chipNow().textContent).toBe('main live');
+    expect(await contentCount()).toBeGreaterThan(0);
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -259,15 +326,15 @@ describe('shell banners in github mode', () => {
     fake.state.refs.set('editlet/broken', fake.state.refs.get('main')!);
     fake.commit('editlet/broken', { 'cms/schema.json': '{ not json' });
     window.localStorage.setItem(activeBranchKey('o', 'r'), 'editlet/broken');
-    const { chip } = await openApp(fake);
+    await openApp(fake, '', false);
 
     expect(await within(main()).findByRole('heading', { name: 'The schema has errors' })).toBeDefined();
     expect(within(main()).getByRole('alert').textContent).toContain('cms/schema.json');
-    expect(chip.textContent).toBe('editlet/broken');
+    expect(chipNow().textContent).toBe('editlet/broken');
 
-    fireEvent.click(chip);
+    fireEvent.click(chipNow());
     fireEvent.click(await screen.findByRole('button', { name: /^main/ }));
-    expect(await within(main()).findByRole('link', { name: 'Post (1)' })).toBeDefined();
+    expect(await contentCount()).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: 'The schema has errors' })).toBeNull();
     expect(window.localStorage.getItem(activeBranchKey('o', 'r'))).toBe('main');
   });
@@ -277,20 +344,21 @@ describe('shell banners in github mode', () => {
       if (body.includes('refs/heads/editlet/spring')) throw new TypeError('fetch failed');
       return pass();
     });
-    const { chip } = await openApp(fake);
-    expect(await within(main()).findByRole('link', { name: 'Post (1)' })).toBeDefined();
-    const dialog = await openDialog(chip);
+    await openApp(fake);
+    expect(await contentCount()).toBeGreaterThan(0);
+    const dialog = await openDialog();
     fireEvent.click(within(dialog).getByRole('button', { name: /^editlet\/spring/ }));
 
-    const alert = await screen.findByRole('alert');
-    expect(within(alert).getByText("Can't load from GitHub: Can't reach GitHub")).toBeDefined();
-    expect(chip.textContent).toBe('editlet/spring #1');
+    // The banner sits in the shell's assertive live region, which was on the page before it.
+    const message = await screen.findByText("Can't load from GitHub: Can't reach GitHub");
+    expect(message.closest('[aria-live="assertive"]')).not.toBeNull();
+    expect(chipNow().textContent).toBe('editlet/spring #1');
 
     // The shell (and the chip) stay, so the editor can switch back.
-    fireEvent.click(chip);
+    fireEvent.click(chipNow());
     fireEvent.click(await screen.findByRole('button', { name: /^main/ }));
-    expect(await within(main()).findByRole('link', { name: 'Post (1)' })).toBeDefined();
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(await contentCount()).toBeGreaterThan(0);
+    expect(screen.queryByText("Can't load from GitHub: Can't reach GitHub")).toBeNull();
   });
 
   it('"Try again" on the GitHub banner reloads the file list', async () => {
@@ -300,13 +368,14 @@ describe('shell banners in github mode', () => {
       return pass();
     });
     window.localStorage.setItem(activeBranchKey('o', 'r'), 'editlet/spring');
-    await openApp(fake);
+    await openApp(fake, '', false);
 
-    const alert = await screen.findByRole('alert');
-    expect(within(alert).getByText("Can't load from GitHub: Can't reach GitHub")).toBeDefined();
+    const banner = (await screen.findByText("Can't load from GitHub: Can't reach GitHub")).closest<HTMLElement>(
+      '[data-slot="banner"]',
+    )!;
     offline = false;
-    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
-    expect(await within(main()).findByRole('link', { name: 'Post (2)' })).toBeDefined();
-    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    fireEvent.click(within(banner).getByRole('button', { name: 'Try again' }));
+    expect(await contentCount()).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.queryByText("Can't load from GitHub: Can't reach GitHub")).toBeNull());
   });
 });

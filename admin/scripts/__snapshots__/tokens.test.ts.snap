@@ -1,0 +1,58 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`render > writes both themes, the shadcn mapping, the reset theme and a utility per gradient 1`] = `
+"/* Generated from design/tokens.json by packages/editlet/admin/scripts/tokens.ts (npm run design:tokens). Do not edit. */
+
+:root,
+[data-editlet-theme='light'] {
+  --background: #F5F5F4;
+  --on-ink: #FFFFFF;
+  --elevation-card: 0 1px 2px 0 #0000000A, inset 0 -1px 0 0 var(--on-ink);
+  --gradient-ink: linear-gradient(#3F3F46, #18181B);
+}
+
+[data-editlet-theme='dark'] {
+  --background: #0A0A0A;
+  --on-ink: #FFFFFF;
+  --elevation-card: inset 0 1px 0 0 #FFFFFF0F, 0 1px 2px 0 #00000066;
+  --gradient-ink: linear-gradient(#52525B, #27272A);
+}
+
+@theme {
+  --*: initial;
+  --spacing: 0.25rem;
+  --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-mono: ui-monospace, sfmono-regular, menlo, monaco, consolas, 'Liberation Mono', monospace;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(20 / 14);
+  --font-weight-medium: 500;
+  --radius-xl: 0.75rem;
+  --container-wide: 36rem;
+  --shadow-card: var(--elevation-card);
+  --ease-tab: cubic-bezier(.2,.8,.2,1);
+  --duration-tab: 200ms;
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-on-ink: var(--on-ink);
+}
+
+@utility bg-gradient-ink {
+  background-image: var(--gradient-ink);
+}
+"
+`;
+
+exports[`render > writes the icon paths as ICONS and the IconName type 1`] = `
+"// Generated from design/tokens.json by packages/editlet/admin/scripts/tokens.ts (npm run design:tokens). Do not edit.
+export const ICONS = {
+  plus: 'M5 12h14M12 5v14',
+  'arrow-left': 'm12 19-7-7 7-7M19 12H5',
+} as const;
+
+export type IconName = keyof typeof ICONS;
+"
+`;

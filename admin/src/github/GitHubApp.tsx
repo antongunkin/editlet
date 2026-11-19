@@ -14,9 +14,11 @@ import { parseSchemaText } from '../../../core/schema';
 import { createGitHubClient, GitHubError, type GitHubClient } from '../../../github';
 import type { AdminConfig, AdminGitHubConfig } from '../../config';
 import { GitHubPreviewSync } from '../preview/GitHubPreviewSync';
+import { GateLoading } from '../screens/GateLoading';
 import { Unavailable } from '../screens/Unavailable';
 import { Shell } from '../Shell';
-import { Button } from '../ui/Button';
+import { Button } from '../ui/primitives/button';
+import { Icon } from '../ui/primitives/icon';
 
 export { useGitHubUser, type GitHubRole, type GitHubUser } from './user';
 
@@ -71,6 +73,8 @@ export function NotConfigured() {
   return (
     <Unavailable
       title="Editing is not set up"
+      icon="settings"
+      tone="neutral"
       text={
         <>
           Editing on the live site is not set up. Set the <code>admin</code> option of the Editlet adapter (repo,
@@ -78,14 +82,6 @@ export function NotConfigured() {
         </>
       }
     />
-  );
-}
-
-function Loading() {
-  return (
-    <p className="editlet-u-text-muted" role="status">
-      Loading…
-    </p>
   );
 }
 
@@ -181,8 +177,8 @@ function SignedIn({
     };
   }, [recheck, session, client, github, queryClient, onReplace]);
 
-  const signOutButton = (
-    <Button variant="outline" onClick={() => signOut()}>
+  const signOutButton = (size: 'md' | 'lg' = 'md') => (
+    <Button size={size} full icon={<Icon name="logout" />} onClick={() => signOut()}>
       Sign out
     </Button>
   );
@@ -191,14 +187,19 @@ function SignedIn({
   if (failed) {
     return (
       <Unavailable title="Can't check your access" text={errorText(failed, { repo })}>
-        <Button variant="primary" onClick={() => void (access.error ? access.refetch() : style.refetch())}>
+        <Button
+          variant="primary"
+          size="lg"
+          full
+          onClick={() => void (access.error ? access.refetch() : style.refetch())}
+        >
           Try again
         </Button>
-        {signOutButton}
+        {signOutButton('lg')}
       </Unavailable>
     );
   }
-  if (!access.data) return <Loading />;
+  if (!access.data) return <GateLoading />;
 
   const { user, status } = access.data;
   if (status === 'not_found') {
@@ -207,7 +208,7 @@ function SignedIn({
         title={`Can't open ${repo}`}
         text={`GitHub doesn't show ${repo} to ${user.login}. Check that the repository exists and that the GitHub App of the auth handler is installed on it.`}
       >
-        {signOutButton}
+        {signOutButton()}
       </Unavailable>
     );
   }
@@ -215,23 +216,27 @@ function SignedIn({
     return (
       <Unavailable
         title="No write access"
+        icon="lock"
         text={`${errorText(new AuthError('forbidden'), { repo })} (signed in as ${user.login}). Ask an owner of the repository for write access, or sign in with another account.`}
       >
-        {signOutButton}
+        {signOutButton()}
       </Unavailable>
     );
   }
 
-  if (!style.data) return <Loading />;
+  if (!style.data) return <GateLoading />;
   return (
     <GitHubUserContext.Provider value={user}>
       <WorkspaceProvider config={github} style={style.data} param={param} client={client} storage={storage}>
         <GitHubPreviewSync preview={preview} fetch={fetchFn} />
-        <Shell />
+        <Shell
+          overlay={
+            session && !recheck ? null : (
+              <SignInDialog authUrl={authUrl} repo={repo} login={user.login} checking={session !== null} />
+            )
+          }
+        />
       </WorkspaceProvider>
-      {session && !recheck ? null : (
-        <SignInDialog authUrl={authUrl} repo={repo} login={user.login} checking={session !== null} />
-      )}
     </GitHubUserContext.Provider>
   );
 }

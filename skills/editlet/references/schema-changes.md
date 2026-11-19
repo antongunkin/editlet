@@ -43,6 +43,10 @@ or incompatible schema breaks them at once. Always run a dry run first.
 - Nested fields (in `object` and `blocks`) take every type, `object` and `blocks` too, with the same rules. A nested
   `markdown` is a Markdown string; `draft` is an ordinary key there. `object` and `blocks` take no `default`.
 - At most one `markdown` field per collection (top level). `titleField` and `slugFrom` must name a field of the collection.
+- `groups` (optional, per collection) splits the editor's entry into tabs: `"groups": { "content": { "label": "Content" },
+  "media": { "label": "Media" } }`, in tab order. A top-level field joins one with `"group": "media"`; a field without
+  `group` is in the first group. `group` must name a key of `groups` and is not allowed on nested fields. Groups change
+  nothing in entry files or types. Add them only when the human asks for tabs or a collection has many fields.
 - To add a block kind or a nested field, edit the candidate schema and run `check`: existing entries stay valid as
   long as the new nested field is optional. `rename-field` and `remove-field` work on top-level fields only; for a
   nested field, change the schema and every entry with a candidate + `check`.

@@ -5,7 +5,8 @@
 // the loader's CSS draws a bottom sheet: this script then drops its inline geometry and ignores the admin's gestures;
 // its own grab handle on the sheet's top edge (./handle.ts) sets (and saves) the sheet's height. Collapsed
 // (the admin's close button), the dialog is a pill at the bottom centre, sized by the admin, on any page width. The
-// switch between window and pill is animated (`morph`); the admin fades its content and the pill in step.
+// switch between window and pill is animated (`morph`); the admin fades its content and the pill in step. It also tells
+// the admin what covers the dialog's bottom (the safe area, the keyboard: ./viewport.ts), which the iframe cannot see.
 import { isAdminToWindowMessage } from './channel';
 import {
   dialogStyle,
@@ -16,11 +17,13 @@ import {
   sheetHeight,
   sheetStyle,
   type DialogStyle,
+  type Edge,
   type Gesture,
   type Rect,
 } from './geometry';
-import { EDGE_ATTR, sheetHandle, type Pull } from './handle';
+import { EDGE_ATTR, edgeName, sheetHandle, type Pull } from './handle';
 import { startSelect } from './select';
+import { startViewport } from './viewport';
 
 import { EDITLET_SOURCE } from '../protocol';
 
@@ -56,13 +59,14 @@ function box(d: HTMLElement): Keyframe {
 
 /**
  * Sets `style` and animates the dialog from where it was to where it lands (FLIP): it works between any two places,
- * the loader's bottom sheet included. No animation when the user prefers reduced motion.
+ * the loader's bottom sheet included. No animation when the user prefers reduced motion. Returns the animation, whose
+ * first frame (the old place) shows at once: what is measured after it lands waits for `finished`.
  */
-function morph(d: HTMLElement, style: DialogStyle, reduce: MediaQueryList): void {
-  if (reduce.matches || typeof d.animate !== 'function') return setStyle(d, style);
+function morph(d: HTMLElement, style: DialogStyle, reduce: MediaQueryList): Animation | undefined {
+  if (reduce.matches || typeof d.animate !== 'function') return void setStyle(d, style);
   const from = box(d);
   setStyle(d, style);
-  d.animate([from, box(d)], MORPH);
+  return d.animate([from, box(d)], MORPH);
 }
 
 function start(): void {
@@ -83,7 +87,7 @@ function start(): void {
   const sheet = matchMedia(SHEET_MEDIA);
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
   // The pill's size while collapsed. Every open builds a fresh dialog (and admin), which starts expanded.
-  let pill: { w: number; h: number } | null = null;
+  let pill: { w: number; h: number; shadow?: string } | null = null;
   let shown: HTMLDialogElement | null = null;
   let gesture: { kind: Gesture; from: Rect } | null = null;
   // The sheet's height when the handle went down (as drawn, so the loader's 70dvh before any pull).
@@ -99,6 +103,8 @@ function start(): void {
     }
   };
 
+  const viewport = startViewport(frame, dialog);
+
   const apply = (animate = false) => {
     const d = dialog();
     if (!d) return;
@@ -110,15 +116,29 @@ function start(): void {
     rect = fitRect(rect, view());
     if (sheetH !== null) sheetH = sheetHeight(sheetH, 0, view());
     const style = pill ? pillStyle(pill, view()) : sheet.matches ? sheetStyle(sheetH) : dialogStyle(rect);
-    if (animate) morph(d, style, reduce);
-    else setStyle(d, style);
+    if (!animate) setStyle(d, style);
+    // An animated move shows its start for a moment: measure where the dialog lands, once it has.
+    else
+      morph(d, style, reduce)?.finished.then(
+        () => viewport(),
+        () => {},
+      );
+    lightEdges();
+    viewport();
   };
 
-  // The window's outline takes the accent while an admin resize edge is hovered or pulled (the page-side style; the
-  // sheet's handle does it with CSS alone).
-  let edgeHover = false;
-  let edgeDrag = false;
-  const lightEdges = () => dialog()?.toggleAttribute(EDGE_ATTR, !pill && (edgeHover || edgeDrag));
+  // The sides the pulled (or hovered) edge moves take the accent: the page-side style (./handle.ts) reads the name
+  // (`top`, `bottom-left`…) off the dialog. A pulled edge wins over the hovered one; no edge named lights every side.
+  let hovered: Edge | 'all' | null = null;
+  let pulled: Edge | null = null;
+  const lightEdges = () => {
+    // The pill and the sheet have no highlight, and a resize cut short by one (the page narrows, the window collapses)
+    // never gets its `end`: forget both, so nothing stays lit when the window comes back.
+    if (pill || sheet.matches) pulled = hovered = gesture = null;
+    const edge = pulled ?? hovered;
+    if (edge) dialog()?.setAttribute(EDGE_ATTR, edgeName(edge));
+    else dialog()?.removeAttribute(EDGE_ATTR);
+  };
 
   const pullSheet: Pull = (dy, phase) => {
     if (phase === 'start') {
@@ -135,28 +155,29 @@ function start(): void {
     if (!f || e.source !== f.contentWindow || e.origin !== new URL(f.src, location.href).origin) return;
     const m = e.data as unknown;
     if (!isAdminToWindowMessage(m)) return;
+    if (m.type === 'hello') return viewport(true);
     if (m.type === 'collapse' || m.type === 'expand') {
-      pill = m.type === 'collapse' ? { w: m.w, h: m.h } : null;
+      pill = m.type === 'collapse' ? { w: m.w, h: m.h, shadow: m.shadow } : null;
       apply(true);
       lightEdges();
       return;
     }
     if (m.type === 'edge') {
-      edgeHover = m.hover;
+      hovered = m.hover ? (m.edge ?? 'all') : null;
       lightEdges();
       return;
     }
     if (m.type !== 'drag' || pill || sheet.matches) return;
     if (m.phase === 'start') {
       gesture = { kind: m.kind, from: rect };
-      edgeDrag = m.kind !== 'move';
+      pulled = m.kind === 'move' ? null : m.kind;
       lightEdges();
     } else if (gesture && m.phase === 'move') {
       rect = drag(gesture.from, gesture.kind, m.dx, m.dy, view());
       apply();
     } else if (m.phase === 'end') {
       gesture = null;
-      edgeDrag = false;
+      pulled = null;
       lightEdges();
       persist();
     }
@@ -169,8 +190,8 @@ function start(): void {
   // The edges sit on the iframe's border: if their `edge { hover: false }` is lost as the pointer leaves the iframe, a
   // move on the page outside the dialog still means no edge is hovered.
   window.addEventListener('pointermove', (e) => {
-    if (!edgeHover || dialog()?.contains(e.target as Node)) return;
-    edgeHover = false;
+    if (!hovered || dialog()?.contains(e.target as Node)) return;
+    hovered = null;
     lightEdges();
   });
   apply();

@@ -165,6 +165,17 @@ describe('SignIn', () => {
     expect(screen.getByLabelText('Personal access token')).toBeDefined();
   });
 
+  it('after origin_not_allowed the token form does not offer the popup again', async () => {
+    login.mockRejectedValue(new AuthError('origin_not_allowed'));
+    renderSignIn({ authUrl: AUTH_URL });
+    fireEvent.click(github());
+    expect(await screen.findByText(/isn't set up for sign-in yet/)).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Sign in with GitHub' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Use a personal access token' }));
+    expect(screen.getByLabelText('Personal access token')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Sign in with GitHub instead' })).toBeNull();
+  });
+
   it('without an authUrl only the token form is offered and it stores a token session', async () => {
     renderSignIn();
     expect(screen.queryByRole('button', { name: 'Sign in with GitHub' })).toBeNull();
@@ -176,10 +187,9 @@ describe('SignIn', () => {
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toBe('noreferrer');
     expect(
-      screen.getByText('Fine-grained token for o/r with Contents and Pull requests read/write and Deployments read.', {
-        exact: false,
-      }),
+      screen.getByText('Needs Contents and Pull requests (read and write), Deployments (read).', { exact: false }),
     ).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'Sign in to edit' })).toBeDefined();
 
     const use = screen.getByRole('button', { name: 'Use token' }) as HTMLButtonElement;
     expect(use.disabled).toBe(true);

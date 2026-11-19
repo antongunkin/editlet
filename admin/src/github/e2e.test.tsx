@@ -5,7 +5,16 @@ import { startLogin, type AuthSession } from '../../../auth/client';
 import type { AdminConfig } from '../../config';
 import { createAdminFakeGitHub, type AdminFakeGitHub } from '../test/fakeGitHub';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
-import { entryActions } from '../test/render';
+import {
+  closeSheets,
+  findCta,
+  openCollection,
+  openSaveTo,
+  reviewSheet,
+  rowText,
+  setField,
+  sheet,
+} from '../test/render';
 
 vi.mock('../../../auth/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../auth/client')>();
@@ -53,6 +62,9 @@ function recording(fake: AdminFakeGitHub): { github: AdminFakeGitHub; bodies: st
   return { github: { ...fake, fetch: fetchFn }, bodies };
 }
 
+/** The branch chip is the window's on Home and the entry screen's own on the entry: look it up each time. */
+const branchChip = () => screen.getByRole('button', { name: /^Branch / });
+
 describe('GitHub mode end to end', () => {
   it('signs in, saves an edit on main to a new branch, reviews it and creates its pull request', async () => {
     const fake = createAdminFakeGitHub();
@@ -64,43 +76,52 @@ describe('GitHub mode end to end', () => {
     // Sign in → Home on main.
     fireEvent.click(await screen.findByRole('button', { name: 'Sign in with GitHub' }));
     expect(login).toHaveBeenCalledWith({ workerUrl: 'https://auth.test/' });
-    const chip = await screen.findByRole('button', { name: 'Branch' });
-    await waitFor(() => expect(chip.textContent).toBe('main · live'));
+    await screen.findByRole('button', { name: /^Branch / });
+    await waitFor(() => expect(branchChip().textContent).toBe('main live'));
     expect(screen.queryByRole('link', { name: 'Review changes' })).toBeNull();
 
     // Open post/hello-world and edit its title.
-    fireEvent.click(await within(main()).findByRole('link', { name: 'Post (1)' }));
+    await openCollection(within(main()), 'Post');
     // The fixture's post collection has no titleField: the row is titled by its slug.
-    fireEvent.click(await within(main()).findByRole('link', { name: 'hello-world' }));
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
-    expect(title.value).toBe('Hello world');
-    fireEvent.change(title, { target: { value: 'Hello from GitHub' } });
-    fireEvent.click(entryActions().getByRole('button', { name: 'Save' }));
+    fireEvent.click(await within(main()).findByRole('button', { name: /^hello-world/ }));
+    await within(main()).findByRole('button', { name: /^Title/ });
+    expect(rowText('Title')).toContain('Hello world');
+    await setField('Title', 'Hello from GitHub');
+    fireEvent.click(await findCta('Save 1 change'));
 
-    // Save on main → New branch.
-    const dialog = await screen.findByRole('dialog');
-    const field = within(dialog).getByLabelText(/^New branch/) as HTMLInputElement;
+    // Save on main → Your changes → Save to, with the suggested new branch.
+    await reviewSheet();
+    const saveTo = await openSaveTo();
+    const field = saveTo.getByLabelText(/^New branch/) as HTMLInputElement;
     await waitFor(() => expect(field.value).toBe('post-hello-world'));
-    await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: 'Save to branch' })));
-    await waitFor(() => expect(chip.textContent).toContain('editlet/post-hello-world'));
+    await act(async () => fireEvent.click(saveTo.getByRole('button', { name: 'Save to new branch' })));
+    await waitFor(() => expect(branchChip().textContent).toContain('editlet/post-hello-world'));
     expect(fileAt(fake, 'editlet/post-hello-world', ENTRY)).toContain('title: Hello from GitHub');
     expect(fileAt(fake, 'main', ENTRY)).toContain('title: Hello world');
 
-    // Review changes → the Title row of the diff.
-    fireEvent.click(await screen.findByRole('link', { name: 'Review changes' }));
-    const file = await within(main()).findByRole('region', { name: ENTRY });
-    const row = within(file).getByRole('region', { name: 'Title' });
+    // Review changes → the branch screen; its Changes sheet has the Title row of the diff.
+    // It is the entry's CTA now that the form is clean on a branch; the form remounts once on the saved file.
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('link', { name: 'Review changes' }));
+      expect(new URLSearchParams(window.location.search).get('editlet')).toMatch(/^branch:/);
+    });
+    expect(await within(main()).findByRole('heading', { level: 1, name: 'Review changes' })).toBeDefined();
+    fireEvent.click(await within(main()).findByRole('button', { name: /^Changes/ }));
+    const changes = await sheet('Changes');
+    const row = within(changes.getByRole('region', { name: ENTRY })).getByRole('region', { name: 'Title' });
     expect(within(row).getByText('Hello world')).toBeDefined();
     expect(within(row).getByText('Hello from GitHub')).toBeDefined();
+    await closeSheets();
     expect(within(main()).queryByRole('button', { name: 'Publish' })).toBeNull();
 
     // Create pull request → the link to it; main is untouched.
     const create = (await within(main()).findByRole('button', { name: 'Create pull request' })) as HTMLButtonElement;
     await waitFor(() => expect(create.disabled).toBe(false));
     await act(async () => fireEvent.click(create));
-    const link = await within(main()).findByRole('link', { name: 'Pull request #1' });
+    const link = await within(main()).findByRole('link', { name: /^Open pull request/ });
     expect(link.getAttribute('href')).toBe('https://github.com/o/r/pull/1');
-    expect(within(main()).getByText('A developer merges it on GitHub.')).toBeDefined();
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Pull request #1' })).toBeDefined();
+    expect(within(main()).getByText('A developer merges it into main on GitHub')).toBeDefined();
 
     expect(fake.state.pulls).toEqual([
       expect.objectContaining({ head: 'editlet/post-hello-world', base: 'main', state: 'open' }),
@@ -108,7 +129,7 @@ describe('GitHub mode end to end', () => {
     expect(fake.state.refs.get('main')).toBe(mainHead);
     expect(fileAt(fake, 'main', ENTRY)).toContain('title: Hello world');
     expect(fake.state.refs.has('editlet/post-hello-world')).toBe(true);
-    expect(chip.textContent).toContain('editlet/post-hello-world');
+    expect(branchChip().textContent).toContain('editlet/post-hello-world');
 
     // The admin never merges: no REST merge, no GraphQL merge or auto-merge.
     expect(

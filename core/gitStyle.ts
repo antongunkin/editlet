@@ -142,9 +142,17 @@ export function formatCommitMessage(style: GitStyle, subject: CommitSubject): st
   return fill(style.commitMessage, { ...subject, Action });
 }
 
-/** The message plus a blank line and `Editlet-Source: <source>`. */
-export function withTrailer(message: string, source: 'admin' | 'agent'): string {
-  return `${message}\n\n${SOURCE_TRAILER}: ${source}`;
+/**
+ * The message plus a blank line and `Editlet-Source: <source>`. A `body` (the editor's note) goes between them, trimmed,
+ * without lines that would read as the source trailer; an empty body adds nothing.
+ */
+export function withTrailer(message: string, source: 'admin' | 'agent', body = ''): string {
+  const note = body
+    .split(/\r\n|\r|\n/)
+    .filter((line) => !line.trimStart().toLowerCase().startsWith(`${SOURCE_TRAILER.toLowerCase()}:`))
+    .join('\n')
+    .trim();
+  return `${message}\n\n${note === '' ? '' : `${note}\n\n`}${SOURCE_TRAILER}: ${source}`;
 }
 
 /** The branch name without the prefix (the `?editlet=branch:<name>` value). */

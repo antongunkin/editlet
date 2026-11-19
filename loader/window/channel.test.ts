@@ -5,6 +5,7 @@ import {
   isAdminToWindowMessage,
   isPreviewToAdminMessage,
   isSelectMessage,
+  isViewportMessage,
   WINDOW_SOURCE,
 } from './channel';
 
@@ -15,7 +16,9 @@ describe('isAdminToWindowMessage', () => {
     msg({ type: 'hello' }),
     msg({ type: 'expand' }),
     msg({ type: 'collapse', w: 120, h: 40.5 }),
+    msg({ type: 'collapse', w: 120, h: 56, shadow: '0 0 0 1px #0001' }),
     msg({ type: 'edge', hover: false }),
+    msg({ type: 'edge', hover: true, edge: 'sw' }),
     msg({ type: 'drag', kind: 'move', phase: 'start', dx: 0, dy: 0 }),
     msg({ type: 'drag', kind: 'sw', phase: 'end', dx: -3, dy: 7 }),
   ])('accepts %j', (data) => {
@@ -31,7 +34,9 @@ describe('isAdminToWindowMessage', () => {
     msg({ type: 'collapse', w: 0, h: 40 }),
     msg({ type: 'collapse', w: 10, h: Infinity }),
     msg({ type: 'collapse', w: '10', h: 10 }),
+    msg({ type: 'collapse', w: 10, h: 10, shadow: 1 }),
     msg({ type: 'edge', hover: 'yes' }),
+    msg({ type: 'edge', hover: true, edge: 'up' }),
     msg({ type: 'drag', kind: 'up', phase: 'start', dx: 0, dy: 0 }),
     msg({ type: 'drag', kind: 'n', phase: 'cancel', dx: 0, dy: 0 }),
     msg({ type: 'drag', kind: 'n', phase: 'move', dx: Number.NaN, dy: 0 }),
@@ -80,5 +85,22 @@ describe('isSelectMessage', () => {
     [{ type: 'selection' }],
   ])('rejects %j', (over) => {
     expect(isSelectMessage(select(over))).toBe(false);
+  });
+});
+
+describe('isViewportMessage', () => {
+  it('accepts the safe area and the keyboard in px, zero included', () => {
+    expect(isViewportMessage(msg({ type: 'viewport', safeBottom: 34, keyboard: 0 }))).toBe(true);
+    expect(isViewportMessage(msg({ type: 'viewport', safeBottom: 0, keyboard: 300 }))).toBe(true);
+  });
+
+  it.each([
+    msg({ type: 'viewport', safeBottom: -1, keyboard: 0 }),
+    msg({ type: 'viewport', safeBottom: 0, keyboard: Number.NaN }),
+    msg({ type: 'viewport', safeBottom: '34', keyboard: 0 }),
+    msg({ type: 'viewport', safeBottom: 0 }),
+    { type: 'viewport', safeBottom: 0, keyboard: 0 },
+  ])('rejects %j', (data) => {
+    expect(isViewportMessage(data)).toBe(false);
   });
 });

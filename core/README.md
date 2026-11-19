@@ -29,12 +29,12 @@ const issues = validateEntry(schema, { collection: 'post', slug: 'hello', data, 
 
 | Feature | Doc |
 |---|---|
-| Schema: field types and the rules `loadSchema` enforces | [docs/schema.md](../../../docs/core/schema.md) |
+| Schema: field types, field groups (`fieldGroups`) and the rules `loadSchema` enforces | [docs/schema.md](../../../docs/core/schema.md) |
 | Entry files: frontmatter, YAML rules, paths, slugs, references | [docs/entry-files.md](../../../docs/core/entry-files.md) |
 | Validation: `validateEntry`, `normalizeData`, `initialData`, the "absent" rule | [docs/validation.md](../../../docs/core/validation.md) |
 | JSON Schema and `.d.ts` generation | [docs/generation.md](../../../docs/core/generation.md) |
 | Write rules and batch integrity: `validateChanges`, `validateCommit` | [docs/writes.md](../../../docs/core/writes.md) |
-| `ContentSource`, the memory source, the error contract, `gitBlobSha` | [docs/content-source.md](../../../docs/core/content-source.md) |
+| `ContentSource`, the memory source, the error contract, `gitBlobSha`, file versions | [docs/content-source.md](../../../docs/core/content-source.md) |
 | Image references in fields and body, in-place alt and `src` edits | [docs/assets.md](../../../docs/core/assets.md) |
 | References between entries: referrers, resolving several levels deep, the `Resolved` type | [docs/references.md](../../../docs/core/references.md) |
 | Rename an entry's slug or delete it, with references and images rewritten in one change | [docs/rename.md](../../../docs/core/rename.md) |
@@ -50,7 +50,7 @@ throw for bad content.
 
 | File | Role |
 |---|---|
-| `schema.ts` | Types and `loadSchema` / `parseSchemaText` |
+| `schema.ts` | Types, `loadSchema` / `parseSchemaText`, `markdownFieldKey`, `fieldGroups` |
 | `fields.ts` | Zod schema per field type, the "absent" rule |
 | `entryFile.ts` | Parse and write `.md` + frontmatter, `decodeUtf8` |
 | `paths.ts` | Entry paths, slugs, ref keys, asset resolution |
@@ -62,7 +62,7 @@ throw for bad content.
 | `validate.ts` | `validateEntry`, `buildDataSchema`, `normalizeData`, `initialData` |
 | `generate.ts` | `toJsonSchema`, `generateTypes` |
 | `writes.ts` | `isWritablePath`, `validateChanges`, `validateCommit` |
-| `source.ts` | `ContentSource`, `createMemorySource` |
+| `source.ts` | `ContentSource` (with the optional `listVersions` / `readVersion`), `FileVersion`, `versionLimit`, `createMemorySource` |
 | `sha.ts` | `gitBlobSha` |
 | `devApi.ts` | Types and constants of the dev file API ([node dev API](../../../docs/node/dev-api.md)) |
 | `issues.ts` | `Issue`, `EditletError` |

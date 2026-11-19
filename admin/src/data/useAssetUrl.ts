@@ -1,12 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { createElement, useEffect, useState } from 'react';
 
-import { PreviewImage } from './PreviewImage';
+import { ImagePlaceholder, PreviewImage } from './PreviewImage';
 import { useFiles } from './queries';
 
 import { useSource } from '../source/context';
-import { cn } from '../ui/cn';
-import { Icon } from '../ui/Icon';
 
 const MIME: Record<string, string> = {
   webp: 'image/webp',
@@ -90,13 +88,9 @@ export const canOpenInWindow = (path: string | null) => path !== null && mimeTyp
 
 export type AssetPreviewProps = { path: string | null; alt: string; className?: string; openable?: boolean };
 
-/** `<img>` for a listed asset, else an image-icon placeholder. */
+/** `<img>` for a listed asset, else the placeholder. `className` sizes both (a tile: `size-full object-cover`). */
 export function AssetPreview({ path, alt, className, openable }: AssetPreviewProps) {
   const url = useAssetUrl(path);
   if (url) return createElement(PreviewImage, { url, alt, className, openable: openable && canOpenInWindow(path) });
-  return createElement(
-    'div',
-    { className: cn('editlet-ff-image__empty', className), role: 'img', 'aria-label': alt || 'No image' },
-    createElement(Icon.Image, { size: 16 }),
-  );
+  return createElement(ImagePlaceholder, { alt, className });
 }

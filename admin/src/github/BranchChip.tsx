@@ -1,44 +1,34 @@
-import { useId, useState } from 'react';
+import { useState } from 'react';
 
 import { BranchDialog } from './BranchDialog';
 import { useBranches, useWorkspace } from './workspace';
 
-import { Button } from '../ui/Button';
-import { Icon } from '../ui/Icon';
+import { BranchChip as Chip } from '../ui/parts/status-chips';
 
-/** Status-bar branch button (small, ghost): `main · live` on the base branch, else the active branch and its open PR number. Opens the picker. */
+/** The status line's branch chip: `main live` on the base branch, else the active branch and its open PR number. Opens the picker. */
 export function BranchChip() {
   const workspace = useWorkspace();
   const branches = useBranches();
   const [open, setOpen] = useState(false);
-  const nameId = useId();
   if (!workspace) return null;
 
   const pr = workspace.onBase ? null : branches.data?.find((b) => b.name === workspace.active)?.pullRequest;
-  const label = workspace.onBase ? `${workspace.base} · live` : workspace.active;
+  const name = workspace.onBase ? workspace.base : workspace.active;
+  const suffix = workspace.onBase ? 'live' : pr ? `#${pr.number}` : undefined;
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="editlet-branch-chip"
-        icon={<Icon.GitBranch size={14} />}
-        aria-label="Branch"
-        aria-describedby={nameId}
+      <Chip
+        name={name}
+        suffix={suffix}
+        offBase={!workspace.onBase}
+        description={workspace.onBase ? `${name} · live` : pr ? `${name} #${pr.number}` : name}
+        className="max-w-64"
+        // The visible text is part of the name (WCAG 2.5.3, label in name): *Branch main live*.
+        aria-label={`Branch ${name}${suffix ? ` ${suffix}` : ''}`}
         aria-haspopup="dialog"
-        title={label}
+        title={workspace.onBase ? `${name} · live` : name}
         onClick={() => setOpen(true)}
-      >
-        <span id={nameId} className="editlet-branch-chip__name">
-          {label}
-        </span>
-        {pr ? (
-          <>
-            {' '}
-            <span className="editlet-branch-chip__pr">#{pr.number}</span>
-          </>
-        ) : null}
-      </Button>
+      />
       <BranchDialog open={open} onOpenChange={setOpen} />
     </>
   );

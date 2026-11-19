@@ -1,7 +1,7 @@
 import type { Editor } from '@milkdown/core';
 import { EditorState, TextSelection } from '@milkdown/prose/state';
 import type { EditorView } from '@milkdown/prose/view';
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import { applyImage, applyLink, linkAt, selectedImage } from './commands';
@@ -11,21 +11,16 @@ import { createImageSlots } from './imageSlots';
 import './richtext.css';
 import { loadMarkdown, rawShare, saveMarkdown, type Codec, type Loaded } from './splice';
 import { Toolbar } from './Toolbar';
+import { ToolbarSlot } from './toolbarSlot';
 
 import type { FieldContext } from '../fields/types';
 import { MediaPicker } from '../media/MediaPicker';
 import type { Projection } from '../select/match';
 import { projectDoc } from '../select/project';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Field,
-  FIELD_INPUT_CLASS,
-} from '../ui';
+import { Button, Input } from '../ui';
+import { Field, fieldDescribedBy } from '../ui/Field';
+import { BottomBar } from '../ui/parts/bottom-bar';
+import { Sheet } from '../ui/parts/sheet';
 
 /** More than this share of blocks kept as raw text, and the field opens in Source instead. */
 const MAX_RAW_SHARE = 0.5;
@@ -53,6 +48,7 @@ function LinkDialog({ view, onClose }: { view: EditorView; onClose(): void }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const id = useId();
+  const hrefRef = useRef<HTMLInputElement>(null);
   const needsText = view.state.selection.empty && !existing;
   const apply = () => {
     const tr = applyLink(view.state, { href, text });
@@ -61,57 +57,51 @@ function LinkDialog({ view, onClose }: { view: EditorView; onClose(): void }) {
     onClose();
     view.focus();
   };
+  const formId = `${id}-form`;
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{existing ? 'Edit link' : 'Add link'}</DialogTitle>
-        </DialogHeader>
-        <form
-          className="editlet-u-stack editlet-u-gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            apply();
-          }}
-        >
-          <Field
-            label="URL"
-            htmlFor={`${id}-href`}
-            error={error}
-            hint={existing ? 'Empty removes the link' : undefined}
-          >
-            <input
-              id={`${id}-href`}
-              className={FIELD_INPUT_CLASS}
-              value={href}
-              placeholder="https://"
-              onChange={(e) => {
-                setHref(e.target.value);
-                setError(null);
-              }}
-            />
+    <Sheet
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={existing ? 'Edit link' : 'Add link'}
+      initialFocus={hrefRef}
+      bar={
+        <BottomBar>
+          <Button variant="primary" size="lg" full type="submit" form={formId}>
+            Apply
+          </Button>
+        </BottomBar>
+      }
+    >
+      <form
+        id={formId}
+        noValidate
+        className="flex flex-col gap-5 px-4 pt-1 pb-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          apply();
+        }}
+      >
+        <Field label="URL" htmlFor={`${id}-href`} error={error} hint={existing ? 'Empty removes the link' : undefined}>
+          <Input
+            ref={hrefRef}
+            id={`${id}-href`}
+            value={href}
+            placeholder="https://"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={fieldDescribedBy(`${id}-href`, existing, error)}
+            onChange={(e) => {
+              setHref(e.target.value);
+              setError(null);
+            }}
+          />
+        </Field>
+        {needsText ? (
+          <Field label="Text" htmlFor={`${id}-text`}>
+            <Input id={`${id}-text`} value={text} onChange={(e) => setText(e.target.value)} />
           </Field>
-          {needsText ? (
-            <Field label="Text" htmlFor={`${id}-text`}>
-              <input
-                id={`${id}-text`}
-                className={FIELD_INPUT_CLASS}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-              />
-            </Field>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="submit">
-              Apply
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        ) : null}
+      </form>
+    </Sheet>
   );
 }
 
@@ -129,44 +119,49 @@ function ImageDialog({ view, ctx, onClose }: { view: EditorView; ctx: FieldConte
     view.focus();
   };
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="editlet-ff-image__dialog">
-        <DialogHeader>
-          <DialogTitle>{selected ? 'Edit image' : 'Insert image'}</DialogTitle>
-        </DialogHeader>
-        <Field label="Alt text" htmlFor={`${id}-alt`} error={error}>
-          <input
-            id={`${id}-alt`}
-            className={FIELD_INPUT_CLASS}
-            value={alt}
-            placeholder="Describe the image for screen readers"
-            onChange={(e) => setAlt(e.target.value)}
-          />
-        </Field>
-        {selected ? (
-          <DialogFooter>
-            <Button variant="primary" onClick={() => put(String(selected.node.attrs.src))}>
-              Save alt text
-            </Button>
-          </DialogFooter>
-        ) : null}
-        <MediaPicker
-          images={ctx.images}
-          entryFolder={ctx.entryPath.replace(/\.md$/, '')}
-          Preview={ctx.Preview}
-          uploading={uploading}
-          onPick={(path) => put(ctx.toSrc(path))}
-          onUpload={(file) => {
-            setUploading(true);
-            setError(null);
-            ctx
-              .stageUpload(file)
-              .then(put, (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-              .finally(() => setUploading(false));
-          }}
+    <MediaPicker
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={selected ? 'Edit image' : 'Insert image'}
+      images={ctx.images}
+      entryFolder={ctx.entryPath.replace(/\.md$/, '')}
+      contentDir={ctx.contentDir}
+      Preview={ctx.Preview}
+      uploading={uploading}
+      onPick={(path) => put(ctx.toSrc(path))}
+      onUpload={(file) => {
+        setUploading(true);
+        setError(null);
+        ctx
+          .stageUpload(file)
+          .then(put, (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+          .finally(() => setUploading(false));
+      }}
+    >
+      <div className="flex flex-col gap-2 px-4">
+        <label htmlFor={`${id}-alt`} className="px-1 text-sm font-medium text-tray-muted-foreground">
+          Alt text
+        </label>
+        <Input
+          id={`${id}-alt`}
+          value={alt}
+          placeholder="Describe the image for screen readers"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}-error` : undefined}
+          onChange={(e) => setAlt(e.target.value)}
         />
-      </DialogContent>
-    </Dialog>
+        {error ? (
+          <p id={`${id}-error`} className="m-0 px-1 text-sm font-medium text-tint-danger-foreground" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {selected ? (
+          <Button variant="primary" onClick={() => put(String(selected.node.attrs.src))}>
+            Save alt text
+          </Button>
+        ) : null}
+      </div>
+    </MediaPicker>
   );
 }
 
@@ -299,22 +294,26 @@ export default function RichEditor({
   }, [label, describedBy, invalid]);
 
   const view = live.current?.view;
+  const toolbarSlot = useContext(ToolbarSlot);
+  const toolbar =
+    state && live.current ? (
+      <Toolbar
+        editor={live.current.editor}
+        state={state}
+        onLink={() => setDialog('link')}
+        onImage={() => setDialog('image')}
+      />
+    ) : null;
   return (
     <div
-      className="editlet-rt"
+      className="rounded-2xl bg-card shadow-raised focus-within:inset-ring-2 focus-within:inset-ring-ring"
+      data-focus-ring=""
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onBlur?.();
       }}
     >
-      {state && live.current ? (
-        <Toolbar
-          editor={live.current.editor}
-          state={state}
-          onLink={() => setDialog('link')}
-          onImage={() => setDialog('image')}
-        />
-      ) : null}
-      <div ref={rootRef} className="editlet-rt__body" />
+      {toolbarSlot && toolbar ? createPortal(toolbar, toolbarSlot) : toolbar}
+      <div ref={rootRef} className="min-h-60" />
       {images.map((slot) =>
         createPortal(<ctx.Preview path={ctx.resolveSrc(slot.src)} alt={slot.alt} />, slot.dom, slot.id),
       )}

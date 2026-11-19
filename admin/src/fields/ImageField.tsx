@@ -3,45 +3,51 @@ import { useRef, useState, type DragEvent } from 'react';
 import { describedBy, fieldProps, invalid } from './shared';
 import type { ImageValue, WidgetProps } from './types';
 
+import { BIG_PREVIEW } from '../data/PreviewImage';
 import { MediaPicker } from '../media/MediaPicker';
-import {
-  AlertDialog,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  Field,
-  FIELD_INPUT_CLASS,
-  Icon,
-} from '../ui';
+import { Button, cn, Confirm, Field, Icon, IconButton, Input } from '../ui';
+import { StatusChip } from '../ui/parts/status-chips';
 
 const EMPTY: ImageValue = { src: '', alt: '' };
 
-/** The file name of a stored `src` (its last path segment), shown cut with an ellipsis; the title has the whole path. */
+/** The file name of a stored `src`: its last path segment. */
 const fileName = (src: string) => src.split('/').pop() || src;
 
 /** A drag that carries files (not text or a link). */
 const hasFiles = (e: DragEvent<HTMLElement>) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 
 /**
- * Image `{ src, alt }`: a preview of at most 200 px (a magnifier opens it in a new window), then Upload (staged into
- * the entry's commit; an image file can also be dropped on the preview), Gallery (`MediaPicker`: pick an image
- * already in the repository, or upload one), a red Remove icon (asks first) and the file name, then the alt text.
+ * Image `{ src, alt }` in its modal (FigCraft *Edit · Cover image*): the preview, 160 px high (a magnifier opens it in a
+ * new window), a chip while the file waits for the save, then Replace (staged into the entry's commit; an image file
+ * can also be dropped on the preview), Gallery (`MediaPicker`, a second modal: pick an image already in the
+ * repository, or upload one), a red Remove icon (asks first) and the alt text.
  */
-export function ImageField({ name, field, value, onChange, onBlur, error, ctx }: WidgetProps<ImageValue>) {
+export function ImageField({
+  name,
+  field,
+  value,
+  onChange,
+  onBlur,
+  error,
+  ctx,
+  defaultGalleryOpen = false,
+}: WidgetProps<ImageValue> & {
+  /** For the *Gallery* frame of /design only: the editor opens the Gallery with the button, never through this. */
+  defaultGalleryOpen?: boolean;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const latest = useRef(value);
   latest.current = value;
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [choosing, setChoosing] = useState(false);
+  const [choosing, setChoosing] = useState(defaultGalleryOpen);
   const [removing, setRemoving] = useState(false);
   const [dragging, setDragging] = useState(false);
   // dragenter/dragleave also fire for the children of the zone, so count them to know when the pointer really left.
   const depth = useRef(0);
   const Preview = ctx.Preview;
   const path = value.src === '' ? null : ctx.resolveSrc(value.src);
+  const staged = path !== null && ctx.isStaged?.(path) === true;
   const altId = `${name}-alt`;
 
   const upload = async (file: File) => {
@@ -87,57 +93,58 @@ export function ImageField({ name, field, value, onChange, onBlur, error, ctx }:
 
   return (
     <Field {...fieldProps(field, error, name)}>
-      <div className="editlet-ff-image__body" data-dragging={dragging ? 'true' : undefined} {...dropZone}>
+      <div
+        className={cn('flex flex-col gap-3 rounded-2xl', dragging && 'inset-ring-2 inset-ring-ring')}
+        data-editlet="image-drop"
+        data-dragging={dragging ? 'true' : undefined}
+        {...dropZone}
+      >
         {value.src !== '' ? (
-          <div className="editlet-ff-image__preview">
-            <Preview path={path} alt={value.alt} openable />
+          <div className="relative overflow-hidden rounded-2xl">
+            <Preview path={path} alt={value.alt} openable className={BIG_PREVIEW} />
           </div>
         ) : (
-          <div className="editlet-ff-image__empty">
-            <Icon.Image size={28} />
+          <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-2xl bg-sunken text-sm text-tray-muted-foreground">
+            <Icon name="image" size={24} />
             <span>Drop an image here</span>
           </div>
         )}
-        <div className="editlet-ff-image__actions">
+        {staged ? (
+          <StatusChip
+            tone="unsaved"
+            className="self-start"
+            icon={<Icon name="upload" size={16} className="shrink-0 text-chart-1" />}
+          >
+            {fileName(value.src)} · uploads when you save
+          </StatusChip>
+        ) : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Button
-            variant="outline"
-            size="sm"
-            icon={<Icon.Upload size={14} />}
+            icon={<Icon name="upload" size={20} />}
             disabled={uploading}
             onClick={() => inputRef.current?.click()}
           >
-            Upload
+            {value.src === '' ? 'Upload' : 'Replace'}
           </Button>
-          <Button variant="outline" size="sm" icon={<Icon.Image size={14} />} onClick={() => setChoosing(true)}>
+          <Button icon={<Icon name="image" size={20} />} onClick={() => setChoosing(true)}>
             Gallery
           </Button>
           {value.src !== '' || value.alt !== '' ? (
-            <Button
-              variant="outline"
-              size="sm"
-              iconOnly
-              className="editlet-ff-image__remove"
-              aria-label="Remove image"
-              title="Remove image"
+            <IconButton
+              className="text-destructive"
+              label="Remove image"
               onClick={() => setRemoving(true)}
-            >
-              <Icon.Trash size={16} />
-            </Button>
-          ) : null}
-          {value.src !== '' ? (
-            <code className="editlet-ff-image__meta" title={value.src}>
-              {fileName(value.src)}
-            </code>
+              icon={<Icon name="trash" size={20} />}
+            />
           ) : null}
         </div>
       </div>
-      <div className="editlet-ff-image__alt">
-        <label htmlFor={altId} className="editlet-ff-image__alt-label">
+      <div className="flex flex-col gap-2">
+        <label htmlFor={altId} className="px-1 text-sm font-medium text-tray-muted-foreground">
           Alt text
         </label>
-        <input
+        <Input
           id={altId}
-          className={FIELD_INPUT_CLASS}
           type="text"
           value={value.alt}
           placeholder="Describe the image for screen readers"
@@ -149,16 +156,16 @@ export function ImageField({ name, field, value, onChange, onBlur, error, ctx }:
         />
       </div>
       {uploadError ? (
-        <div className="editlet-field__error" role="alert">
-          <Icon.X size={11} />
+        <p className="m-0 flex items-center gap-1.5 px-1 text-sm font-medium text-tint-danger-foreground" role="alert">
+          <Icon name="alert" size={16} className="shrink-0 text-destructive" />
           {uploadError}
-        </div>
+        </p>
       ) : null}
       <input
         ref={inputRef}
         type="file"
         accept="image/*"
-        className="editlet-u-hidden"
+        hidden
         data-testid={`${name}-file`}
         aria-label={`${field.label}: file to upload`}
         onChange={(e) => {
@@ -167,7 +174,7 @@ export function ImageField({ name, field, value, onChange, onBlur, error, ctx }:
           if (file) void upload(file);
         }}
       />
-      <AlertDialog
+      <Confirm
         open={removing}
         onOpenChange={setRemoving}
         title="Remove image?"
@@ -175,27 +182,23 @@ export function ImageField({ name, field, value, onChange, onBlur, error, ctx }:
         confirmLabel="Remove"
         onConfirm={() => onChange(EMPTY)}
       />
-      <Dialog open={choosing} onOpenChange={setChoosing}>
-        <DialogContent className="editlet-ff-image__dialog">
-          <DialogHeader>
-            <DialogTitle>Gallery</DialogTitle>
-          </DialogHeader>
-          <MediaPicker
-            images={ctx.images}
-            entryFolder={ctx.entryPath.replace(/\.md$/, '')}
-            Preview={Preview}
-            uploading={uploading}
-            onPick={(p) => {
-              onChange({ src: ctx.toSrc(p), alt: value.alt });
-              setChoosing(false);
-            }}
-            onUpload={(file) => {
-              setChoosing(false);
-              void upload(file);
-            }}
-          />
-        </DialogContent>
-      </Dialog>
+      <MediaPicker
+        open={choosing}
+        onOpenChange={setChoosing}
+        images={ctx.images}
+        entryFolder={ctx.entryPath.replace(/\.md$/, '')}
+        contentDir={ctx.contentDir}
+        Preview={Preview}
+        uploading={uploading}
+        onPick={(p) => {
+          onChange({ src: ctx.toSrc(p), alt: value.alt });
+          setChoosing(false);
+        }}
+        onUpload={(file) => {
+          setChoosing(false);
+          void upload(file);
+        }}
+      />
     </Field>
   );
 }

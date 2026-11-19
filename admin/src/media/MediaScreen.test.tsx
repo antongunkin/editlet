@@ -26,6 +26,26 @@ async function openMedia(extra?: Record<string, string | Uint8Array>) {
 }
 
 const card = (path: string) => within(main()).getByTitle(path);
+const chip = (name: RegExp) => within(main()).getByRole('button', { name });
+
+/** The ⋯ action sheet of the screen, opened. */
+async function more() {
+  fireEvent.click(within(main()).getByRole('button', { name: 'More actions' }));
+  return within(await screen.findByRole('dialog'));
+}
+
+/** Search is a header action: it opens the search field in place of the title. */
+function search(text: string) {
+  if (!screen.queryByRole('searchbox', { name: 'Search images' }))
+    fireEvent.click(within(main()).getByRole('button', { name: 'Search images' }));
+  fireEvent.change(within(main()).getByRole('searchbox', { name: 'Search images' }), { target: { value: text } });
+}
+
+/** Opens the image's page from the grid. */
+async function openImage(path: string, name: string) {
+  fireEvent.click(card(path));
+  await within(main()).findByRole('heading', { level: 1, name });
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -33,36 +53,45 @@ afterEach(() => {
 });
 
 describe('MediaScreen', () => {
-  it('lists images by collection with their entry folder, Used and Unused, and filters them', async () => {
+  it('lists images with their folder, Used and Unused, and filters them', async () => {
     await openMedia();
-    const post = within(main()).getByRole('group', { name: 'Post' });
-    expect(within(post).getAllByText('hello-world')).toHaveLength(2);
-    expect(card(COVER).textContent).toContain('Used in 1');
-    expect(card(COVER).textContent).not.toContain('Unused');
-    await waitFor(() => expect(card(OLD).textContent).toContain('Unused'));
-    fireEvent.click(within(main()).getByRole('tab', { name: 'Unused 1' }));
+    expect(card(COVER).getAttribute('aria-label')).toBe('cover.webp, post/hello-world, Used in 1');
+    expect(within(card(COVER)).queryByText('Unused')).toBeNull();
+    await waitFor(() => expect(card(OLD).getAttribute('aria-label')).toContain('Unused'));
+    expect(within(card(OLD)).getByText('Unused')).toBeDefined();
+    fireEvent.click(chip(/^Unused\s*1$/));
     expect(within(main()).queryByTitle(COVER)).toBeNull();
     expect(card(OLD)).toBeDefined();
-    fireEvent.click(within(main()).getByRole('tab', { name: 'All 2' }));
-    fireEvent.change(within(main()).getByLabelText('Search images'), { target: { value: 'cover' } });
+    fireEvent.click(chip(/^All\s*2$/));
+    search('cover');
     expect(within(main()).queryByTitle(OLD)).toBeNull();
+    // The search header keeps the page's h1 and the window's own actions.
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Media' })).toBeDefined();
+    expect(within(main()).getByRole('button', { name: 'Minimize' })).toBeDefined();
+    // Back from the search field clears it.
+    fireEvent.click(within(main()).getByRole('button', { name: 'Close search' }));
+    expect(card(OLD)).toBeDefined();
   });
 
   it('opens an image with its uses and saves alt text to the entry in one commit', async () => {
     const { source, commit } = await openMedia();
-    fireEvent.click(card(COVER));
-    const detail = await within(main()).findByRole('complementary', { name: 'cover.webp' });
-    expect(within(detail).getByText('Used in 1 place')).toBeDefined();
-    const alt = within(detail).getByLabelText('Alt text in hello-world, Featured image') as HTMLInputElement;
+    await openImage(COVER, 'cover.webp');
+    expect(within(main()).getByRole('heading', { name: 'Used in 1 place' })).toBeDefined();
+    expect(within(main()).getByRole('link', { name: /hello-world/ })).toBeDefined();
+    const alt = within(main()).getByLabelText('Alt text in hello-world, Featured image') as HTMLInputElement;
     expect(alt.value).toBe('Cover');
+    const save = within(main()).getByRole('button', { name: 'Save alt text' });
+    expect(save).toHaveProperty('disabled', true);
     fireEvent.change(alt, { target: { value: 'A laptop' } });
-    fireEvent.click(within(detail).getByRole('button', { name: 'Save alt changes (1)' }));
+    fireEvent.click(save);
     await waitFor(() => expect(commit).toHaveBeenCalled());
     const [changes, message] = commit.mock.calls[0]!;
     expect(message).toBe('Update post/hello-world');
     expect(changes.map((c) => c.path)).toEqual([POST]);
     expect(decode(await source.readFile(POST))).toContain('alt: A laptop');
-    expect(within(detail).getByRole('button', { name: 'Delete' })).toHaveProperty('disabled', true);
+    // Delete is in ⋯ and is off while an entry uses the image.
+    const actions = await more();
+    expect(actions.getByRole('button', { name: /^Delete…/ })).toHaveProperty('disabled', true);
   });
 
   it('uploads several files at once into the media folder, renaming on collision', async () => {
@@ -88,14 +117,20 @@ describe('MediaScreen', () => {
 
   it('deletes only unused images, after asking', async () => {
     const { source, commit } = await openMedia();
-    fireEvent.click(within(main()).getByRole('button', { name: 'Select' }));
+    fireEvent.click((await more()).getByRole('button', { name: 'Select images' }));
     await waitFor(() => expect(card(OLD)).toHaveProperty('disabled', false));
+    expect(within(main()).getByText('Only unused images can be selected.')).toBeDefined();
+    // Where two files can share a name, the tile says which one: its name and folder are under the picture.
+    expect(within(card(OLD)).getByText('old.png')).toBeDefined();
+    expect(within(card(OLD)).getByText('post/hello-world')).toBeDefined();
     expect(within(main()).getByTitle(`Used by ${POST}`)).toHaveProperty('disabled', true);
+    expect(within(main()).getByRole('button', { name: 'Delete' })).toHaveProperty('disabled', true);
     fireEvent.click(card(OLD));
-    fireEvent.click(within(main()).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(within(main()).getByRole('button', { name: 'Delete 1 image' }));
     const dialog = await screen.findByRole('alertdialog');
-    expect(within(dialog).getByText('Delete old.png?')).toBeDefined();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    expect(within(dialog).getByText('Delete 1 image?')).toBeDefined();
+    expect(within(dialog).getByText(/old\.png is not used by any entry/)).toBeDefined();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete image' }));
     await waitFor(() => expect(commit).toHaveBeenCalled());
     expect(commit.mock.calls[0]![0]).toEqual([{ path: OLD, content: null, sha: expect.any(String) }]);
     await expect(source.readFile(OLD)).rejects.toThrow();
@@ -104,8 +139,7 @@ describe('MediaScreen', () => {
 
   it('replaces a file in place (same extension) with the sha it was read at', async () => {
     const { source, commit } = await openMedia();
-    fireEvent.click(card(OLD));
-    await within(main()).findByRole('complementary', { name: 'old.png' });
+    await openImage(OLD, 'old.png');
     fireEvent.change(screen.getByTestId('media-replace-file'), {
       target: { files: [new File([new Uint8Array([4, 4])], 'new.png')] },
     });
@@ -116,9 +150,10 @@ describe('MediaScreen', () => {
     expect([...(await source.readFile(OLD))]).toEqual([4, 4]);
   });
 
-  it('is reachable from the navigation menu', async () => {
+  it('is reachable from All content', async () => {
     renderApp({ route: '' });
-    const link = await screen.findByRole('link', { name: 'Media', hidden: true });
+    fireEvent.click(await within(main()).findByRole('link', { name: /^All content/ }));
+    const link = await within(main()).findByRole('link', { name: /^Media/ });
     fireEvent.click(link);
     expect(await within(main()).findByRole('heading', { name: 'Media' })).toBeDefined();
   });
@@ -126,12 +161,12 @@ describe('MediaScreen', () => {
 
 const drag = (list: File[], types = ['Files']) => ({ dataTransfer: { types, files: list, dropEffect: 'none' } });
 
-const section = () => main().querySelector<HTMLElement>('.editlet-media')!;
+const section = () => main().querySelector<HTMLElement>('[data-editlet="screen"]')!;
 
 const big = (name: string) => new File([new Uint8Array(6 * 1024 * 1024)], name);
 
 describe('MediaScreen: drops, failures and several uses', () => {
-  it('uploads files dropped on the screen to the media folder, and on a card into that card folder', async () => {
+  it('uploads files dropped on the screen to the media folder, and on a tile into that tile folder', async () => {
     const { commit } = await openMedia();
     const png = new File([new Uint8Array([5])], 'drop.png');
 
@@ -161,10 +196,21 @@ describe('MediaScreen: drops, failures and several uses', () => {
     expect(commit.mock.calls[1]![0].map((c) => c.path)).toEqual(['cms/content/post/hello-world/here.png']);
   });
 
-  it('uploads into the open image folder, notes large files and reports a series that stopped midway', async () => {
+  it('uploads into the open image folder from the image’s ⋯', async () => {
     const { commit } = await openMedia();
-    fireEvent.click(card(OLD));
-    await within(main()).findByRole('complementary', { name: 'old.png' });
+    await openImage(OLD, 'old.png');
+    const actions = await more();
+    expect(actions.getByRole('button', { name: /^Upload to this folder…/ })).toBeDefined();
+    fireEvent.change(screen.getByTestId('media-upload-file'), {
+      target: { files: [new File([new Uint8Array([7])], 'next.png')] },
+    });
+    await waitFor(() => expect(commit).toHaveBeenCalled());
+    expect(commit.mock.calls[0]![0].map((c) => c.path)).toEqual(['cms/content/post/hello-world/next.png']);
+    expect(commit.mock.calls[0]![1]).toBe('Upload post/next.png');
+  });
+
+  it('notes large files and reports a series that stopped midway', async () => {
+    const { commit } = await openMedia();
     commit.mockImplementationOnce(async () => ({ issues: [], sha: 'x' }) as never);
     commit.mockRejectedValueOnce(new Error('Network down'));
     fireEvent.change(screen.getByTestId('media-upload-file'), { target: { files: [big('a.png'), big('b.png')] } });
@@ -174,8 +220,8 @@ describe('MediaScreen: drops, failures and several uses', () => {
       "Large files stay in the repository's history for good: a.png (6.0 MB), b.png (6.0 MB).",
     );
     expect(commit.mock.calls.map(([changes, message]) => [changes.map((c) => c.path), message])).toEqual([
-      [['cms/content/post/hello-world/a.png'], 'Upload 2 images (1/2)'],
-      [['cms/content/post/hello-world/b.png'], 'Upload 2 images (2/2)'],
+      [['cms/content/media/a.png'], 'Upload 2 images (1/2)'],
+      [['cms/content/media/b.png'], 'Upload 2 images (2/2)'],
     ]);
   });
 
@@ -190,29 +236,27 @@ describe('MediaScreen: drops, failures and several uses', () => {
 
   it('refuses to replace with a file that is not an image', async () => {
     const { commit } = await openMedia();
-    fireEvent.click(card(OLD));
-    const detail = await within(main()).findByRole('complementary', { name: 'old.png' });
+    await openImage(OLD, 'old.png');
     fireEvent.change(screen.getByTestId('media-replace-file'), { target: { files: [new File(['x'], 'notes.txt')] } });
-    expect((await within(detail).findByRole('alert')).textContent).toBe('notes.txt: only image files can be uploaded');
+    expect((await within(main()).findByRole('alert')).textContent).toBe('notes.txt: only image files can be uploaded');
     expect(commit).not.toHaveBeenCalled();
-    expect(within(detail).getByText('Not used')).toBeDefined();
-    fireEvent.click(within(detail).getByRole('button', { name: 'All media' }));
-    expect(within(main()).queryByRole('complementary')).toBeNull();
+    expect(within(main()).getByRole('heading', { name: 'Not used' })).toBeDefined();
+    fireEvent.click(within(main()).getByRole('button', { name: 'All media' }));
+    expect(await within(main()).findByRole('heading', { level: 1, name: 'Media' })).toBeDefined();
   });
 
-  it('applies the first alt to every use and saves both entries', async () => {
+  it('uses the first alt text for every use and saves both entries', async () => {
     const second = 'cms/content/post/second.md';
     const { commit } = await openMedia({
       [second]: '---\ntitle: Second\nfeaturedImage:\n  src: hello-world/cover.webp\n---\n',
     });
-    fireEvent.click(card(COVER));
-    const detail = await within(main()).findByRole('complementary', { name: 'cover.webp' });
-    await waitFor(() => expect(within(detail).getByText('Used in 2 places')).toBeDefined());
-    const alt = within(detail).getByLabelText('Alt text in second, Featured image') as HTMLInputElement;
+    await openImage(COVER, 'cover.webp');
+    await waitFor(() => expect(within(main()).getByRole('heading', { name: 'Used in 2 places' })).toBeDefined());
+    const alt = within(main()).getByLabelText('Alt text in second, Featured image') as HTMLInputElement;
     expect(alt.value).toBe('');
-    fireEvent.click(within(detail).getByRole('button', { name: 'Apply first alt to all' }));
-    expect(alt.value).toBe('Cover');
-    fireEvent.click(within(detail).getByRole('button', { name: 'Save alt changes (1)' }));
+    fireEvent.click((await more()).getByRole('button', { name: 'Use the first alt text everywhere' }));
+    await waitFor(() => expect(alt.value).toBe('Cover'));
+    fireEvent.click(within(main()).getByRole('button', { name: 'Save alt text' }));
     await waitFor(() => expect(commit).toHaveBeenCalled());
     expect(commit.mock.calls[0]![0].map((c) => c.path)).toEqual([second]);
   });
@@ -221,26 +265,27 @@ describe('MediaScreen: drops, failures and several uses', () => {
     await openMedia({
       'cms/content/post/second.md': '---\ntitle: Second\nfeaturedImage:\n  src: hello-world/old.png\n---\n',
     });
-    await waitFor(() => expect(card(OLD).textContent).toContain('Used in 1'));
+    await waitFor(() => expect(card(OLD).getAttribute('aria-label')).toContain('Used in 1'));
     expect(within(card(OLD)).getByText('No alt')).toBeDefined();
-    fireEvent.click(within(main()).getByRole('tab', { name: 'Missing alt 1' }));
+    fireEvent.click(chip(/^Missing alt\s*1$/));
     expect(within(main()).queryByTitle(COVER)).toBeNull();
-    fireEvent.change(within(main()).getByLabelText('Search images'), { target: { value: 'zzz' } });
+    search('zzz');
     expect(within(main()).getByText('No images match.')).toBeDefined();
   });
 
-  it('selecting a card twice clears it; Done leaves select mode', async () => {
+  it('selecting a tile twice clears it; Done leaves select mode', async () => {
     await openMedia({ 'cms/content/media/free.png': new Uint8Array([1]) });
-    fireEvent.click(within(main()).getByRole('button', { name: 'Select' }));
+    fireEvent.click((await more()).getByRole('button', { name: 'Select images' }));
     const free = await within(main()).findByTitle('cms/content/media/free.png');
     await waitFor(() => expect(free).toHaveProperty('disabled', false));
     fireEvent.click(free);
     expect(free.getAttribute('aria-pressed')).toBe('true');
-    expect(within(main()).getByText(/1 selected/)).toBeDefined();
+    expect(within(main()).getByRole('button', { name: 'Delete 1 image' })).toBeDefined();
     fireEvent.click(free);
     expect(free.getAttribute('aria-pressed')).toBe('false');
     fireEvent.click(within(main()).getByRole('button', { name: 'Done' }));
     expect(free.getAttribute('aria-pressed')).toBeNull();
+    expect(within(main()).getByRole('button', { name: 'Upload' })).toBeDefined();
   });
 
   it('says where uploads go when there are no images', async () => {
@@ -255,12 +300,11 @@ describe('MediaScreen: drops, failures and several uses', () => {
 
   it('cancels a delete from its dialog', async () => {
     const { commit } = await openMedia();
-    fireEvent.click(card(OLD));
-    const detail = await within(main()).findByRole('complementary', { name: 'old.png' });
-    await waitFor(() =>
-      expect(within(detail).getByRole('button', { name: 'Delete' })).toHaveProperty('disabled', false),
-    );
-    fireEvent.click(within(detail).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(card(OLD).getAttribute('aria-label')).toContain('Unused'));
+    await openImage(OLD, 'old.png');
+    const actions = await more();
+    await waitFor(() => expect(actions.getByRole('button', { name: /^Delete…/ })).toHaveProperty('disabled', false));
+    fireEvent.click(actions.getByRole('button', { name: /^Delete…/ }));
     const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());

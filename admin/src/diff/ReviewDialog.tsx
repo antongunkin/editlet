@@ -1,96 +1,323 @@
-import type { ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 
-import { DiffHunk } from './DiffHunk';
+import { FieldDiffList, InfoRow } from './FieldDiff';
 
 import type { FieldDiffRow } from '../entry/diff';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui';
+import { BottomBar } from '../ui/parts/bottom-bar';
+import { Card } from '../ui/parts/card';
+import { BigTitle } from '../ui/parts/header';
+import { Row } from '../ui/parts/rows';
+import { Sheet } from '../ui/parts/sheet';
+import { Badge } from '../ui/primitives/badge';
+import { Button } from '../ui/primitives/button';
+import { Textarea } from '../ui/primitives/input';
+
+// Save changes (FigCraft *Your changes*, *Change · diff*, *Saving*, *Save to · new branch*, *Your changes · 600*): what
+// a save puts in its one commit, before it is made. Props only: the entry screen passes its own diff; /design passes
+// the design's two entries.
+
+export interface ReviewEntry {
+  /** The entry's ref (`post/tires`). */
+  key: string;
+  title: string;
+  /** *Post · Title, Excerpt*: the collection and the changed fields. */
+  sub: string;
+  rows: FieldDiffRow[];
+}
 
 export type ReviewDialogProps = {
   open: boolean;
   onOpenChange(open: boolean): void;
-  /** Changed fields (`entryDiff`), one diff row each. */
-  rows: FieldDiffRow[];
+  /** The entries with changes, each with its changed fields (`entryDiff`). */
+  entries: ReviewEntry[];
   /** Repo paths of staged image files that go into the same commit. */
   newFiles: string[];
-  /** Confirm button label. */
-  confirmLabel?: string;
+  /** Where the commit goes (*editlet/spring · PR #2*, *main · new branch*); nothing in dev mode (the files on disk). */
+  saveTo?: string;
+  /**
+   * On the base branch: the new-branch field (`NewBranchField`). The CTA then opens *Save to*, where the name is chosen
+   * and its own CTA saves.
+   */
+  newBranch?: ReactNode;
+  /** Who must approve (`ApprovalNote`), under the list and in *Save to*. */
+  note?: ReactNode;
+  /** The CTA: *Save 2 changes*. */
+  confirmLabel: string;
   busy?: boolean;
-  /** Also disables the confirm button (e.g. no usable new-branch name yet). */
+  /** Also disables the final save (no usable new-branch name yet, an offline dev server). */
   confirmDisabled?: boolean;
-  /** Rendered between the changes and the buttons (e.g. the new-branch field). */
-  children?: ReactNode;
   onConfirm(): void;
+  /** The diffs open inline under each entry (a 600 px window) instead of one level down. */
+  inline?: boolean;
+  /** /design: the entry whose diff is open, `save-to` or `note`. */
+  initialOpen?: string;
+  /**
+   * *Revert this change* under each field of a diff: puts that field of that entry back to its saved value. Without
+   * it the diffs only show.
+   */
+  onRevert?: (entryKey: string, row: FieldDiffRow) => void;
+  /** The *Note* row (GitHub mode): the commit's optional body, edited in its own sheet. */
+  commitNote?: { value: string; onChange(value: string): void };
 };
 
-/** One before/after section per changed field (label, type, key), line numbers for markdown. */
-export function FieldDiffList({ rows }: { rows: FieldDiffRow[] }) {
-  return (
-    <>
-      {rows.map((row) => (
-        <section key={row.key} className="editlet-diff-hunk" aria-label={row.label}>
-          <div className="editlet-diff-hunk__header">
-            <span className="editlet-diff-hunk__header-label">{row.label}</span>
-            <span className="editlet-diff-hunk__header-format">{row.type}</span>
-            <span className="editlet-diff-hunk__header-spacer" />
-            <code className="editlet-diff-hunk__header-key">{row.key}</code>
-          </div>
-          <div className="editlet-diff-hunk__body">
-            <DiffHunk before={row.before} after={row.after} showLineNumbers={row.type === 'markdown'} />
-          </div>
-        </section>
-      ))}
-    </>
-  );
+/** /design opens a second level once the first has risen (`sheet-motion`'s `modal-in`). */
+const OPEN_AFTER_MS = 400;
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** *2 entries, 3 fields* (and the new files, when there are any). */
+export function reviewSummary(entries: ReviewEntry[], newFiles: string[]): string {
+  const fields = entries.reduce((n, e) => n + e.rows.length, 0);
+  const parts = [plural(entries.length, 'entry', 'entries'), plural(fields, 'field')];
+  if (newFiles.length > 0) parts.push(plural(newFiles.length, 'new file'));
+  return parts.join(', ');
 }
 
-/** "Review changes": one before/after diff per changed field, the new image files, `children`, then Cancel / Save. */
+/** The entry screen's one entry: *Post · Title, Excerpt*. */
+export function reviewEntries(ref: string, title: string, collection: string, rows: FieldDiffRow[]): ReviewEntry[] {
+  return [{ key: ref, title, sub: `${collection} · ${rows.map((r) => r.label).join(', ')}`, rows }];
+}
+
+/** The window is at least 600 px wide (the desktop window): the diffs show inline. */
+const WIDE = '(min-width: 600px)';
+
+export function useWide(): boolean {
+  const [wide, setWide] = useState(() => typeof matchMedia === 'function' && matchMedia(WIDE).matches);
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return;
+    const query = matchMedia(WIDE);
+    const update = () => setWide(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return wide;
+}
+
+const fileName = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+
+/**
+ * *Your changes*: the big title counts what the commit holds, each entry is a row (its diff one level down, or inline
+ * at 600 px), the new image files and where the commit goes follow, and the one CTA saves. On the base branch the CTA
+ * opens *Save to* first: the live site is never written, so the change goes to a new branch named there.
+ */
 export function ReviewDialog({
   open,
   onOpenChange,
-  rows,
+  entries,
   newFiles,
-  confirmLabel = 'Save',
-  busy,
-  confirmDisabled,
-  children,
+  saveTo,
+  newBranch,
+  note,
+  confirmLabel,
+  busy = false,
+  confirmDisabled = false,
   onConfirm,
+  inline = false,
+  initialOpen,
+  onRevert,
+  commitNote,
 }: ReviewDialogProps) {
+  const [opened, setOpened] = useState<string | null>(null);
+  // A level opens after the one under it: opened together, the outer sheet's focus trap would mark the inner one inert.
+  useEffect(() => {
+    if (!initialOpen) return;
+    const id = setTimeout(() => setOpened(initialOpen), OPEN_AFTER_MS);
+    return () => clearTimeout(id);
+  }, [initialOpen]);
+  // Closed by the caller (the save landed): the next open starts at the list.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) setOpened(null);
+  }
+  const formId = useId();
+  const summary = reviewSummary(entries, newFiles);
+  const empty = entries.length === 0 && newFiles.length === 0;
+  const diffOf = entries.find((e) => e.key === opened);
+  // The diff that is open lost its last change (every field reverted): back to the list.
+  if (opened !== null && opened !== 'save-to' && opened !== 'note' && diffOf === undefined) setOpened(null);
+  const revert = (key: string) => (onRevert ? (row: FieldDiffRow) => !busy && onRevert(key, row) : undefined);
+  // The note's first line as the commit will have it (`withTrailer` drops a forged trailer line).
+  const firstLine = commitNote?.value
+    .split(/\r\n|\r|\n/)
+    .map((l) => l.trim())
+    .find((l) => l !== '' && !/^editlet-source:/i.test(l));
+
+  const save = () => (newBranch ? setOpened('save-to') : onConfirm());
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="editlet-review-dialog">
-        <DialogHeader>
-          <DialogTitle>Review changes</DialogTitle>
-          <DialogDescription>
-            {rows.length === 0 && newFiles.length === 0 ? 'No changes.' : 'These changes are saved in one commit.'}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="editlet-u-stack editlet-u-gap-3 editlet-review-dialog__body">
-          <FieldDiffList rows={rows} />
-          {newFiles.length > 0 ? (
-            <section className="editlet-diff-hunk" aria-label="New files">
-              <div className="editlet-diff-hunk__header">
-                <span className="editlet-diff-hunk__header-label">New files</span>
-              </div>
-              <ul className="editlet-diff-hunk__body editlet-review-dialog__files">
-                {newFiles.map((p) => (
-                  <li key={p} className="editlet-u-mono editlet-u-text-xs">
-                    + {p}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </div>
-        {children}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button variant="primary" disabled={busy || confirmDisabled} onClick={onConfirm}>
-            {confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setOpened(null);
+        onOpenChange(next);
+      }}
+      title="Your changes"
+      // While it saves every control is locked: the content is only to read, and keeps a tab stop to scroll it.
+      readOnly={inline || busy}
+      bar={
+        empty ? undefined : (
+          <BottomBar>
+            <Button
+              variant="primary"
+              size="lg"
+              full
+              loading={busy && !newBranch}
+              busyLabel="Saving…"
+              disabled={busy || (!newBranch && confirmDisabled)}
+              onClick={save}
+            >
+              {confirmLabel}
+            </Button>
+          </BottomBar>
+        )
+      }
+    >
+      <BigTitle title={empty ? 'No changes' : summary} meta={empty ? undefined : 'One commit'} />
+      <div className="flex flex-col gap-4 px-4 pb-8">
+        {entries.length > 0 ? (
+          <Card as="ul" aria-label="Changed entries">
+            {entries.map((entry) => {
+              const count = <Badge tone="unsaved">{entry.rows.length}</Badge>;
+              return (
+                <li key={entry.key}>
+                  {inline ? (
+                    <>
+                      <InfoRow lead="file" title={entry.title} sub={entry.sub} trail={count} />
+                      <div className="pr-3 pb-3 pl-16">
+                        <FieldDiffList rows={entry.rows} onRevert={revert(entry.key)} revertDisabled={busy} />
+                      </div>
+                    </>
+                  ) : (
+                    <Row
+                      lead="file"
+                      title={entry.title}
+                      sub={entry.sub}
+                      trail={count}
+                      disabled={busy}
+                      aria-haspopup="dialog"
+                      onClick={() => setOpened(entry.key)}
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </Card>
+        ) : null}
+        {newFiles.length > 0 || saveTo || commitNote ? (
+          <Card as="ul" aria-label="Commit">
+            {newFiles.map((p) => (
+              <InfoRow key={p} as="li" lead="image" title={fileName(p)} sub={`New file · ${p}`} />
+            ))}
+            {saveTo ? (
+              <li>
+                {newBranch ? (
+                  <Row
+                    lead="branch"
+                    title="Save to"
+                    sub={saveTo}
+                    disabled={busy}
+                    aria-haspopup="dialog"
+                    onClick={() => setOpened('save-to')}
+                  />
+                ) : (
+                  <InfoRow lead="branch" title="Save to" sub={saveTo} />
+                )}
+              </li>
+            ) : null}
+            {commitNote ? (
+              <li>
+                <Row
+                  lead="pencil"
+                  title="Note"
+                  sub={firstLine || 'Add a note (optional)'}
+                  disabled={busy}
+                  aria-haspopup="dialog"
+                  onClick={() => setOpened('note')}
+                />
+              </li>
+            ) : null}
+          </Card>
+        ) : null}
+        {note}
+      </div>
+
+      {inline ? null : (
+        <Sheet
+          open={diffOf !== undefined}
+          onOpenChange={(next) => (next ? undefined : setOpened(null))}
+          title={diffOf?.title ?? ''}
+          sub={diffOf ? plural(diffOf.rows.length, 'change') : undefined}
+          readOnly
+        >
+          <div className="px-4 pt-1 pb-8">
+            {diffOf ? <FieldDiffList rows={diffOf.rows} onRevert={revert(diffOf.key)} revertDisabled={busy} /> : null}
+          </div>
+        </Sheet>
+      )}
+
+      {commitNote ? (
+        <Sheet
+          open={opened === 'note'}
+          onOpenChange={(next) => (next ? undefined : setOpened(null))}
+          title="Note"
+          sub="Goes into the commit message"
+          bar={
+            <BottomBar>
+              <Button variant="primary" size="lg" full onClick={() => setOpened(null)}>
+                Done
+              </Button>
+            </BottomBar>
+          }
+        >
+          <div className="px-4 pt-1 pb-8">
+            <Textarea
+              aria-label="Note"
+              rows={4}
+              value={commitNote.value}
+              placeholder="What changed and why (optional)"
+              onChange={(e) => commitNote.onChange(e.target.value)}
+            />
+          </div>
+        </Sheet>
+      ) : null}
+
+      {newBranch ? (
+        <Sheet
+          open={opened === 'save-to'}
+          onOpenChange={(next) => (next ? undefined : setOpened(null))}
+          title="Save to"
+          sub={summary}
+          bar={
+            <BottomBar>
+              <Button
+                type="submit"
+                form={formId}
+                variant="primary"
+                size="lg"
+                full
+                loading={busy}
+                busyLabel="Saving…"
+                disabled={confirmDisabled}
+              >
+                Save to new branch
+              </Button>
+            </BottomBar>
+          }
+        >
+          <form
+            id={formId}
+            className="flex flex-col gap-2 px-4 pt-1 pb-8"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!busy && !confirmDisabled) onConfirm();
+            }}
+          >
+            {newBranch}
+            {note}
+          </form>
+        </Sheet>
+      ) : null}
+    </Sheet>
   );
 }

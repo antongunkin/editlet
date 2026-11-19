@@ -48,9 +48,11 @@ coordinates:
 
 - A field is named by its schema `label` (`textbox "Title"`, `combobox "Category"`); required fields have
   `aria-required`.
-- `button "Save"` opens `dialog "Review changes"`: one region per changed field with the old (`−`) and new (`+`)
-  value. Confirm with the `Save` inside the dialog. Then check the file with `git diff`.
-- The status bar (`contentinfo`) says `Unsaved changes (n)`, `n uncommitted` or `Draft`.
+- `button "Save 1 change"` opens `dialog "Your changes"`; the entry's row opens its diff (`dialog "<title>"`, one
+  region per changed field with the old and new value; inline in a 600 px window). Confirm with the CTA inside
+  `Your changes` (`Save 1 change`). Then check the file with `git diff`.
+- The status line at the bottom of each screen says `Unsaved changes (n)` (a button that opens the review),
+  `n uncommitted` or `Draft`; GitHub mode has `button "Branch <name> …"` there.
 - Escape closes a menu or dialog first, then collapses the window; errors are text in the page.
 
 The full map of roles and names is `docs/admin/agents.md` in the Editlet repository.

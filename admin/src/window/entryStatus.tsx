@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { ChangesChip } from '../ui/parts/status-chips';
 import { StatusBadge } from '../ui/StatusBadge';
 
 /** What the open entry form tells the window's status bar. */
@@ -51,13 +52,13 @@ export function useReportEntryStatus(
 export function UnsavedLink({ entry }: { entry: EntryStatus }) {
   if (!entry.dirty && !entry.isNew) return null;
   return (
-    <button type="button" className="editlet-window__pending" title="Review and save" onClick={entry.review}>
+    <ChangesChip title="Review and save" onClick={entry.review}>
       {entry.isNew ? 'New entry' : `Unsaved changes (${entry.changes})`}
-    </button>
+    </ChangesChip>
   );
 }
 
 /** Only the exception is shown: a draft is not live. Published is the normal state and stays silent. */
 export function DraftBadge({ entry }: { entry: EntryStatus }) {
-  return entry.draft ? <StatusBadge draft size="sm" /> : null;
+  return entry.draft ? <StatusBadge draft /> : null;
 }

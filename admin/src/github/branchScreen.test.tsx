@@ -11,6 +11,7 @@ import { json } from '../../../github/test/fakeGitHub';
 import { withEditletRoute } from '../../../loader/protocol';
 import { createAdminFakeGitHub, type AdminFakeGitHub } from '../test/fakeGitHub';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
+import { closeSheets, sheet } from '../test/render';
 
 const ENTRY = 'cms/content/post/hello-world.md';
 const GONE = "Branch editlet/edit doesn't exist. It may have been merged or deleted.";
@@ -64,11 +65,59 @@ async function openBranch(fake: AdminFakeGitHub, opts: { route?: string; active?
   window.history.replaceState(null, '', withEditletRoute('/editlet/', opts.route ?? 'branch:edit'));
   writeSession(window.sessionStorage, tokenSession('pat_1'));
   renderLiveApp(siteFetch(opts.param ? { ...LIVE_CONFIG, param: opts.param } : LIVE_CONFIG, fake));
-  await screen.findByRole('button', { name: 'Branch' });
+  await screen.findByRole('button', { name: /^Branch / });
 }
 
 async function createButton(): Promise<HTMLButtonElement> {
   return (await within(main()).findByRole('button', { name: 'Create pull request' })) as HTMLButtonElement;
+}
+
+/** The branch screen (`section[data-editlet="branch-screen"]`). */
+function branchScreen(): HTMLElement {
+  const el = main().querySelector<HTMLElement>('[data-editlet="branch-screen"]');
+  if (!el) throw new Error('No branch screen');
+  return el;
+}
+
+/** The header's title: the branch name (a span, not a heading). */
+const headerText = () => branchScreen().querySelector('[data-slot="header"]')?.textContent ?? '';
+
+/** The step row `name` (Saved, Preview, Review, Live) in the Steps list, once the branch has loaded. */
+async function step(name: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const steps = within(main()).getByRole('list', { name: 'Steps' });
+    const li = within(steps)
+      .getAllByRole('listitem')
+      .find((item) => item.textContent?.startsWith(name));
+    if (!li || li.querySelector('[aria-busy="true"]')) throw new Error(`No step ${name}`);
+    return li;
+  });
+}
+
+/** The row under the steps whose name starts with `name` (*Changes*, *Other files this merge brings in*). */
+const findRow = (name: string) => within(main()).findByRole('button', { name: new RegExp(`^${name}`) });
+
+/** Opens the Changes sheet from its row. */
+async function openChanges() {
+  fireEvent.click(await findRow('Changes'));
+  return sheet('Changes');
+}
+
+/** Opens the Other files sheet from its row. */
+async function openOtherFiles() {
+  fireEvent.click(await findRow('Other files this merge brings in'));
+  return sheet('Other files');
+}
+
+/** Checks the Other files row (`1 file`) and the sheet it opens: src/foo.ts, added. */
+async function expectOtherFiles() {
+  expect((await findRow('Other files this merge brings in')).textContent).toContain('1 file');
+  const other = await openOtherFiles();
+  expect(other.getByText('Merging the pull request brings these in too.')).toBeDefined();
+  const list = within(other.getByRole('list', { name: 'Other files' }));
+  const row = list.getByText('src/foo.ts').closest('li')!;
+  expect(within(row).getByText('Added')).toBeDefined();
+  await closeSheets();
 }
 
 beforeEach(() => {
@@ -82,22 +131,26 @@ afterEach(() => {
 });
 
 describe('branch screen', () => {
-  it('shows the field diff, the other files, the crumb and no Publish', async () => {
+  it('shows the steps, the field diff and the other files in their sheets, and no Publish', async () => {
     const fake = fakeWithEdit();
     await openBranch(fake);
 
-    const file = await within(main()).findByRole('region', { name: ENTRY });
+    expect(await within(main()).findByRole('heading', { level: 1, name: 'Review changes' })).toBeDefined();
+    expect(headerText()).toContain('editlet/edit');
+    expect((await step('Saved')).textContent).toContain('1 entry, 1 commit');
+
+    expect((await findRow('Changes')).textContent).toContain('1 file · 1 field');
+    const changes = await openChanges();
+    const file = changes.getByRole('region', { name: ENTRY });
     expect(within(file).getByText('Modified')).toBeDefined();
     const title = within(file).getByRole('region', { name: 'Title' });
     expect(within(title).getByText('Hello world')).toBeDefined();
     expect(within(title).getByText('Edited')).toBeDefined();
+    await closeSheets();
 
-    const other = within(main()).getByRole('list', { name: 'Other files' });
-    expect(within(other).getByText('src/foo.ts')).toBeDefined();
-    expect(within(main()).getByText('Merging the pull request brings these in too.')).toBeDefined();
-    expect(within(main()).getByRole('heading', { name: 'editlet/edit' })).toBeDefined();
+    await expectOtherFiles();
     expect((await createButton()).disabled).toBe(false);
-    expect(within(main()).getByRole('button', { name: 'Edit on this branch' })).toBeDefined();
+    expect(within(main()).getByRole('button', { name: 'More actions' }).getAttribute('aria-haspopup')).toBe('dialog');
     expect(within(main()).queryByRole('button', { name: 'Publish' })).toBeNull();
     expect(within(main()).queryByRole('region', { name: 'Live site' })).toBeNull();
   });
@@ -111,14 +164,15 @@ describe('branch screen', () => {
     const button = await createButton();
     fireEvent.click(button);
     await waitFor(() => expect(button.textContent).toBe('Creating…'));
-    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
     await act(async () => release());
 
-    const link = await within(main()).findByRole('link', { name: 'Pull request #1' });
+    const link = await within(main()).findByRole('link', { name: /^Open pull request/ });
     expect(link.getAttribute('href')).toBe('https://github.com/o/r/pull/1');
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toBe('noreferrer');
-    expect(within(main()).getByText('A developer merges it on GitHub.')).toBeDefined();
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Pull request #1' })).toBeDefined();
+    expect((await step('Live')).textContent).toContain('A developer merges it into main on GitHub');
     expect(within(main()).queryByRole('button', { name: 'Create pull request' })).toBeNull();
     expect(within(main()).queryByText('Draft')).toBeNull();
 
@@ -146,10 +200,14 @@ describe('branch screen', () => {
     });
     await openBranch(fake);
 
-    const link = await within(main()).findByRole('link', { name: 'Pull request #4' });
+    const link = await within(main()).findByRole('link', { name: /^Open pull request/ });
     expect(link.getAttribute('href')).toBe('https://github.com/o/r/pull/4');
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Pull request #4' })).toBeDefined();
     expect(within(main()).getByText('Draft')).toBeDefined();
-    expect(within(main()).getByText('A developer merges it on GitHub.')).toBeDefined();
+    expect((await step('Review')).textContent).toContain(
+      'Code owners are asked to review when the pull request is ready for review',
+    );
+    expect((await step('Live')).textContent).toContain('A developer merges it into main on GitHub');
     expect(within(main()).queryByRole('button', { name: 'Create pull request' })).toBeNull();
   });
 
@@ -167,22 +225,24 @@ describe('branch screen', () => {
     const alert = await within(main()).findByRole('alert');
     expect(within(alert).getByText('No changes between main and editlet/edit')).toBeDefined();
     expect((await createButton()).disabled).toBe(false);
-    expect(within(main()).queryByRole('link', { name: /Pull request #/ })).toBeNull();
+    expect(within(main()).queryByRole('link', { name: /^Open pull request/ })).toBeNull();
   });
 
   it('revisiting a branch deleted elsewhere shows it is gone, without the old diff', async () => {
     const fake = fakeWithEdit();
     await openBranch(fake, { active: 'editlet/edit' });
-    await within(main()).findByRole('region', { name: ENTRY });
-    const review = screen.getByRole('link', { name: 'Review changes' });
+    await findRow('Changes');
     fake.state.refs.delete('editlet/edit');
 
-    fireEvent.click(screen.getByRole('link', { name: 'Home', hidden: true }));
-    await waitFor(() => expect(within(main()).queryByRole('region', { name: ENTRY })).toBeNull());
-    fireEvent.click(review);
+    // Home's status line links back to the active branch's review, whose diff is cached.
+    fireEvent.click(within(main()).getByRole('link', { name: 'Back' }));
+    await waitFor(() => expect(main().querySelector('[data-editlet="branch-screen"]')).toBeNull());
+    fireEvent.click(await screen.findByRole('link', { name: 'Review changes' }));
 
     expect(await within(main()).findByText(GONE)).toBeDefined();
-    expect(within(main()).queryByRole('region', { name: ENTRY })).toBeNull();
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Branch not found' })).toBeDefined();
+    expect(within(main()).getByRole('link', { name: 'Back to main' })).toBeDefined();
+    expect(within(main()).queryByRole('button', { name: /^Changes/ })).toBeNull();
     expect(within(main()).queryByRole('button', { name: 'Create pull request' })).toBeNull();
   });
 
@@ -191,9 +251,9 @@ describe('branch screen', () => {
     deploy(fake, 3, fake.state.refs.get('editlet/edit')!, 'editlet/edit', 'success', 'https://preview.test/');
     await openBranch(fake);
 
-    const preview = await within(main()).findByRole('region', { name: 'Preview' });
+    const preview = await step('Preview');
     const link = await within(preview).findByRole('link', { name: 'Open preview' });
-    expect(within(preview).getByText('Preview ready')).toBeDefined();
+    expect(within(preview).getByText(/^Preview ready/)).toBeDefined();
     expect(link.getAttribute('href')).toBe(withEditletRoute('https://preview.test/', 'branch:edit'));
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toBe('noreferrer');
@@ -204,11 +264,11 @@ describe('branch screen', () => {
     deploy(fake, 3, fake.state.refs.get('editlet/edit')!, 'editlet/edit', 'success', 'https://preview.test/');
     await openBranch(fake, { param: 'cms' });
 
-    const preview = await within(main()).findByRole('region', { name: 'Preview' });
+    const preview = await step('Preview');
     const link = await within(preview).findByRole('link', { name: 'Open preview' });
     expect(link.getAttribute('href')).toBe('https://preview.test/?cms=branch:edit');
     fireEvent.click(await createButton());
-    await within(main()).findByRole('link', { name: 'Pull request #1' });
+    await within(main()).findByRole('link', { name: /^Open pull request/ });
     expect(fake.state.pulls[0]!.body).toContain('/?cms=branch:edit');
   });
 
@@ -217,8 +277,8 @@ describe('branch screen', () => {
     deploy(fake, 4, 'older', 'editlet/edit', 'success', 'https://old.test/');
     await openBranch(fake);
 
-    const preview = await within(main()).findByRole('region', { name: 'Preview' });
-    expect(await within(preview).findByText('Build in progress')).toBeDefined();
+    const preview = await step('Preview');
+    expect(await within(preview).findByText(/^Build in progress/)).toBeDefined();
     const link = within(preview).getByRole('link', { name: 'Older preview' });
     expect(link.getAttribute('href')).toBe(withEditletRoute('https://old.test/', 'branch:edit'));
   });
@@ -228,7 +288,7 @@ describe('branch screen', () => {
     deploy(fake, 5, fake.state.refs.get('editlet/edit')!, 'editlet/edit', 'success', 'javascript:alert(1)');
     await openBranch(fake);
 
-    const preview = await within(main()).findByRole('region', { name: 'Preview' });
+    const preview = await step('Preview');
     expect(await within(preview).findByText('Preview ready')).toBeDefined();
     expect(within(preview).queryByRole('link')).toBeNull();
   });
@@ -239,7 +299,7 @@ describe('branch screen', () => {
     fake.state.deploymentStatuses.get(6)![0]!.log_url = 'javascript:alert(1)';
     await openBranch(fake);
 
-    const preview = await within(main()).findByRole('region', { name: 'Preview' });
+    const preview = await step('Preview');
     expect(await within(preview).findByText('Preview build failed')).toBeDefined();
     expect(within(preview).queryByRole('link')).toBeNull();
   });
@@ -247,42 +307,42 @@ describe('branch screen', () => {
   it('no deployment: no preview yet', async () => {
     const fake = fakeWithEdit();
     await openBranch(fake);
-    const preview = await within(main()).findByRole('region', { name: 'Preview' });
-    expect(
-      await within(preview).findByText(
-        "No preview yet. The build may still be starting, or the host doesn't report deployments to GitHub. Review the diff below.",
-      ),
-    ).toBeDefined();
+    const preview = await step('Preview');
+    expect(await within(preview).findByText('No preview yet')).toBeDefined();
   });
 
-  it('Edit on this branch makes it active and keeps the review', async () => {
+  it('Edit on this branch (in More actions) makes it active and keeps the review', async () => {
     const fake = fakeWithEdit();
     await openBranch(fake);
-    const file = await within(main()).findByRole('region', { name: ENTRY });
-    const chip = screen.getByRole('button', { name: 'Branch' });
-    expect(chip.textContent).toContain('main · live');
+    await findRow('Changes');
+    const review = branchScreen();
+    const chip = screen.getByRole('button', { name: /^Branch / });
+    expect(chip.textContent).toContain('main live');
 
-    await act(async () => fireEvent.click(within(main()).getByRole('button', { name: 'Edit on this branch' })));
+    fireEvent.click(within(main()).getByRole('button', { name: 'More actions' }));
+    const edit = await screen.findByRole('button', { name: 'Edit on this branch' });
+    await act(async () => fireEvent.click(edit));
     await waitFor(() => expect(chip.textContent).toContain('editlet/edit'));
     expect(window.localStorage.getItem(activeBranchKey('o', 'r'))).toBe('editlet/edit');
-    expect(within(main()).queryByRole('button', { name: 'Edit on this branch' })).toBeNull();
-    expect(file.isConnected).toBe(true);
+    await waitFor(() => expect(within(main()).queryByRole('button', { name: 'More actions' })).toBeNull());
+    expect(review.isConnected).toBe(true);
   });
 
   it('the active branch: no Edit on this branch', async () => {
     const fake = fakeWithEdit();
     await openBranch(fake, { active: 'editlet/edit' });
-    const chip = screen.getByRole('button', { name: 'Branch' });
+    const chip = screen.getByRole('button', { name: /^Branch / });
     await waitFor(() => expect(chip.textContent).toContain('editlet/edit'));
-    await within(main()).findByRole('region', { name: ENTRY });
-    expect(within(main()).queryByRole('button', { name: 'Edit on this branch' })).toBeNull();
+    await findRow('Changes');
+    expect(within(main()).queryByRole('button', { name: 'More actions' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit on this branch' })).toBeNull();
   });
 
   it('a branch with no changes cannot open a pull request', async () => {
     const fake = createAdminFakeGitHub();
     fake.state.refs.set('editlet/edit', fake.state.refs.get('main')!);
     await openBranch(fake);
-    expect(await within(main()).findByText('No changes on this branch yet.')).toBeDefined();
+    expect((await step('Saved')).textContent).toContain('No changes on this branch yet');
     expect((await createButton()).disabled).toBe(true);
   });
 
@@ -298,29 +358,37 @@ describe('branch screen', () => {
     });
     await openBranch(fake);
 
-    await within(main()).findByRole('region', { name: ENTRY });
+    await findRow('Changes');
     expect((await createButton()).disabled).toBe(false);
-    expect(within(main()).queryByText('No changes on this branch yet.')).toBeNull();
+    expect((await step('Saved')).textContent).not.toContain('No changes on this branch yet');
   });
 
-  it('main ahead of the branch: a status line', async () => {
+  it('main ahead of the branch: the Live step says so', async () => {
     const fake = fakeWithEdit();
     fake.commit('main', { 'README.md': 'one\n' });
     fake.commit('main', { 'README.md': 'two\n' });
     await openBranch(fake);
-    expect(await within(main()).findByText('main has 2 newer commits.')).toBeDefined();
+    expect(
+      await within(main()).findByText('A developer merges it into main on GitHub · main has 2 newer commits'),
+    ).toBeDefined();
   });
 
-  it('a branch that is gone', async () => {
-    await openBranch(createAdminFakeGitHub(), { route: 'branch:gone' });
+  it('a branch that is gone: Back to main, and no deployment polling', async () => {
+    const fake = createAdminFakeGitHub();
+    await openBranch(fake, { route: 'branch:gone' });
     expect(
       await within(main()).findByText("Branch editlet/gone doesn't exist. It may have been merged or deleted."),
     ).toBeDefined();
+    expect(within(main()).getByRole('heading', { level: 1, name: 'Branch not found' })).toBeDefined();
+    expect(within(main()).getByRole('link', { name: 'Back to main' })).toBeDefined();
+    // A dead branch asks GitHub for no deployments (they would poll every 10 s).
+    expect(fake.calls.filter((c) => c.url.includes('/deployments'))).toEqual([]);
   });
 
   it('an invalid branch name', async () => {
     await openBranch(createAdminFakeGitHub(), { route: 'branch:a..b' });
-    expect(await within(main()).findByText('Not a CMS branch')).toBeDefined();
+    expect(await within(main()).findByRole('heading', { level: 2, name: 'Not a CMS branch' })).toBeDefined();
+    expect(within(main()).getByText('editlet/a..b is not a branch the CMS edits.')).toBeDefined();
   });
 });
 
@@ -351,14 +419,14 @@ describe('pull request style and reviewers', () => {
     });
     await openBranch(fake);
     fireEvent.click(await createButton());
-    await within(main()).findByRole('link', { name: 'Pull request #1' });
+    await within(main()).findByRole('link', { name: /^Open pull request/ });
     const pr = fake.state.pulls[0]!;
     expect(pr).toMatchObject({ title: 'Content: edit by octocat', draft: true, labels: ['editlet', 'content'] });
     expect(pr.body).toContain('<!-- editlet:start -->');
     expect(pr.body).toContain('Opened in Editlet by @octocat.');
     expect(pr.body).toContain('- Post · hello-world — updated');
     expect(pr.body).toContain('/?editlet=branch:edit');
-    expect(await within(main()).findByText(/Code owners are asked to review/)).toBeDefined();
+    expect((await step('Review')).textContent).toContain('Code owners are asked to review');
   });
 
   it('adds the editlet label by default and says when labels fail', async () => {
@@ -366,7 +434,8 @@ describe('pull request style and reviewers', () => {
     fake.state.options.labelsFail = true;
     await openBranch(fake);
     fireEvent.click(await createButton());
-    expect(await within(main()).findByText(/^Labels weren't added: /)).toBeDefined();
+    const notice = await within(main()).findByText(/^Labels weren't added: /);
+    expect(notice.closest('[data-slot="banner"]')).not.toBeNull();
     expect(fake.state.pulls).toHaveLength(1);
   });
 
@@ -374,7 +443,7 @@ describe('pull request style and reviewers', () => {
     const fake = fakeWithEdit();
     fake.commit('main', { '.github/CODEOWNERS': '* @acme/admins\n/cms/content/ @acme/editors\n' });
     await openBranch(fake);
-    expect(await within(main()).findByText('Needs approval from @acme/editors, @acme/admins on GitHub.')).toBeDefined();
+    expect((await step('Review')).textContent).toContain('Needs approval from @acme/editors, @acme/admins');
   });
 
   it('shows the reviewers of an open pull request', async () => {
@@ -390,25 +459,24 @@ describe('pull request style and reviewers', () => {
       review: { decision: 'REVIEW_REQUIRED', requested: ['@acme/editors'], approved: ['bob'] },
     });
     await openBranch(fake);
-    expect((await within(main()).findByTestId('reviewers')).textContent).toBe(
-      'Approved by @bob · Waiting for @acme/editors',
+    await waitFor(async () =>
+      expect((await step('Review')).textContent).toContain('Approved by @bob · Waiting for @acme/editors'),
     );
   });
 
-  it('collapses the other files for an editor', async () => {
+  it('an editor sees the other files as a row that opens their sheet', async () => {
     await openBranch(fakeWithEdit());
-    const summary = await within(main()).findByText('Other files this merge brings in (1)');
-    expect(summary.closest('details')?.open).toBe(false);
-    expect(screen.getByText('Editor')).toBeDefined();
+    await expectOtherFiles();
   });
 
-  it('keeps the other files open for an admin', async () => {
+  it('an admin sees the other files open on the screen, with no row to open them', async () => {
     const admin = createAdminFakeGitHub({ admin: true });
     admin.state.refs.set('editlet/edit', admin.state.refs.get('main')!);
     admin.commit('editlet/edit', { 'src/foo.ts': 'x\n' });
     await openBranch(admin);
-    expect(await within(main()).findByRole('heading', { name: 'Other files this merge brings in' })).toBeDefined();
-    expect(screen.getByText('Admin')).toBeDefined();
+    const section = await within(main()).findByRole('region', { name: 'Other files this merge brings in' });
+    expect(within(section).getByRole('list', { name: 'Other files' }).textContent).toContain('src/foo.tsAdded');
+    expect(within(main()).queryByRole('button', { name: /^Other files this merge brings in/ })).toBeNull();
   });
 
   it('follows git.branchPrefix of the base schema', async () => {
@@ -417,7 +485,8 @@ describe('pull request style and reviewers', () => {
     fake.state.refs.set('cms/edit', fake.state.refs.get('main')!);
     fake.commit('cms/edit', { [ENTRY]: fileAt(fake, 'main', ENTRY).replace('title: Hello world', 'title: Edited') });
     await openBranch(fake);
-    expect(await within(main()).findByRole('heading', { name: 'cms/edit' })).toBeDefined();
+    await findRow('Changes');
+    expect(headerText()).toContain('cms/edit');
     expect(await createButton()).toBeDefined();
   });
 });

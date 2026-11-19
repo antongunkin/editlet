@@ -44,7 +44,7 @@ function useHeld(value: Activity): Activity {
 }
 
 /**
- * The status bar's right end: Loading…, Saving… or Syncing… while the admin works with its data, nothing while it is
+ * The status line's right end: Loading…, Saving… or Syncing… while the admin works with its data, nothing while it is
  * idle. Syncing is shown only where refreshes are worth seeing (GitHub mode), not for the dev server's polling. Not a
  * live region: refreshes would make a screen reader repeat it.
  */
@@ -52,7 +52,7 @@ export function ActivityStatus({ syncing }: { syncing: boolean }) {
   const activity = useActivity({ syncing });
   if (activity === 'idle') return null;
   return (
-    <span className="editlet-window__activity" data-activity={activity}>
+    <span className="whitespace-nowrap" data-editlet="activity" data-activity={activity}>
       {LABEL[activity]}
     </span>
   );

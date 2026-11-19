@@ -14,7 +14,7 @@ import { activeBranchKey } from '../github/workspace';
 import { createAdminFakeGitHub, type AdminFakeGitHub } from '../test/fakeGitHub';
 import { createFakeWindow, ORIGIN } from '../test/fakeWindow';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
-import { entryActions, renderApp } from '../test/render';
+import { closeSheets, findCta, openTitle, renderApp, rowText, saveReview } from '../test/render';
 import { BridgeProvider } from '../useRoute';
 
 const ENTRY = 'cms/content/post/hello-world.md';
@@ -33,7 +33,6 @@ class SpyChannel {
   close(): void {}
 }
 
-const main = () => screen.getByRole('main');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function fileAt(fake: AdminFakeGitHub, branch: string, path: string): string {
@@ -57,7 +56,19 @@ async function openLive(
   window.history.replaceState(null, '', withEditletRoute('/editlet/', opts.route ?? ''));
   writeSession(window.sessionStorage, tokenSession('pat_1'));
   renderLiveApp(opts.fetch ?? siteFetch(LIVE_CONFIG, fake), { win: opts.win });
-  return screen.findByRole('button', { name: 'Branch' });
+  await screen.findByRole('button', { name: /^Branch / });
+  // A moved screen draws its own status line (its own chip) over the loading screen's: wait for it.
+  await waitFor(() => expect(document.querySelector('main [data-editlet="screen"]')).not.toBeNull());
+  return screen.getByRole('button', { name: /^Branch / });
+}
+
+/** The branch chip of the open screen: a branch switch draws a new one. */
+const branch = () => screen.getByRole('button', { name: /^Branch / });
+
+/** The account sheet's Sign out (the header's avatar opens it). */
+async function signOut() {
+  fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
 }
 
 /** Types `text` into `input` one character at a time (well inside the 100 ms debounce). */
@@ -73,9 +84,15 @@ async function settleMount() {
 }
 
 async function saveForm() {
-  fireEvent.click(entryActions().getByRole('button', { name: 'Save' }));
-  const dialog = await screen.findByRole('dialog');
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+  await closeSheets();
+  fireEvent.click(await findCta(/^Save/));
+  await saveReview();
+}
+
+/** Waits for the Title row to show `value` (the branch's file loaded), then opens its modal. */
+async function titleWith(value: string) {
+  await waitFor(() => expect(rowText('Title')).toContain(value));
+  return openTitle();
 }
 
 beforeEach(() => {
@@ -95,7 +112,7 @@ afterEach(() => {
 describe('preview snapshot from the entry form (local mode)', () => {
   it('typing in a field writes a debounced snapshot and announces it', async () => {
     renderApp({ route: REF });
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
+    const title = await openTitle();
     await settleMount();
     typeInto(title, 'New');
 
@@ -112,19 +129,20 @@ describe('preview snapshot from the entry form (local mode)', () => {
 
   it('closing the entry removes its form preview', async () => {
     renderApp({ route: REF });
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
+    const title = await openTitle();
     typeInto(title, 'New');
     await waitFor(async () => expect((await readSnapshot())?.entries[REF]).toBeDefined());
 
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(screen.getByRole('link', { name: 'Home', hidden: true }));
+    await closeSheets();
+    fireEvent.click(screen.getByRole('link', { name: 'Back' }));
     await waitFor(async () => expect(await readSnapshot()).toBeNull());
   });
 
   it('a dirty close via close-request drops the form preview before the admin sends close', async () => {
     const fake = createFakeWindow();
     renderApp({ route: REF, win: fake.win });
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
+    const title = await openTitle();
     act(() => fake.fromSite({ type: 'init', route: REF, site: { origin: ORIGIN, href: `${ORIGIN}/` } }));
     typeInto(title, 'New');
     await waitFor(async () => expect((await readSnapshot())?.entries[REF]).toBeDefined());
@@ -153,18 +171,18 @@ describe('preview snapshot from the entry form (local mode)', () => {
 
   it('Save clears the form preview', async () => {
     renderApp({ route: REF });
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
+    const title = await openTitle();
     typeInto(title, 'New');
     await waitFor(async () => expect((await readSnapshot())?.entries[REF]).toBeDefined());
 
     await saveForm();
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Your changes' })).toBeNull());
     await waitFor(async () => expect(await readSnapshot()).toBeNull());
   });
 
   it('local mode never sets the flag', async () => {
     renderApp({ route: REF });
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
+    const title = await openTitle();
     typeInto(title, 'New');
     await waitFor(async () => expect((await readSnapshot())?.entries[REF]).toBeDefined());
     expect(readPreviewFlag()).toBeNull();
@@ -184,13 +202,13 @@ describe('preview snapshot from the active branch (GitHub mode)', () => {
   });
 
   it('github: switching to the base branch clears snapshot and flag', async () => {
-    const chip = await openLive(fakeWithBranch(), { active: 'editlet/x' });
+    await openLive(fakeWithBranch(), { active: 'editlet/x' });
     await waitFor(async () => expect((await readSnapshot())?.branch).toBe('editlet/x'));
 
-    fireEvent.click(chip);
+    fireEvent.click(branch());
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(await within(dialog).findByRole('button', { name: /^main/ }));
-    await waitFor(() => expect(chip.textContent).toBe('main · live'));
+    await waitFor(() => expect(branch().textContent).toBe('main live'));
     await waitFor(async () => expect(await readSnapshot()).toBeNull());
     expect(readPreviewFlag()).toBeNull();
   });
@@ -200,7 +218,7 @@ describe('preview snapshot from the active branch (GitHub mode)', () => {
     await waitFor(async () => expect((await readSnapshot())?.branch).toBe('editlet/x'));
     expect(readPreviewFlag()).toBe('editlet/x');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out', hidden: true }));
+    await signOut();
     await screen.findByRole('heading', { name: 'Sign in to edit' });
     await waitFor(async () => expect(await readSnapshot()).toBeNull());
     expect(readPreviewFlag()).toBeNull();
@@ -208,8 +226,8 @@ describe('preview snapshot from the active branch (GitHub mode)', () => {
 
   it('form edit over a branch change keeps the base from', async () => {
     await openLive(fakeWithBranch(), { active: 'editlet/x', route: REF });
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
-    await waitFor(() => expect(title.value).toBe('Edited'));
+    await screen.findByRole('button', { name: /^Title/ });
+    const title = await titleWith('Edited');
     await waitFor(async () => expect((await readSnapshot())?.branch).toBe('editlet/x'));
 
     typeInto(title, 'New');
@@ -224,8 +242,8 @@ describe('preview snapshot from the active branch (GitHub mode)', () => {
   it('github: after Save the snapshot holds the branch value', async () => {
     const fake = fakeWithBranch();
     await openLive(fake, { active: 'editlet/x', route: REF });
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
-    await waitFor(() => expect(title.value).toBe('Edited'));
+    await screen.findByRole('button', { name: /^Title/ });
+    const title = await titleWith('Edited');
     typeInto(title, 'Saved');
     await waitFor(async () => expect((await readSnapshot())?.entries[REF]?.title).toBeDefined());
 
@@ -310,8 +328,8 @@ describe('Layer B: the preview cookie (GitHub mode, config.preview)', () => {
     const { win, init } = embeddedAt(REF, log);
     await openLive(fake, { active: 'editlet/x', route: REF, fetch: site.fetch, win });
     init();
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
-    await waitFor(() => expect(title.value).toBe('Edited'));
+    await screen.findByRole('button', { name: /^Title/ });
+    const title = await titleWith('Edited');
     await waitFor(() => expect(site.calls).toHaveLength(1));
     const before = headOf(fake, 'editlet/x');
 
@@ -334,13 +352,24 @@ describe('Layer B: the preview cookie (GitHub mode, config.preview)', () => {
     const { win, init } = embeddedAt(REF, log);
     await openLive(fake, { active: 'editlet/x', route: REF, fetch: site.fetch, win });
     init();
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
-    await waitFor(() => expect(title.value).toBe('Edited'));
+    await screen.findByRole('button', { name: /^Title/ });
+    const title = await titleWith('Edited');
 
     fireEvent.change(title, { target: { value: 'Saved' } });
     await saveForm();
     await waitFor(() => expect(log).toContain('msg:refresh'));
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out', hidden: true }));
+    // The account sheet is Home's: leave the entry, the collection and All content first.
+    fireEvent.click(screen.getByRole('link', { name: 'Back' }));
+    fireEvent.click(
+      await screen.findByRole('heading', { name: 'Post' }).then(() => screen.getByRole('link', { name: 'Back' })),
+    );
+    fireEvent.click(
+      await screen
+        .findByRole('heading', { name: 'All content' })
+        .then(() => screen.getByRole('link', { name: 'Back' })),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Account' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
     await screen.findByRole('heading', { name: 'Sign in to edit' });
     await sleep(100);
     expect(site.calls).toEqual([]);
@@ -349,13 +378,13 @@ describe('Layer B: the preview cookie (GitHub mode, config.preview)', () => {
   it('switching to base sends DELETE', async () => {
     const fake = fakeWithBranch();
     const site = previewSite(fake);
-    const chip = await openLive(fake, { active: 'editlet/x', fetch: site.fetch });
+    await openLive(fake, { active: 'editlet/x', fetch: site.fetch });
     await waitFor(() => expect(site.calls).toHaveLength(1));
 
-    fireEvent.click(chip);
+    fireEvent.click(branch());
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(await within(dialog).findByRole('button', { name: /^main/ }));
-    await waitFor(() => expect(chip.textContent).toBe('main · live'));
+    await waitFor(() => expect(branch().textContent).toBe('main live'));
     await waitFor(() => expect(site.calls.map((c) => c.method)).toEqual(['POST', 'DELETE']));
   });
 
@@ -365,7 +394,7 @@ describe('Layer B: the preview cookie (GitHub mode, config.preview)', () => {
     await openLive(fake, { active: 'editlet/x', fetch: site.fetch });
     await waitFor(() => expect(site.calls).toHaveLength(1));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out', hidden: true }));
+    await signOut();
     await screen.findByRole('heading', { name: 'Sign in to edit' });
     await waitFor(() => expect(site.calls.map((c) => c.method)).toEqual(['POST', 'DELETE']));
   });
@@ -378,8 +407,8 @@ describe('Layer B: the preview cookie (GitHub mode, config.preview)', () => {
     const { win, init } = embeddedAt(REF, log);
     await openLive(fake, { active: 'editlet/x', route: REF, fetch: site.fetch, win });
     init();
-    const title = (await within(main()).findByLabelText(/^Title/)) as HTMLInputElement;
-    await waitFor(() => expect(title.value).toBe('Edited'));
+    await screen.findByRole('button', { name: /^Title/ });
+    const title = await titleWith('Edited');
     await waitFor(() => expect(site.calls).toHaveLength(1));
     expect(screen.queryByText(PREVIEW_NOTICE)).toBeNull();
 
@@ -388,7 +417,8 @@ describe('Layer B: the preview cookie (GitHub mode, config.preview)', () => {
     await saveForm();
     await waitFor(() => expect(log).toContain('msg:refresh'));
     expect(site.calls.some((c) => c.status === 403)).toBe(true);
-    expect((await screen.findByText(PREVIEW_NOTICE)).closest('[role="status"]')).not.toBeNull();
+    // The notice sits in the shell's live region (polite), which was on the page before it.
+    expect((await screen.findByText(PREVIEW_NOTICE)).closest('[aria-live="polite"]')).not.toBeNull();
   });
 });
 

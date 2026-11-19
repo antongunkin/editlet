@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "base-vega",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "admin/src/app.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "editlet/admin/src/ui",
+    "ui": "editlet/admin/src/ui/primitives",
+    "utils": "editlet/admin/src/ui/cn",
+    "lib": "editlet/admin/src/ui",
+    "hooks": "editlet/admin/src/ui/hooks"
+  }
+}

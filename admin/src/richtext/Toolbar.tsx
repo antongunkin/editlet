@@ -1,3 +1,4 @@
+/* oxlint-disable jsx-a11y/interactive-supports-focus -- roving tabindex: the focused control of the toolbar carries the focus */
 import type { CmdKey, Editor } from '@milkdown/core';
 import {
   createCodeBlockCommand,
@@ -23,7 +24,7 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { blockKind, inNode, markActive, selectedImage } from './commands';
 
-import { Icon } from '../ui';
+import { Icon, LegacyIcon } from '../ui';
 
 /** `Mod` as the platform shows it. */
 const MOD = typeof navigator !== 'undefined' && /Mac|iP(hone|ad)/.test(navigator.platform) ? '⌘' : 'Ctrl+';
@@ -77,7 +78,7 @@ export function Toolbar({
       key: 'bold',
       label: 'Bold',
       shortcut: `${MOD}B`,
-      icon: <Icon.Bold size={16} />,
+      icon: <LegacyIcon.Bold size={20} />,
       run: run(toggleStrongCommand),
       pressed: markActive(state, schema.marks.strong),
     },
@@ -85,7 +86,7 @@ export function Toolbar({
       key: 'italic',
       label: 'Italic',
       shortcut: `${MOD}I`,
-      icon: <Icon.Italic size={16} />,
+      icon: <LegacyIcon.Italic size={20} />,
       run: run(toggleEmphasisCommand),
       pressed: markActive(state, schema.marks.emphasis),
     },
@@ -93,7 +94,7 @@ export function Toolbar({
       key: 'strike',
       label: 'Strikethrough',
       shortcut: `${MOD}${ALT}X`,
-      icon: <Icon.Strikethrough size={16} />,
+      icon: <LegacyIcon.Strikethrough size={20} />,
       run: run(toggleStrikethroughCommand),
       pressed: markActive(state, schema.marks.strike_through),
     },
@@ -101,7 +102,7 @@ export function Toolbar({
       key: 'code',
       label: 'Inline code',
       shortcut: `${MOD}E`,
-      icon: <Icon.Code size={16} />,
+      icon: <LegacyIcon.Code size={20} />,
       run: run(toggleInlineCodeCommand),
       pressed: markActive(state, schema.marks.inlineCode),
     },
@@ -109,7 +110,7 @@ export function Toolbar({
       key: 'link',
       label: 'Link',
       shortcut: `${MOD}K`,
-      icon: <Icon.Link size={16} />,
+      icon: <Icon name="link" size={20} />,
       run: onLink,
       pressed: markActive(state, schema.marks.link),
     },
@@ -117,7 +118,7 @@ export function Toolbar({
       key: 'bullet',
       label: 'Bulleted list',
       shortcut: `${MOD}${ALT}8`,
-      icon: <Icon.List size={16} />,
+      icon: <Icon name="list" size={20} />,
       run: run(wrapInBulletListCommand),
       pressed: inNode(state, schema.nodes.bullet_list),
     },
@@ -125,7 +126,7 @@ export function Toolbar({
       key: 'ordered',
       label: 'Numbered list',
       shortcut: `${MOD}${ALT}7`,
-      icon: <Icon.ListOrdered size={16} />,
+      icon: <LegacyIcon.ListOrdered size={20} />,
       run: run(wrapInOrderedListCommand),
       pressed: inNode(state, schema.nodes.ordered_list),
     },
@@ -133,7 +134,7 @@ export function Toolbar({
       key: 'quote',
       label: 'Quote',
       shortcut: `${MOD}⇧B`,
-      icon: <Icon.Quote size={16} />,
+      icon: <LegacyIcon.Quote size={20} />,
       run: run(wrapInBlockquoteCommand),
       pressed: inNode(state, schema.nodes.blockquote),
     },
@@ -141,31 +142,36 @@ export function Toolbar({
       key: 'codeblock',
       label: 'Code block',
       shortcut: `${MOD}${ALT}C`,
-      icon: <Icon.CodeBlock size={16} />,
+      icon: <LegacyIcon.CodeBlock size={20} />,
       run: run(createCodeBlockCommand),
       pressed: kind === 'code',
     },
     {
       key: 'image',
       label: selectedImage(state) ? 'Edit image' : 'Image',
-      icon: <Icon.Image size={16} />,
+      icon: <Icon name="image" size={20} />,
       run: onImage,
     },
-    { key: 'table', label: 'Table', icon: <Icon.Table size={16} />, run: run(insertTableCommand, { row: 3, col: 3 }) },
-    { key: 'hr', label: 'Divider', icon: <Icon.Minus size={16} />, run: run(insertHrCommand) },
+    {
+      key: 'table',
+      label: 'Table',
+      icon: <Icon name="table" size={20} />,
+      run: run(insertTableCommand, { row: 3, col: 3 }),
+    },
+    { key: 'hr', label: 'Divider', icon: <Icon name="minus" size={20} />, run: run(insertHrCommand) },
   ];
   if (inTable) {
     tools.push(
       {
         key: 'row',
         label: 'Add row',
-        icon: <span className="editlet-rt-toolbar__text">+ Row</span>,
+        icon: <span className="px-1 text-xs font-medium">+ Row</span>,
         run: run(addRowAfterCommand),
       },
       {
         key: 'col',
         label: 'Add column',
-        icon: <span className="editlet-rt-toolbar__text">+ Col</span>,
+        icon: <span className="px-1 text-xs font-medium">+ Col</span>,
         run: run(addColAfterCommand),
       },
     );
@@ -188,25 +194,35 @@ export function Toolbar({
   };
 
   return (
-    <div className="editlet-rt-toolbar" role="toolbar" aria-label="Formatting" onKeyDown={onKeyDown}>
-      <select
-        ref={(el) => {
-          refs.current[0] = el;
-        }}
-        className="editlet-rt-toolbar__select"
-        aria-label="Block type"
-        tabIndex={current === 0 ? 0 : -1}
-        value={BLOCKS.some((b) => b.value === kind) ? kind : ''}
-        onFocus={() => setFocus(0)}
-        onChange={(e) => setBlock(e.target.value)}
-      >
-        {BLOCKS.some((b) => b.value === kind) ? null : <option value="">—</option>}
-        {BLOCKS.map((b) => (
-          <option key={b.value} value={b.value}>
-            {b.label}
-          </option>
-        ))}
-      </select>
+    // FigCraft `Toolbar/format`: one row that scrolls sideways (the last tool is cut at the edge), every tool a 44 px
+    // target; a tool that is on is a raised white tile.
+    <div
+      className="flex items-center gap-1 overflow-x-auto overscroll-x-contain bg-background px-4 py-1"
+      role="toolbar"
+      aria-label="Formatting"
+      onKeyDown={onKeyDown}
+    >
+      <span className="relative inline-flex shrink-0 items-center">
+        <select
+          ref={(el) => {
+            refs.current[0] = el;
+          }}
+          className="h-11 cursor-pointer appearance-none rounded-full border-0 bg-card pr-10 pl-4 font-sans text-base font-medium text-foreground shadow-raised outline-none focused:inset-ring-2 focused:inset-ring-ring"
+          aria-label="Block type"
+          tabIndex={current === 0 ? 0 : -1}
+          value={BLOCKS.some((b) => b.value === kind) ? kind : ''}
+          onFocus={() => setFocus(0)}
+          onChange={(e) => setBlock(e.target.value)}
+        >
+          {BLOCKS.some((b) => b.value === kind) ? null : <option value="">—</option>}
+          {BLOCKS.map((b) => (
+            <option key={b.value} value={b.value}>
+              {b.label}
+            </option>
+          ))}
+        </select>
+        <Icon name="chevron-down" size={16} className="pointer-events-none absolute right-4 text-muted-foreground" />
+      </span>
       {tools.map((tool, i) => (
         <button
           key={tool.key}
@@ -214,7 +230,7 @@ export function Toolbar({
             refs.current[i + 1] = el;
           }}
           type="button"
-          className="editlet-rt-toolbar__button"
+          className="inline-flex h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border-0 bg-transparent p-0 text-foreground outline-none hovered:bg-accent aria-pressed:bg-card aria-pressed:shadow-raised focused:inset-ring-2 focused:inset-ring-ring"
           tabIndex={current === i + 1 ? 0 : -1}
           aria-label={tool.label}
           aria-pressed={tool.pressed}

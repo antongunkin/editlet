@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { execFileSync } from 'node:child_process';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -141,5 +142,33 @@ describe('detectMode', () => {
   it('is github on a 500 without issues', async () => {
     const fetch = (async () => new Response('<html>', { status: 500 })) as unknown as typeof globalThis.fetch;
     expect(await detectMode(fetch)).toEqual({ mode: 'github' });
+  });
+
+  it('lists the versions of a file and reads one through the dev API', async () => {
+    const { root, source } = await setup();
+    const path = 'cms/content/author/jane.md';
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=Ann', '-c', 'user.email=a@t', ...args], { cwd: root })
+        .toString()
+        .trim();
+    git('init', '-b', 'main');
+    git('add', '.');
+    git('commit', '-m', 'init');
+    const before = await readFile(join(root, path), 'utf8');
+    await writeFile(join(root, path), '---\nname: Janet\n---\n');
+    git('commit', '-am', 'Rename Jane');
+    const versions = await source.listVersions(path);
+    expect(versions.map((v) => v.message)).toEqual(['Rename Jane', 'init']);
+    expect(await source.listVersions(path, 1)).toHaveLength(1);
+    expect(new TextDecoder().decode(await source.readVersion(path, versions[1]!.commit))).toBe(before);
+    const error = await source
+      .readVersion('cms/content/author/nobody.md', versions[0]!.commit)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EditletError);
+  });
+
+  it('lists no versions outside a git checkout', async () => {
+    const { source } = await setup();
+    expect(await source.listVersions('cms/content/author/jane.md')).toEqual([]);
   });
 });

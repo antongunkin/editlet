@@ -20,7 +20,7 @@ import { withEditletRoute } from '../../../loader/protocol';
 import { IssuesError } from '../data/queries';
 import { createAdminFakeGitHub } from '../test/fakeGitHub';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
-import { createTestQueryClient, entryActions } from '../test/render';
+import { createTestQueryClient, findCta, HOME_LOADED, rowText, saveReview, setField } from '../test/render';
 
 vi.mock('../../../auth/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../auth/client')>();
@@ -550,9 +550,7 @@ describe('App in github mode', () => {
     renderLiveApp(siteFetch(LIVE_CONFIG, createAdminFakeGitHub({ push: true })));
 
     const main = await screen.findByRole('main');
-    expect(await within(main).findByRole('link', { name: 'Post (1)' })).toBeDefined();
-    expect(within(main).getByRole('link', { name: 'Author (1)' })).toBeDefined();
-    await waitFor(() => expect(within(main).getByRole('link', { name: 'Home page' })).toBeDefined());
+    expect(await within(main).findByRole('link', { name: HOME_LOADED })).toBeDefined();
   });
 });
 
@@ -584,9 +582,9 @@ async function dirtyEntry() {
   writeSession(window.sessionStorage, tokenSession('pat_1'));
   renderLiveApp(siteFetch(LIVE_CONFIG, { ...github, fetch }));
   const main = await screen.findByRole('main');
-  const title = (await within(main).findByLabelText(/^Title/)) as HTMLInputElement;
-  fireEvent.change(title, { target: { value: 'Unsaved edit' } });
-  return { github, control, main, title, form: main.querySelector('.editlet-screen')! };
+  await within(main).findByRole('button', { name: /^Title/ });
+  await setField('Title', 'Unsaved edit');
+  return { github, control, main, form: main.querySelector('[data-editlet="screen"]')! };
 }
 
 /** Pastes `token` into the sign-in dialog. */
@@ -600,7 +598,7 @@ function useToken(dialog: HTMLElement, token: string) {
 describe('a session that ends by itself keeps the open form', () => {
   it('idle: sign in again over the form, then Save commits the kept edit', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { github, title, form } = await dirtyEntry();
+    const { github, form } = await dirtyEntry();
 
     act(() => vi.advanceTimersByTime(61 * MINUTE));
     const dialog = await screen.findByRole('dialog');
@@ -610,17 +608,16 @@ describe('a session that ends by itself keeps the open form', () => {
     ).toBeDefined();
     expect(within(dialog).queryByRole('button', { name: 'Close' })).toBeNull();
     expect(form.isConnected).toBe(true);
-    expect(title.value).toBe('Unsaved edit');
+    expect(form.textContent).toContain('Unsaved edit');
     expect(readSession(window.sessionStorage)).toBeNull();
 
     useToken(dialog, 'pat_2');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(form.isConnected).toBe(true);
-    expect(title.value).toBe('Unsaved edit');
+    expect(form.textContent).toContain('Unsaved edit');
 
-    fireEvent.click(entryActions().getByRole('button', { name: 'Save' }));
-    const review = await screen.findByRole('dialog');
-    await act(async () => fireEvent.click(within(review).getByRole('button', { name: 'Save' })));
+    fireEvent.click(await findCta(/^Save/));
+    await saveReview();
     await waitFor(() => expect(fileAt(github, 'editlet/a', ENTRY)).toContain('title: Unsaved edit'));
     expect(fileAt(github, 'main', ENTRY)).toContain('title: Hello world');
   });
@@ -628,9 +625,8 @@ describe('a session that ends by itself keeps the open form', () => {
   it('a 401 lapses too; a different account then gets a fresh admin, not the old form', async () => {
     const { control, form } = await dirtyEntry();
     control.revoked = true;
-    fireEvent.click(entryActions().getByRole('button', { name: 'Save' }));
-    const review = await screen.findByRole('dialog');
-    await act(async () => fireEvent.click(within(review).getByRole('button', { name: 'Save' })));
+    fireEvent.click(await findCta(/^Save/));
+    await saveReview();
 
     const dialog = await screen.findByRole('dialog', { name: 'Sign in again' });
     expect(within(dialog).getByText('Your GitHub session expired. Sign in again.')).toBeDefined();
@@ -638,26 +634,37 @@ describe('a session that ends by itself keeps the open form', () => {
 
     useToken(dialog, 'pat_other');
     await waitFor(() => expect(form.isConnected).toBe(false));
-    const fresh = (await within(await screen.findByRole('main')).findByLabelText(/^Title/)) as HTMLInputElement;
-    expect(fresh.value).toBe('Hello world');
+    await within(await screen.findByRole('main')).findByRole('button', { name: /^Title/ });
+    await waitFor(() => expect(rowText('Title')).toContain('Hello world'));
     expect(screen.queryByRole('dialog', { name: 'Sign in again' })).toBeNull();
   });
 
   it('a token GitHub refuses in the dialog asks again and keeps the form', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { title, form } = await dirtyEntry();
+    const { form } = await dirtyEntry();
     act(() => vi.advanceTimersByTime(61 * MINUTE));
     useToken(await screen.findByRole('dialog'), 'bad');
     expect(await screen.findByText("GitHub didn't accept this token.")).toBeDefined();
     expect(screen.getByRole('dialog', { name: 'Sign in again' })).toBeDefined();
     expect(form.isConnected).toBe(true);
-    expect(title.value).toBe('Unsaved edit');
+    expect(form.textContent).toContain('Unsaved edit');
   });
 
   it('Sign out from the account menu still leaves for the sign-in screen', async () => {
     const { form } = await dirtyEntry();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign out', hidden: true }));
+    // The account sheet is Home's: leave the entry, the collection and All content first.
+    fireEvent.click(screen.getByRole('link', { name: 'Back' }));
+    fireEvent.click(
+      await screen.findByRole('heading', { name: 'Post' }).then(() => screen.getByRole('link', { name: 'Back' })),
+    );
+    fireEvent.click(
+      await screen
+        .findByRole('heading', { name: 'All content' })
+        .then(() => screen.getByRole('link', { name: 'Back' })),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Account' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { name: 'Sign in to edit' })).toBeDefined();
     expect(form.isConnected).toBe(false);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -686,20 +693,19 @@ describe('a refresh that cannot reach the auth handler', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Sign in with GitHub' }));
 
     const main = await screen.findByRole('main');
-    const title = (await within(main).findByLabelText(/^Title/)) as HTMLInputElement;
-    const form = main.querySelector('.editlet-screen')!;
+    await within(main).findByRole('button', { name: /^Title/ });
     const before = readSession(window.sessionStorage);
     expect(before).toMatchObject({ accessToken: 'gho_old', method: 'oauth' });
-    fireEvent.change(title, { target: { value: 'Unsaved edit' } });
+    await setField('Title', 'Unsaved edit');
+    const form = main.querySelector('[data-editlet="screen"]')!;
     expired = true;
-    fireEvent.click(entryActions().getByRole('button', { name: 'Save' }));
-    const dialog = await screen.findByRole('dialog');
-    await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: 'Save' })));
+    fireEvent.click(await findCta(/^Save/));
+    await saveReview();
 
     expect(await within(main).findByText("Can't reach GitHub")).toBeDefined();
     expect(refreshMock).toHaveBeenCalledWith({ workerUrl: AUTH_URL, refreshToken: 'ghr_old' });
     expect(form.isConnected).toBe(true);
-    expect(((await within(main).findByLabelText(/^Title/)) as HTMLInputElement).value).toBe('Unsaved edit');
+    expect(rowText('Title')).toContain('Unsaved edit');
     expect(screen.queryByLabelText('Personal access token')).toBeNull();
     expect(readSession(window.sessionStorage)).toEqual(before);
     expect(github.state.refs.get('editlet/a')).toBe(mainHead);

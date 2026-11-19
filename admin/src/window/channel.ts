@@ -12,13 +12,14 @@ import {
 
 import {
   isPreviewToAdminMessage,
+  isViewportMessage,
   WINDOW_SOURCE,
   type AdminToPreviewMessage,
   type AdminToWindowMessage,
   type PreviewState,
   type WindowBody,
 } from '../../../loader/window/channel';
-import { SHEET_MEDIA, type Gesture } from '../../../loader/window/geometry';
+import { SHEET_MEDIA, type Edge, type Gesture } from '../../../loader/window/geometry';
 
 /** Posts to the site page (window.js, the preview overlay). Only the embedded chrome calls it; the parent is always
  * at the admin's own origin (the bridge enforces it). */
@@ -40,6 +41,40 @@ export function usePagePreview(embedded: boolean): PreviewState | null {
     return () => window.removeEventListener('message', onMessage);
   }, [embedded]);
   return state;
+}
+
+/**
+ * What covers the bottom of the window on the site page (the home indicator, the on-screen keyboard), which only the
+ * page can measure: window.js answers `hello` and reports every change (`ViewportMessage`). The admin sets them as
+ * `--safe-bottom` and `--keyboard` on its root, for the bottom bar (`ui/parts/bottom-bar.tsx`). Standalone (no page
+ * around it), app.css's defaults apply: the admin's own safe area and no keyboard.
+ */
+export function usePageViewport(embedded: boolean): void {
+  useEffect(() => {
+    if (!embedded) return;
+    const root = document.documentElement.style;
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== window.parent || e.origin !== window.location.origin || !isViewportMessage(e.data)) return;
+      root.setProperty('--safe-bottom', `${e.data.safeBottom}px`);
+      root.setProperty('--keyboard', `${e.data.keyboard}px`);
+      // The on-screen keyboard is up (app.css: on iOS the bottom bar then hides under Safari's form accessory).
+      document.documentElement.toggleAttribute('data-keyboard', e.data.keyboard > 0);
+    };
+    // Safari on iOS and iPadOS floats its form accessory over the page above the keyboard (an iPad reports a Mac).
+    document.documentElement.toggleAttribute(
+      'data-ios',
+      /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
+    );
+    window.addEventListener('message', onMessage);
+    post({ type: 'hello' });
+    return () => {
+      window.removeEventListener('message', onMessage);
+      root.removeProperty('--safe-bottom');
+      root.removeProperty('--keyboard');
+      document.documentElement.removeAttribute('data-keyboard');
+      document.documentElement.removeAttribute('data-ios');
+    };
+  }, [embedded]);
 }
 
 /**
@@ -67,14 +102,32 @@ export function usePageSheet(): boolean {
 /**
  * While `collapsed`, window.js shrinks the dialog (this iframe) to the element's size: the pill at the bottom centre.
  * Measured from the layout size (the computed width and height), not the box, which the pill's scale-in transform
- * shrinks. Expanding (or unmounting) posts `expand`.
+ * shrinks. The pill's shadow goes along: the iframe would clip it, so the dialog draws it. A theme change while
+ * collapsed (`data-editlet-theme` on the root) sends the new shadow. Expanding (or unmounting) posts `expand`.
  */
 export function useWindowPill(ref: RefObject<HTMLElement | null>, collapsed: boolean): void {
   useLayoutEffect(() => {
     if (!collapsed) return;
-    const style = getComputedStyle(ref.current!);
-    post({ type: 'collapse', w: Math.ceil(parseFloat(style.width)), h: Math.ceil(parseFloat(style.height)) });
-    return () => post({ type: 'expand' });
+    let sent: string | undefined;
+    const measure = (force: boolean) => {
+      const style = getComputedStyle(ref.current!);
+      const shadow = style.boxShadow && !style.boxShadow.endsWith('none') ? style.boxShadow : undefined; // jsdom: `currentcolor none`
+      if (!force && shadow === sent) return;
+      sent = shadow;
+      post({
+        type: 'collapse',
+        w: Math.ceil(parseFloat(style.width)),
+        h: Math.ceil(parseFloat(style.height)),
+        ...(shadow ? { shadow } : {}),
+      });
+    };
+    measure(true);
+    const theme = new MutationObserver(() => measure(false));
+    theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-editlet-theme'] });
+    return () => {
+      theme.disconnect();
+      post({ type: 'expand' });
+    };
   }, [ref, collapsed]);
 }
 
@@ -88,15 +141,16 @@ const ARROWS: Record<string, [number, number]> = {
 };
 
 /**
- * Pointer handlers for a resize edge: entering or leaving it tells window.js, which lights the window's outline (in the
- * site page, outside this iframe) while any edge is hovered. An edge that goes away while hovered (a dialog closing)
+ * Pointer handlers for a resize edge: entering (with the zone's name) or leaving it tells window.js, which lights the
+ * sides that zone moves (in the site page, outside this iframe) while it is hovered. An edge that goes away while hovered (a dialog closing)
  * says it was left.
  */
-export function useEdgeHover() {
+export function useEdgeHover(edge?: Edge) {
   const hovered = useRef(false);
   const set = (hover: boolean) => {
     hovered.current = hover;
-    post({ type: 'edge', hover });
+    // Entering names the zone, so window.js lights only the sides it moves (docs/loader/window.md).
+    post(hover && edge ? { type: 'edge', hover, edge } : { type: 'edge', hover });
   };
   useEffect(
     () => () => {

@@ -64,14 +64,14 @@ describe('createRichEditor', () => {
   });
 });
 
-const area = () => view.dom.querySelector<HTMLTextAreaElement>('textarea.editlet-rt-raw__text')!;
+const area = () => view.dom.querySelector<HTMLTextAreaElement>('textarea')!;
 
 describe('raw blocks', () => {
   it('edit their text in a textarea sized to the text, and follow document changes', () => {
     load('<div>\n  a\n</div>\n');
     expect(area().value).toBe('<div>\n  a\n</div>');
     expect(area().rows).toBe(3);
-    expect(view.dom.querySelector('.editlet-rt-raw__label')?.textContent).toBe('Markdown kept as text');
+    expect(view.dom.textContent).toContain('Markdown kept as text');
 
     area().value = '<p>b</p>';
     area().dispatchEvent(new Event('input'));
@@ -107,7 +107,6 @@ describe('image previews', () => {
       ['a.png', 'A'],
       ['b.png', 'B'],
     ]);
-    expect(images.snapshot()[0]!.dom.className).toBe('editlet-rt-image');
 
     const [first] = positionsOf('image');
     const node = view.state.doc.nodeAt(first!)!;

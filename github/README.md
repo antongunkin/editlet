@@ -33,7 +33,7 @@ const result = await source.publish({ headOid: diff.headOid });
 
 | Feature | Doc |
 |---|---|
-| Reading files and the tree, file history, blob cache, pending edits | [docs/github/source.md](../../../docs/github/source.md) |
+| Reading files and the tree, file history and versions (`listVersions`, `readVersion`), blob cache, pending edits | [docs/github/source.md](../../../docs/github/source.md) |
 | Commit: atomic write, `sha` conflicts, issues | [docs/github/commit.md](../../../docs/github/commit.md) |
 | Branches, pull requests (draft, labels, body refresh, reviews), branch diff, `CODEOWNERS` | [docs/github/branches.md](../../../docs/github/branches.md) |
 | Publish: the merge gate and blocked reasons | [docs/github/publish.md](../../../docs/github/publish.md) |

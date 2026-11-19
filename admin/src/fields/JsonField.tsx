@@ -1,7 +1,7 @@
 import { describedBy, fieldProps, invalid } from './shared';
 import type { WidgetProps } from './types';
 
-import { cn, Field, FIELD_TEXTAREA_CLASS } from '../ui';
+import { cn, Field, Textarea } from '../ui';
 
 function syntaxStatus(text: string): 'empty' | 'valid' | 'invalid' {
   const t = text.trim();
@@ -15,13 +15,16 @@ function syntaxStatus(text: string): 'empty' | 'valid' | 'invalid' {
 }
 
 /** JSON text in a monospace textarea; the value stays text (parsed by `formToEntry`). */
+/** The status line's colour: muted while empty, green when it parses, red when it does not. */
+const STATUS_TONE = { empty: 'text-muted-foreground', valid: 'text-chart-2', invalid: 'text-destructive' } as const;
+
 export function JsonField({ name, field, value, onChange, onBlur, error }: WidgetProps<string>) {
   const status = syntaxStatus(value);
   return (
     <Field {...fieldProps(field, error, name)} htmlFor={name}>
-      <textarea
+      <Textarea
         id={name}
-        className={cn(FIELD_TEXTAREA_CLASS, 'editlet-ff-json__textarea', invalid(error) && 'editlet-textarea--error')}
+        className="min-h-40 font-mono leading-7"
         name={name}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -32,7 +35,7 @@ export function JsonField({ name, field, value, onChange, onBlur, error }: Widge
         aria-label={field.label}
         aria-required={field.required || undefined}
       />
-      <div className={cn('editlet-ff-json__status', `editlet-ff-json__status--${status}`)}>
+      <div className={cn('mt-1.5 text-sm', STATUS_TONE[status])}>
         {status === 'empty'
           ? field.required
             ? 'Enter JSON…'

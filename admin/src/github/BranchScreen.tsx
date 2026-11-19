@@ -1,11 +1,12 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { fileDiff, type FileDiff } from './branchDiff';
 import { branchFromRoute, routeFromBranch } from './branchName';
-import { DeployStatus, useDeployment } from './DeployStatus';
+import { BranchUnavailable, BranchView, ChangesSheet, OtherFilesSection, OtherFilesSheet } from './BranchView';
+import { PreviewStep, useDeployment } from './DeployStatus';
 import { errorText } from './errors';
-import { ApprovalNote, pullRequestBodyFor, useCodeowners } from './style';
+import { approvalText, pullRequestBodyFor, useCodeowners } from './style';
 import { useGitHubUser } from './user';
 import { BRANCHES_KEY, useWorkspace, type Workspace } from './workspace';
 
@@ -16,33 +17,28 @@ import { parseSchemaText, type Schema } from '../../../core/schema';
 import {
   GitHubError,
   type BranchDiff,
-  type BranchDiffOtherFile,
   type CodeownersRule,
   type GitHubSource,
   type PullRequestInfo,
+  type PullRequestReview,
 } from '../../../github';
 import { DEFAULT_SCHEMA_PATH, findSchemaRef, useSchema } from '../data/queries';
-import { DiffHunk } from '../diff/DiffHunk';
-import { FieldDiffList } from '../diff/ReviewDialog';
-import { PageTop } from '../screens/PageTop';
-import { Placeholder } from '../screens/Placeholder';
+import { RouteLink } from '../RouteLink';
 import { filesKey } from '../source/context';
-import { Button, StatusBadge } from '../ui';
-import { Icon } from '../ui/Icon';
+import { cn } from '../ui/cn';
+import { ActionSheet } from '../ui/parts/action-sheet';
+import { ActionRow, Row, StepRow, type StepKind } from '../ui/parts/rows';
+import { Badge } from '../ui/primitives/badge';
+import { Banner } from '../ui/primitives/banner';
+import { Button, buttonVariants } from '../ui/primitives/button';
+import { Icon } from '../ui/primitives/icon';
+import { IconButton } from '../ui/primitives/icon-button';
 import { useBridge } from '../useRoute';
+import { useScreenChrome } from '../window/chrome';
 
 type Loaded = { diff: BranchDiff; files: FileDiff[]; schema: Schema };
 
-const STATUS_LABEL: Record<BranchDiffOtherFile['status'], string> = {
-  added: 'Added',
-  modified: 'Modified',
-  removed: 'Removed',
-  renamed: 'Renamed',
-};
-
-const BINARY_VERB: Record<FileDiff['status'], string> = { added: 'added', modified: 'changed', removed: 'removed' };
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /**
  * The branch's own schema, its compare against the base, and every changed CMS file read on both sides. `schemaPath`
@@ -74,158 +70,6 @@ async function activateKeepingScreen(workspace: Workspace, queryClient: QueryCli
   workspace.switchTo(branch, { keepScreen: true });
 }
 
-/** Who reviews the open pull request, as GitHub reports it. Nothing while loading, on an error or with no reviews. */
-function Reviewers({ src, pullRequest }: { src: GitHubSource; pullRequest: PullRequestInfo }) {
-  const review = useQuery({
-    queryKey: ['pull-request-review', src.branch, pullRequest.number],
-    queryFn: () => src.pullRequestReview(pullRequest.number),
-    retry: false,
-  });
-  if (pullRequest.isDraft) {
-    return (
-      <p className="editlet-u-text-sm editlet-u-text-muted">
-        Code owners are asked to review when the pull request is ready for review.
-      </p>
-    );
-  }
-  const r = review.data;
-  if (!r) return null;
-  const parts: string[] = [];
-  if (r.approvedBy.length > 0) parts.push(`Approved by ${r.approvedBy.map((l) => `@${l}`).join(', ')}`);
-  if (r.changesRequestedBy.length > 0) {
-    parts.push(`Changes requested by ${r.changesRequestedBy.map((l) => `@${l}`).join(', ')}`);
-  }
-  if (r.requested.length > 0) parts.push(`Waiting for ${r.requested.join(', ')}`);
-  if (parts.length === 0 && r.decision === 'REVIEW_REQUIRED') parts.push('Review required');
-  if (parts.length === 0) return null;
-  return (
-    <p className="editlet-u-text-sm" data-testid="reviewers">
-      {parts.join(' · ')}
-    </p>
-  );
-}
-
-/** The open pull request: its link (and Draft), its reviewers, and who merges it. The admin never merges. */
-function PullRequestBlock({ src, pullRequest }: { src: GitHubSource; pullRequest: PullRequestInfo }) {
-  return (
-    <div className="editlet-u-stack editlet-u-gap-1">
-      <div className="editlet-u-row editlet-u-gap-2">
-        <a className="editlet-link editlet-branch-screen__pr" href={pullRequest.url} target="_blank" rel="noreferrer">
-          Pull request #{pullRequest.number}
-        </a>
-        <StatusBadge draft={pullRequest.isDraft} size="sm" />
-      </div>
-      <Reviewers src={src} pullRequest={pullRequest} />
-      <p className="editlet-u-text-sm editlet-u-text-muted">A developer merges it on GitHub.</p>
-    </div>
-  );
-}
-
-function FileStatus({ status }: { status: BranchDiffOtherFile['status'] }) {
-  return <span className={`editlet-file-status editlet-file-status--${status}`}>{STATUS_LABEL[status]}</span>;
-}
-
-function FileChange({ file }: { file: FileDiff }) {
-  let body;
-  if (file.kind === 'entry') {
-    body =
-      file.rows.length === 0 ? (
-        <p className="editlet-u-text-muted editlet-u-text-sm">No field changes</p>
-      ) : (
-        <div className="editlet-u-stack editlet-u-gap-3">
-          <FieldDiffList rows={file.rows} />
-        </div>
-      );
-  } else if (file.kind === 'text') {
-    body = <DiffHunk before={file.before} after={file.after} showLineNumbers />;
-  } else {
-    body = (
-      <p className="editlet-u-text-muted editlet-u-text-sm">
-        {file.image ? 'Image' : 'Binary file'} {BINARY_VERB[file.status]}
-      </p>
-    );
-  }
-  return (
-    <section className="editlet-branch-file" aria-label={file.path}>
-      <div className="editlet-branch-file__header">
-        <code className="editlet-branch-file__path">{file.path}</code>
-        <FileStatus status={file.status} />
-      </div>
-      <div className="editlet-branch-file__body">{body}</div>
-    </section>
-  );
-}
-
-function Preview({
-  src,
-  branch,
-  headOid,
-  prefix,
-  param,
-}: {
-  src: GitHubSource;
-  branch: string;
-  headOid: string;
-  prefix: string;
-  param: string;
-}) {
-  const deployment = useDeployment(src, branch, headOid);
-  return (
-    <DeployStatus
-      deployment={deployment.data}
-      expectSha={headOid}
-      previewRoute={`branch:${routeFromBranch(branch, prefix)}`}
-      param={param}
-    />
-  );
-}
-
-/** Before the pull request exists: whose approval `CODEOWNERS` will ask for. */
-function ExpectedReviewers({ diff, rules }: { diff: BranchDiff; rules: CodeownersRule[] | null }) {
-  const paths = [...diff.files.map((f) => f.path), ...diff.otherFiles.map((f) => f.path)];
-  return <ApprovalNote paths={paths} rules={rules} />;
-}
-
-/** Changed paths outside the CMS. Open for admins; collapsed with a count for editors (the code is not theirs). */
-function OtherFiles({ diff, collapsed }: { diff: BranchDiff; collapsed: boolean }) {
-  if (diff.otherFiles.length === 0 && diff.complete) return null;
-  const title = 'Other files this merge brings in';
-  const list = (
-    <>
-      <p className="editlet-u-text-sm editlet-u-text-muted">Merging the pull request brings these in too.</p>
-      {diff.complete ? null : (
-        <p className="editlet-u-text-sm editlet-u-text-muted">GitHub listed only the first 300 files.</p>
-      )}
-      <ul className="editlet-branch-screen__other" aria-label="Other files">
-        {diff.otherFiles.map((f) => (
-          <li key={f.path} className="editlet-branch-screen__other-item">
-            <code className="editlet-branch-file__path">{f.path}</code>
-            <FileStatus status={f.status} />
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-  if (collapsed) {
-    return (
-      <details className="editlet-u-stack editlet-u-gap-2 editlet-branch-screen__other-details">
-        <summary className="editlet-branch-screen__heading">
-          {title} ({diff.otherFiles.length})
-        </summary>
-        {list}
-      </details>
-    );
-  }
-  return (
-    <section className="editlet-u-stack editlet-u-gap-2" aria-labelledby="editlet-branch-other">
-      <h2 id="editlet-branch-other" className="editlet-branch-screen__heading">
-        {title}
-      </h2>
-      {list}
-    </section>
-  );
-}
-
 /**
  * Changed files or commits ahead. Not only `aheadBy`: right after a commit GitHub's REST compare can still report
  * `identical` / `ahead_by: 0` while `files` (from the fresh snapshot) already lists the change.
@@ -234,29 +78,104 @@ function hasChanges(diff: BranchDiff): boolean {
   return diff.files.length > 0 || diff.otherFiles.length > 0 || diff.aheadBy > 0;
 }
 
-function statusLines(diff: BranchDiff, base: string): string[] {
-  const lines: string[] = [];
-  if (diff.status === 'behind' || diff.status === 'diverged') {
-    lines.push(`${base} has ${plural(diff.behindBy, 'newer commit')}.`);
-  }
-  if (!hasChanges(diff)) lines.push('No changes on this branch yet.');
-  return lines;
+/** *1 entry · 1 image*: the changed CMS files by kind. */
+function filesText(files: FileDiff[]): string {
+  const entries = files.filter((f) => f.kind === 'entry').length;
+  const others = files.length - entries;
+  const parts = [entries > 0 ? plural(entries, 'entry', 'entries') : null, others > 0 ? plural(others, 'file') : null];
+  return parts.filter(Boolean).join(' · ') || 'No content files';
 }
+
+/** *1 file · 1 field*: the Changes row's line. */
+function changesText(files: FileDiff[]): string {
+  const fields = files.reduce((n, f) => n + (f.kind === 'entry' ? f.rows.length : 0), 0);
+  return [plural(files.length, 'file'), ...(fields > 0 ? [plural(fields, 'field')] : [])].join(' · ');
+}
+
+/** *Saved*: the commits on the branch, or that there are none yet. */
+function savedStep(diff: BranchDiff, files: FileDiff[]): { kind: StepKind; sub: string } {
+  if (!hasChanges(diff)) return { kind: 'todo', sub: 'No changes on this branch yet' };
+  const commits = diff.aheadBy > 0 ? `, ${plural(diff.aheadBy, 'commit')}` : '';
+  return { kind: 'done', sub: `${filesText(files)}${commits}` };
+}
+
+/**
+ * *Review*: before the pull request, whose approval `CODEOWNERS` will ask for; a draft asks nobody yet; an open one says
+ * who approved, who asked for changes and who is still to review, as GitHub reports it.
+ */
+function reviewStep(
+  pullRequest: PullRequestInfo | null | undefined,
+  review: PullRequestReview | null | undefined,
+  expected: string | null,
+): { kind: StepKind; sub: string } {
+  if (!pullRequest) return { kind: 'todo', sub: expected ?? 'Asked for with the pull request' };
+  if (pullRequest.isDraft) {
+    return { kind: 'current', sub: 'Code owners are asked to review when the pull request is ready for review' };
+  }
+  if (!review) return { kind: 'current', sub: 'Waiting for reviews' };
+  const parts: string[] = [];
+  if (review.approvedBy.length > 0) parts.push(`Approved by ${review.approvedBy.map((l) => `@${l}`).join(', ')}`);
+  if (review.changesRequestedBy.length > 0) {
+    parts.push(`Changes requested by ${review.changesRequestedBy.map((l) => `@${l}`).join(', ')}`);
+  }
+  if (review.requested.length > 0) parts.push(`Waiting for ${review.requested.join(', ')}`);
+  if (parts.length === 0 && review.decision === 'REVIEW_REQUIRED') parts.push('Review required');
+  const approved =
+    review.decision === 'APPROVED' ||
+    (review.approvedBy.length > 0 && review.changesRequestedBy.length === 0 && review.requested.length === 0);
+  return { kind: approved ? 'done' : 'current', sub: parts.join(' · ') || 'Waiting for reviews' };
+}
+
+/** Reviewers of the open (not draft) pull request; nothing while loading or on an error. */
+function useReview(src: GitHubSource, pullRequest: PullRequestInfo | null | undefined) {
+  return useQuery({
+    queryKey: ['pull-request-review', src.branch, pullRequest?.number],
+    queryFn: () => src.pullRequestReview(pullRequest!.number),
+    enabled: Boolean(pullRequest && !pullRequest.isDraft),
+    retry: false,
+  }).data;
+}
+
+/** Every path of the merge, for the code owners. */
+const pathsOf = (diff: BranchDiff) => [...diff.files.map((f) => f.path), ...diff.otherFiles.map((f) => f.path)];
+
+function expectedReviewers(diff: BranchDiff, rules: CodeownersRule[] | null): string | null {
+  return approvalText(pathsOf(diff), rules);
+}
+
+const backLink = (
+  <RouteLink
+    to={{ kind: 'home' }}
+    className={cn(buttonVariants({ variant: 'ghost' }), 'size-11 px-0')}
+    aria-label="Back"
+    title="Back to Home"
+  >
+    <Icon name="chevron-left" size={20} />
+  </RouteLink>
+);
 
 function BranchReview({ workspace, branch }: { workspace: Workspace; branch: string }) {
   const queryClient = useQueryClient();
   const { canLeave } = useBridge();
+  const chrome = useScreenChrome();
   const src = workspace.sourceFor(branch);
   const repo = `${workspace.config.owner}/${workspace.config.repo}`;
   const [busy, setBusy] = useState<'create' | 'edit' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [labelNotice, setLabelNotice] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<'more' | 'other' | 'changes' | null>(null);
   const user = useGitHubUser();
   const codeowners = useCodeowners();
 
   const schemaPath = useSchema().data?.schemaPath ?? DEFAULT_SCHEMA_PATH;
   const loaded = useQuery({ queryKey: ['branch-diff', branch], queryFn: () => loadBranch(src, schemaPath) });
   const pullRequest = useQuery({ queryKey: ['pull-request', branch], queryFn: () => src.pullRequest() });
+  const pr = pullRequest.data;
+  const review = useReview(src, pr);
+  // Also with cached data: a refetch that finds the branch gone (merged or deleted on GitHub) replaces the review.
+  const gone = loaded.error instanceof GitHubError && loaded.error.code === 'not_found';
+  // Only for a branch that loaded and exists: a dead branch or a failed load would poll every 10 s for nothing.
+  const deployment = useDeployment(src, branch, loaded.data?.diff.headOid ?? '', loaded.isSuccess && !gone);
 
   const run = async (kind: 'create' | 'edit', action: () => Promise<void>) => {
     setBusy(kind);
@@ -287,104 +206,228 @@ function BranchReview({ workspace, branch }: { workspace: Workspace; branch: str
     });
 
   const editHere = () => {
+    setSheet(null);
     if (!canLeave()) return;
     void run('edit', () => activateKeepingScreen(workspace, queryClient, branch));
   };
 
-  const title = <PageTop title={branch} />;
   const data = loaded.data;
-  // Also with cached data: a refetch that finds the branch gone (merged or deleted on GitHub) replaces the review.
-  const gone = loaded.error instanceof GitHubError && loaded.error.code === 'not_found';
-  if (!data || gone) {
+  if (gone) {
+    const backToBase = () => {
+      if (!workspace.onBase && workspace.active === branch && canLeave()) workspace.switchTo(workspace.base);
+    };
     return (
-      <section className="editlet-screen editlet-branch-screen">
-        {title}
-        {loaded.error ? (
-          <div className="editlet-card editlet-card--banner editlet-card--banner-danger" role="alert">
-            <Icon.Alert />
-            <span className="editlet-u-flex-1">
-              {gone
-                ? `Branch ${branch} doesn't exist. It may have been merged or deleted.`
-                : errorText(loaded.error, { repo })}
-            </span>
-          </div>
-        ) : (
-          <p className="editlet-u-text-muted" role="status">
-            Loading…
-          </p>
-        )}
-      </section>
+      <BranchView
+        branch={branch}
+        back={backLink}
+        actions={chrome.windowActions}
+        title="Branch not found"
+        banners={
+          <>
+            {chrome.banners}
+            <Banner tone="danger" role="alert">
+              {`Branch ${branch} doesn't exist. It may have been merged or deleted.`}
+            </Banner>
+          </>
+        }
+        status={chrome.status}
+        cta={
+          // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- RouteLink renders an <a href>; Enter follows it
+          <RouteLink
+            to={{ kind: 'home' }}
+            onClick={backToBase}
+            className={buttonVariants({ variant: 'primary', size: 'lg', full: true })}
+          >
+            Back to {workspace.base}
+          </RouteLink>
+        }
+      />
+    );
+  }
+  if (!data) {
+    return (
+      <BranchView
+        branch={branch}
+        back={backLink}
+        actions={chrome.windowActions}
+        title="Review changes"
+        banners={
+          <>
+            {chrome.banners}
+            {loaded.error ? (
+              <Banner tone="danger" role="alert">
+                {errorText(loaded.error, { repo })}
+              </Banner>
+            ) : null}
+          </>
+        }
+        steps={
+          loaded.error ? undefined : (
+            <>
+              {['Saved', 'Preview', 'Review'].map((step) => (
+                <li key={step}>
+                  <Row title={step} loading disabled chevron={false} />
+                </li>
+              ))}
+            </>
+          )
+        }
+        status={chrome.status}
+      />
     );
   }
 
   const { diff, files } = data;
-  const pr = pullRequest.data;
+  const saved = savedStep(diff, files);
+  const reviewed = reviewStep(pr, review, expectedReviewers(diff, codeowners));
+  const behind =
+    diff.status === 'behind' || diff.status === 'diverged'
+      ? ` · ${workspace.base} has ${plural(diff.behindBy, 'newer commit')}`
+      : '';
+  const others = diff.otherFiles.length;
+  const editable = workspace.active !== branch;
+  const hasOther = others > 0 || !diff.complete;
+  // An Admin sees the code a merge brings in open on the screen; an Editor gets a row with the count (roles.md).
+  const otherOpen = hasOther && user?.role === 'admin';
+
+  const cta: ReactNode = pr ? (
+    <a
+      href={pr.url}
+      target="_blank"
+      rel="noreferrer"
+      className={buttonVariants({ variant: 'primary', size: 'lg', full: true })}
+    >
+      Open pull request
+      <Icon name="arrow-up-right" size={20} />
+    </a>
+  ) : pr === null ? (
+    <Button
+      variant="primary"
+      size="lg"
+      full
+      loading={busy === 'create'}
+      busyLabel="Creating…"
+      disabled={!hasChanges(diff) || busy !== null}
+      onClick={() => void createPullRequest(data)}
+    >
+      Create pull request
+    </Button>
+  ) : null;
+
   return (
-    <section className="editlet-screen editlet-branch-screen">
-      <PageTop title={branch}>
-        {workspace.active === branch ? null : (
-          <Button variant="outline" size="sm" icon={<Icon.GitBranch />} disabled={busy !== null} onClick={editHere}>
+    <BranchView
+      branch={branch}
+      back={backLink}
+      actions={
+        <>
+          {editable ? (
+            <IconButton
+              label="More actions"
+              aria-haspopup="dialog"
+              onClick={() => setSheet('more')}
+              icon={<Icon name="more" size={20} />}
+            />
+          ) : null}
+          {chrome.windowActions}
+        </>
+      }
+      title={pr ? `Pull request #${pr.number}` : 'Review changes'}
+      meta={
+        <>
+          {pr?.isDraft ? <Badge tone="neutral">Draft</Badge> : null}
+          {filesText(files)}
+        </>
+      }
+      banners={
+        <>
+          {chrome.banners}
+          {loaded.error ? (
+            <Banner tone="danger" role="alert">
+              {errorText(loaded.error, { repo })}
+            </Banner>
+          ) : null}
+          {pullRequest.error ? (
+            <Banner tone="danger" role="alert">
+              {errorText(pullRequest.error, { repo })}
+            </Banner>
+          ) : null}
+          {actionError ? (
+            <Banner tone="danger" role="alert">
+              {actionError}
+            </Banner>
+          ) : null}
+          {labelNotice ? <Banner tone="unsaved">{labelNotice}</Banner> : null}
+        </>
+      }
+      steps={
+        <>
+          <li>
+            <StepRow title="Saved" sub={saved.sub} kind={saved.kind} />
+          </li>
+          <li>
+            <PreviewStep
+              deployment={deployment.data}
+              expectSha={diff.headOid}
+              previewRoute={`branch:${routeFromBranch(branch, workspace.prefix)}`}
+              param={workspace.param}
+            />
+          </li>
+          <li>
+            <StepRow title="Review" sub={reviewed.sub} kind={pr === undefined ? 'todo' : reviewed.kind} />
+          </li>
+          <li>
+            <StepRow
+              title="Live"
+              sub={`A developer merges it into ${workspace.base} on GitHub${behind}`}
+              kind={pr && reviewed.kind !== 'done' ? 'todo' : 'current'}
+            />
+          </li>
+        </>
+      }
+      rows={
+        <>
+          {hasOther && !otherOpen ? (
+            <Row
+              lead="file"
+              title="Other files this merge brings in"
+              sub={diff.complete ? plural(others, 'file') : `${others}+ files`}
+              aria-haspopup="dialog"
+              onClick={() => setSheet('other')}
+            />
+          ) : null}
+          <Row
+            lead="file"
+            title="Changes"
+            sub={changesText(files)}
+            aria-haspopup="dialog"
+            onClick={() => setSheet('changes')}
+          />
+        </>
+      }
+      after={otherOpen ? <OtherFilesSection files={diff.otherFiles} complete={diff.complete} /> : undefined}
+      status={chrome.status}
+      cta={cta}
+    >
+      {editable ? (
+        <ActionSheet open={sheet === 'more'} onOpenChange={(open) => setSheet(open ? 'more' : null)} title={branch}>
+          <ActionRow icon="branch" disabled={busy !== null} onClick={editHere}>
             Edit on this branch
-          </Button>
-        )}
-      </PageTop>
-
-      {loaded.error ? (
-        <div className="editlet-card editlet-card--banner editlet-card--banner-danger" role="alert">
-          <Icon.Alert />
-          <span className="editlet-u-flex-1">{errorText(loaded.error, { repo })}</span>
-        </div>
+          </ActionRow>
+        </ActionSheet>
       ) : null}
-      {pullRequest.error ? (
-        <p className="editlet-u-text-sm editlet-u-text-danger">{errorText(pullRequest.error, { repo })}</p>
-      ) : null}
-
-      <Preview src={src} branch={branch} headOid={diff.headOid} prefix={workspace.prefix} param={workspace.param} />
-
-      {pr ? (
-        <PullRequestBlock src={src} pullRequest={pr} />
-      ) : pr === null ? (
-        <div className="editlet-u-stack editlet-u-gap-1">
-          <div className="editlet-u-row editlet-u-gap-2">
-            <Button
-              variant="primary"
-              disabled={!hasChanges(diff) || busy !== null}
-              onClick={() => void createPullRequest(data)}
-            >
-              {busy === 'create' ? 'Creating…' : 'Create pull request'}
-            </Button>
-          </div>
-          <ExpectedReviewers diff={diff} rules={codeowners} />
-        </div>
-      ) : null}
-      {labelNotice ? <p className="editlet-u-text-sm editlet-u-text-muted">{labelNotice}</p> : null}
-      {actionError ? (
-        <div className="editlet-card editlet-card--banner editlet-card--banner-danger" role="alert">
-          <Icon.Alert />
-          <span className="editlet-u-flex-1">{actionError}</span>
-        </div>
-      ) : null}
-
-      {statusLines(diff, workspace.base).map((line) => (
-        <p key={line} className="editlet-u-text-sm editlet-u-text-muted">
-          {line}
-        </p>
-      ))}
-
-      <section className="editlet-u-stack editlet-u-gap-3" aria-labelledby="editlet-branch-changes">
-        <h2 id="editlet-branch-changes" className="editlet-branch-screen__heading">
-          Changes
-        </h2>
-        {files.length === 0 ? (
-          <p className="editlet-u-text-sm editlet-u-text-muted">No content files changed.</p>
-        ) : null}
-        {files.map((file) => (
-          <FileChange key={file.path} file={file} />
-        ))}
-      </section>
-
-      <OtherFiles diff={diff} collapsed={user?.role === 'editor'} />
-    </section>
+      <OtherFilesSheet
+        open={sheet === 'other'}
+        onOpenChange={(open) => setSheet(open ? 'other' : null)}
+        files={diff.otherFiles}
+        complete={diff.complete}
+      />
+      <ChangesSheet
+        open={sheet === 'changes'}
+        onOpenChange={(open) => setSheet(open ? 'changes' : null)}
+        sub={changesText(files)}
+        files={files}
+      />
+    </BranchView>
   );
 }
 
@@ -397,7 +440,21 @@ export function BranchScreen({ name }: { name: string }) {
   const prefix = workspace?.prefix ?? '';
   const branch = branchFromRoute(name, prefix);
   if (!workspace || !isEditletBranchName(branch, prefix) || branch === workspace.base) {
-    return <Placeholder title="Not a CMS branch" text={`${branch} is not a branch the CMS edits.`} />;
+    return <BranchUnavailableScreen title="Not a CMS branch" text={`${branch} is not a branch the CMS edits.`} />;
   }
   return <BranchReview key={branch} workspace={workspace} branch={branch} />;
+}
+
+/** A branch route the admin cannot show, with the window's chrome (dev mode, a name outside the prefix). */
+export function BranchUnavailableScreen({ title, text }: { title: string; text: string }) {
+  const chrome = useScreenChrome();
+  return (
+    <BranchUnavailable
+      title={title}
+      text={text}
+      actions={chrome.windowActions}
+      banners={chrome.banners}
+      status={chrome.status}
+    />
+  );
 }

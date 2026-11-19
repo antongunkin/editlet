@@ -2,7 +2,7 @@
 // state): the admin draws the window chrome, window.js owns the dialog's geometry. Both ship in the same admin dist, so this is not part of the frozen
 // loader protocol (the loader ignores these messages: `isAdminToSiteMessage` rejects the unknown `source`).
 
-import { EDGES, type Gesture } from './geometry';
+import { EDGES, type Edge, type Gesture } from './geometry';
 
 export const WINDOW_SOURCE = 'editlet-window' as const;
 
@@ -10,14 +10,16 @@ export const WINDOW_SOURCE = 'editlet-window' as const;
  * Admin → site page. `hello`: the admin mounted (the preview overlay answers with its state). `drag` → window.js: `kind`
  * is `move` or the edge or corner being pulled; deltas are screen pixels since `phase: 'start'`, so they survive the
  * window moving. `edge` → window.js: the pointer entered (`hover: true`) or left a resize edge, so the window's outline
- * lights up. `collapse` → window.js: shrink the dialog to a pill of `w`×`h` px at the bottom centre; `expand`: back to the
- * window.
+ * lights up. `edge` (additive, optional; the compass name of the hovered zone, as in `drag`'s `kind`) says which sides
+ * move, so only those light up; without it every side lights. `collapse` → window.js: shrink the dialog to a pill of `w`×`h` px at the bottom centre, drawn with the pill's
+ * `shadow` (its computed `box-shadow`: the iframe clips anything drawn outside it, so the dialog carries the shadow);
+ * `expand`: back to the window.
  */
 export type AdminToWindowMessage =
   | { source: typeof WINDOW_SOURCE; type: 'hello' }
-  | { source: typeof WINDOW_SOURCE; type: 'collapse'; w: number; h: number }
+  | { source: typeof WINDOW_SOURCE; type: 'collapse'; w: number; h: number; shadow?: string }
   | { source: typeof WINDOW_SOURCE; type: 'expand' }
-  | { source: typeof WINDOW_SOURCE; type: 'edge'; hover: boolean }
+  | { source: typeof WINDOW_SOURCE; type: 'edge'; hover: boolean; edge?: Edge }
   | {
       source: typeof WINDOW_SOURCE;
       type: 'drag';
@@ -55,8 +57,17 @@ export type SelectMessage = {
   suffix: string;
 };
 
+/**
+ * window.js → admin: what covers the bottom of the dialog on the page, in CSS px, sent on every change and in answer to
+ * `hello`. `safeBottom` is the part of the page's safe area (the home indicator) under the dialog; `keyboard` is the part
+ * of the dialog the on-screen keyboard hides. Only the page sees the real `visualViewport`: inside the iframe both read
+ * as zero. The admin sets them as `--safe-bottom` and `--keyboard` on its root (docs/loader/window.md).
+ */
+export type ViewportMessage = { source: typeof WINDOW_SOURCE; type: 'viewport'; safeBottom: number; keyboard: number };
+
 const isObject = (data: unknown): data is Record<string, unknown> => typeof data === 'object' && data !== null;
 const isSize = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n > 0;
+const isLength = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
 
 export function isAdminToWindowMessage(data: unknown): data is AdminToWindowMessage {
   if (!isObject(data) || data.source !== WINDOW_SOURCE) return false;
@@ -65,9 +76,12 @@ export function isAdminToWindowMessage(data: unknown): data is AdminToWindowMess
     case 'expand':
       return true;
     case 'collapse':
-      return isSize(data.w) && isSize(data.h);
+      return isSize(data.w) && isSize(data.h) && (data.shadow === undefined || typeof data.shadow === 'string');
     case 'edge':
-      return typeof data.hover === 'boolean';
+      return (
+        typeof data.hover === 'boolean' &&
+        (data.edge === undefined || (EDGES as readonly unknown[]).includes(data.edge))
+      );
     case 'drag':
       return (
         (data.kind === 'move' || (EDGES as readonly unknown[]).includes(data.kind)) &&
@@ -105,5 +119,15 @@ export function isSelectMessage(data: unknown): data is SelectMessage {
     data.quote.trim() !== '' &&
     typeof data.prefix === 'string' &&
     typeof data.suffix === 'string'
+  );
+}
+
+export function isViewportMessage(data: unknown): data is ViewportMessage {
+  return (
+    isObject(data) &&
+    data.source === WINDOW_SOURCE &&
+    data.type === 'viewport' &&
+    isLength(data.safeBottom) &&
+    isLength(data.keyboard)
   );
 }

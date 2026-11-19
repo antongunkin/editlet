@@ -24,6 +24,8 @@ interface Base {
   label: string;
   hint?: string;
   required?: boolean;
+  /** Top-level fields only: the key of the collection's `groups` entry (its tab in the admin). */
+  group?: string;
 }
 
 export type Field =
@@ -56,11 +58,21 @@ export interface BlockDef {
 /** Key that names the kind of a `blocks` item; reserved as a field key inside blocks. */
 export const BLOCK_KEY = 'block';
 
+/** A field group of a collection: one tab of the entry in the admin. */
+export interface FieldGroup {
+  label: string;
+}
+
 export interface Collection {
   label: string;
   singleton?: boolean;
   titleField?: string;
   slugFrom?: string;
+  /**
+   * Field groups in tab order. A top-level field names its group with `group`; a field without one is in the first
+   * group. Without `groups` the entry is one group.
+   */
+  groups?: Record<string, FieldGroup>;
   fields: Record<string, Field>;
 }
 
@@ -158,6 +170,7 @@ const base = {
   label: z.string(),
   hint: z.string().optional(),
   required: z.boolean().optional(),
+  group: z.string().optional(),
 };
 
 const strOrList = z.union([z.string(), z.array(z.string())]);
@@ -245,6 +258,9 @@ const collectionSchema = z.strictObject({
   singleton: z.boolean().optional(),
   titleField: z.string().optional(),
   slugFrom: z.string().optional(),
+  groups: z
+    .record(z.string().regex(IDENT, `group key ${identMsg}`), z.strictObject({ label: z.string().min(1) }))
+    .optional(),
   fields: z.record(z.string().regex(IDENT, `field key ${identMsg}`), fieldSchema),
 });
 
@@ -264,6 +280,7 @@ function checkFields(
   for (const [fk, f] of Object.entries(fields)) {
     const path = [...at, fk];
     if (fk === 'draft' && !nested) add(path, 'field key "draft" is reserved for the draft flag');
+    if (nested && f.group !== undefined) add([...path, 'group'], 'group is only for top-level fields');
     if ('default' in f && f.default !== undefined) {
       const checked = fieldValueSchema(f)?.safeParse(f.default);
       for (const issue of checked?.success === false ? checked.error.issues : []) {
@@ -338,6 +355,11 @@ const schemaSchema = z
       if (col.slugFrom !== undefined && !Object.hasOwn(col.fields, col.slugFrom)) {
         add(['collections', ck, 'slugFrom'], `slugFrom "${col.slugFrom}" is not a field of ${ck}`);
       }
+      for (const [fk, f] of fields) {
+        if (f.group !== undefined && !(col.groups && Object.hasOwn(col.groups, f.group))) {
+          add(['collections', ck, 'fields', fk, 'group'], `unknown group "${f.group}" (add it to ${ck}.groups)`);
+        }
+      }
       checkFields(schema, col.fields, ['collections', ck, 'fields'], false, add);
     }
   });
@@ -387,4 +409,28 @@ export function parseSchemaText(text: string, file: string): Schema {
 
 export function markdownFieldKey(collection: Collection): string | undefined {
   return Object.entries(collection.fields).find(([, f]) => f.type === 'markdown')?.[0];
+}
+
+/** One tab of an entry: the group's key and label and its top-level field keys, in schema order. */
+export interface FieldGroupFields {
+  /** The `groups` key; `''` for a collection without `groups`. */
+  key: string;
+  label: string;
+  fields: string[];
+}
+
+/**
+ * The collection's field groups in tab order, each with its fields in schema order. A field without `group` is in the
+ * first group; a group with no fields is left out. Without `groups`: one group of every field (`key` and `label` `''`).
+ */
+export function fieldGroups(collection: Collection): FieldGroupFields[] {
+  const declared = Object.entries(collection.groups ?? {});
+  if (declared.length === 0) return [{ key: '', label: '', fields: Object.keys(collection.fields) }];
+  const first = declared[0]![0];
+  const groups = declared.map(([key, g]) => ({ key, label: g.label, fields: [] as string[] }));
+  for (const [fk, f] of Object.entries(collection.fields)) {
+    const key = f.group !== undefined && Object.hasOwn(collection.groups!, f.group) ? f.group : first;
+    groups.find((g) => g.key === key)!.fields.push(fk);
+  }
+  return groups.filter((g) => g.fields.length > 0);
 }

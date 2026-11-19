@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { MarkdownField } from '../fields/MarkdownField';
 import type { FieldContext } from '../fields/types';
+import { Sheet, SheetProvider } from '../ui/parts/sheet';
 
 const ctx = (over: Partial<FieldContext> = {}): FieldContext => ({
   entries: () => [],
@@ -16,7 +17,7 @@ const ctx = (over: Partial<FieldContext> = {}): FieldContext => ({
   ...over,
 });
 
-function renderBody(initial: string, c = ctx()) {
+function renderBody(initial: string, c = ctx(), inSheet = false) {
   const onChange = vi.fn();
   function Harness() {
     const [value, setValue] = useState(initial);
@@ -33,7 +34,18 @@ function renderBody(initial: string, c = ctx()) {
       />
     );
   }
-  render(<Harness />);
+  // In the Body's own full-screen modal, as on the entry screen: the image dialog is a second modal over it.
+  render(
+    inSheet ? (
+      <SheetProvider>
+        <Sheet open full title="Body">
+          <Harness />
+        </Sheet>
+      </SheetProvider>
+    ) : (
+      <Harness />
+    ),
+  );
   return { onChange };
 }
 
@@ -111,6 +123,24 @@ describe('RichEditor', () => {
     );
   });
 
+  it('the image dialog is a second modal over the Body’s: Escape closes only it, a pick inserts the image', async () => {
+    const { onChange } = renderBody('Text\n', ctx({ contentDir: 'cms/content' }), true);
+    fireEvent.click(within(await toolbar()).getByRole('button', { name: 'Image' }));
+    const picker = await screen.findByRole('dialog', { name: 'Insert image' });
+    expect(within(picker).getByRole('button', { name: 'cover.webp, post/hello-world' })).toBeDefined();
+    fireEvent.keyDown(picker, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Insert image' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'Body' })).toBeDefined();
+
+    fireEvent.click(within(await toolbar()).getByRole('button', { name: 'Image' }));
+    const again = await screen.findByRole('dialog', { name: 'Insert image' });
+    fireEvent.change(within(again).getByLabelText('Alt text'), { target: { value: 'A cover' } });
+    fireEvent.click(within(again).getByTitle('cms/content/post/hello-world/cover.webp'));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('![A cover](hello-world/cover.webp)Text\n'));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Insert image' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'Body' })).toBeDefined();
+  });
+
   it('refuses javascript: links', async () => {
     renderBody('Text\n');
     fireEvent.click(within(await toolbar()).getByRole('button', { name: 'Link' }));
@@ -165,13 +195,13 @@ describe('RichEditor', () => {
     expect(await within(dialog).findByText('This image address is not allowed')).toBeDefined();
   });
 
-  it('opens the link dialog with Mod-K and closes it with Cancel', async () => {
+  it('opens the link sheet with Mod-K and closes it with ×', async () => {
     const { onChange } = renderBody('Text\n');
     const area = await editable();
     fireEvent.keyDown(area, { key: 'k', ctrlKey: true });
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Add link' })).toBeDefined();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(onChange).not.toHaveBeenCalled();
   });

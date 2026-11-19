@@ -2,7 +2,14 @@ import { act, fireEvent, render, renderHook } from '@testing-library/react';
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
-import { usePagePreview, usePageSheet, useEdgeHover, useWindowGesture, useWindowPill } from './channel';
+import {
+  usePagePreview,
+  usePageSheet,
+  usePageViewport,
+  useEdgeHover,
+  useWindowGesture,
+  useWindowPill,
+} from './channel';
 
 import { WINDOW_SOURCE, type PreviewState } from '../../../loader/window/channel';
 import { SHEET_MEDIA, type Gesture } from '../../../loader/window/geometry';
@@ -104,10 +111,10 @@ describe('usePageSheet', () => {
   });
 });
 
-function Pill({ collapsed }: { collapsed: boolean }) {
+function Pill({ collapsed, shadow }: { collapsed: boolean; shadow?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useWindowPill(ref, collapsed);
-  return <div ref={ref} style={{ width: '120.2px', height: '39.5px' }} />;
+  return <div ref={ref} style={{ width: '120.2px', height: '39.5px', boxShadow: shadow }} />;
 }
 
 describe('useWindowPill', () => {
@@ -121,6 +128,63 @@ describe('useWindowPill', () => {
     view.rerender(<Pill collapsed />);
     view.unmount();
     expect(messages().map((m) => m.type)).toEqual(['collapse', 'expand', 'collapse', 'expand']);
+  });
+
+  it('sends the new shadow when the theme changes while collapsed, and nothing when it stays the same', async () => {
+    const view = render(<Pill collapsed shadow="0 12px 32px -8px red" />);
+    posted.mockClear();
+    const pill = view.container.firstElementChild as HTMLElement;
+    pill.style.boxShadow = '0 12px 32px -8px blue';
+    document.documentElement.dataset.editletTheme = 'dark';
+    await act(() => Promise.resolve());
+    expect(messages()).toEqual([
+      { source: WINDOW_SOURCE, type: 'collapse', w: 121, h: 40, shadow: 'rgb(0, 0, 255) 0px 12px 32px -8px' },
+    ]);
+    document.documentElement.dataset.editletTheme = 'light';
+    await act(() => Promise.resolve());
+    expect(messages()).toHaveLength(1);
+    view.unmount();
+    delete document.documentElement.dataset.editletTheme;
+  });
+
+  it('sends the pill’s shadow along, for the dialog to draw', () => {
+    render(<Pill collapsed shadow="0 12px 32px -8px red" />);
+    expect(messages()).toEqual([
+      { source: WINDOW_SOURCE, type: 'collapse', w: 121, h: 40, shadow: 'rgb(255, 0, 0) 0px 12px 32px -8px' },
+    ]);
+  });
+});
+
+describe('usePageViewport', () => {
+  const root = () => document.documentElement.style;
+
+  it('says hello, then sets the safe area and the keyboard the page reports on the root, and clears them on unmount', () => {
+    const { unmount } = renderHook(() => usePageViewport(true));
+    expect(messages()).toEqual([{ source: WINDOW_SOURCE, type: 'hello' }]);
+    fromPage({ source: WINDOW_SOURCE, type: 'viewport', safeBottom: 34, keyboard: 0 });
+    expect(root().getPropertyValue('--safe-bottom')).toBe('34px');
+    expect(root().getPropertyValue('--keyboard')).toBe('0px');
+    fromPage({ source: WINDOW_SOURCE, type: 'viewport', safeBottom: 0, keyboard: 300 });
+    expect(root().getPropertyValue('--keyboard')).toBe('300px');
+    expect(document.documentElement.hasAttribute('data-keyboard')).toBe(true);
+    unmount();
+    expect(root().getPropertyValue('--safe-bottom')).toBe('');
+    expect(root().getPropertyValue('--keyboard')).toBe('');
+    expect(document.documentElement.hasAttribute('data-keyboard')).toBe(false);
+  });
+
+  it('ignores other origins, other windows and malformed messages, and does nothing standalone', () => {
+    const { unmount } = renderHook(() => usePageViewport(true));
+    fromPage({ source: WINDOW_SOURCE, type: 'viewport', safeBottom: 1, keyboard: 1 }, { origin: 'https://evil.test' });
+    fromPage({ source: WINDOW_SOURCE, type: 'viewport', safeBottom: 1, keyboard: 1 }, { source: null });
+    fromPage({ source: WINDOW_SOURCE, type: 'viewport', safeBottom: -1, keyboard: 1 });
+    expect(root().getPropertyValue('--keyboard')).toBe('');
+    unmount();
+    posted.mockClear();
+    renderHook(() => usePageViewport(false));
+    fromPage({ source: WINDOW_SOURCE, type: 'viewport', safeBottom: 1, keyboard: 1 });
+    expect(posted).not.toHaveBeenCalled();
+    expect(root().getPropertyValue('--keyboard')).toBe('');
   });
 });
 
@@ -146,7 +210,21 @@ describe('useEdgeHover', () => {
     again.unmount();
     expect(messages().at(-1)).toEqual({ source: WINDOW_SOURCE, type: 'edge', hover: false });
   });
+
+  it('names the zone on enter, so window.js lights only its sides', () => {
+    const named = render(<NamedEdge />);
+    fireEvent.pointerEnter(named.getByTestId('se'));
+    fireEvent.pointerLeave(named.getByTestId('se'));
+    expect(messages().slice(-2)).toEqual([
+      { source: WINDOW_SOURCE, type: 'edge', hover: true, edge: 'se' },
+      { source: WINDOW_SOURCE, type: 'edge', hover: false },
+    ]);
+  });
 });
+
+function NamedEdge() {
+  return <div data-testid="se" {...useEdgeHover('se')} />;
+}
 
 function Handle({ kind }: { kind: Gesture }) {
   return <button type="button" data-testid="handle" {...useWindowGesture(kind)} />;

@@ -2,6 +2,14 @@ import type { Issue } from '../../../core/issues';
 import { relativeAssetSrc, slugify } from '../../../core/paths';
 
 /**
+ * The top-level fields with a required value still missing, from a validation's issues: a required field inside an
+ * object or a block (`seo.title`, `content.2.text`) counts for its row (`seo`, `content`).
+ */
+export function requiredFieldKeys(issues: Issue[]): Set<string> {
+  return new Set(issues.flatMap((i) => (i.message === 'Required' && i.path !== '' ? [i.path.split('.')[0]!] : [])));
+}
+
+/**
  * Groups issues by top-level field (`tags.2` → `tags`, message `2: …`). File-level issues (`path: ''`) and unknown
  * frontmatter keys (`Unknown field`) go to `general`, shown above the form.
  */

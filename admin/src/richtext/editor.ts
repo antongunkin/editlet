@@ -57,10 +57,10 @@ const rawView = $view(rawNode, (): NodeViewConstructor => (initial, view, getPos
   dom.className = 'editlet-rt-raw';
   dom.contentEditable = 'false';
   const label = document.createElement('div');
-  label.className = 'editlet-rt-raw__label';
+  label.className = 'editlet-rt-raw-label';
   label.textContent = 'Markdown kept as text';
   const area = document.createElement('textarea');
-  area.className = 'editlet-rt-raw__text';
+  area.className = 'editlet-rt-raw-text';
   area.spellcheck = false;
   area.setAttribute('aria-label', 'Markdown kept as text');
   const fit = () => {

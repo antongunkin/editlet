@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { GitHubApp, NotConfigured } from './github/GitHubApp';
 import { PreviewProvider } from './preview/PreviewProvider';
 import { BrokenSchema } from './screens/BrokenSchema';
+import { GateLoading } from './screens/GateLoading';
 import { Shell } from './Shell';
 import { SourceProvider } from './source/context';
 import { detectMode } from './source/detect';
@@ -82,11 +83,7 @@ export function App({ source, win, fetch: fetchFn, storage, queryClient }: AppPr
   let content: ReactNode;
   switch (mode.kind) {
     case 'detecting':
-      content = (
-        <p className="editlet-u-text-muted" role="status">
-          Loading…
-        </p>
-      );
+      content = <GateLoading />;
       break;
     case 'github':
       content = mode.config?.github ? (
