@@ -326,6 +326,10 @@ describe('branch screen', () => {
     expect(window.localStorage.getItem(activeBranchKey('o', 'r'))).toBe('editlet/edit');
     await waitFor(() => expect(within(main()).queryByRole('button', { name: 'More actions' })).toBeNull());
     expect(review.isConnected).toBe(true);
+    // ⋯ is gone with the switch, so the focus goes to the big title (focusable by script, not a tab stop).
+    const title = within(main()).getByRole('heading', { level: 1, name: 'Review changes' });
+    await waitFor(() => expect(document.activeElement).toBe(title));
+    expect(title.getAttribute('tabindex')).toBe('-1');
   });
 
   it('the active branch: no Edit on this branch', async () => {

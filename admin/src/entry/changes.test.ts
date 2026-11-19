@@ -61,6 +61,6 @@ describe('requiredFieldKeys', () => {
       { path: 'tags', message: 'Too many' },
       { path: '', message: 'Required' },
     ];
-    expect([...requiredFieldKeys(issues)].sort()).toEqual(['content', 'seo', 'title']);
+    expect([...requiredFieldKeys(issues)].toSorted()).toEqual(['content', 'seo', 'title']);
   });
 });

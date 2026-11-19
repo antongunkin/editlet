@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { AltQueue } from './AltQueue';
 import { deleteChanges } from './edits';
 import { LazyPreview } from './LazyPreview';
 import { MediaDetail } from './MediaDetail';
@@ -29,6 +30,7 @@ import { RouteLink } from '../RouteLink';
 import { useSource } from '../source/context';
 import { buttonVariants, cn, Icon, IconButton } from '../ui';
 import { ActionSheet } from '../ui/parts/action-sheet';
+import type { FinalFocus } from '../ui/parts/focus';
 import { Header, SearchHeader } from '../ui/parts/header';
 import { ActionRow } from '../ui/parts/rows';
 import { Banner } from '../ui/primitives/banner';
@@ -139,7 +141,10 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [moreOpen, setMoreOpen] = useState(false);
+  // The alt queue: a run per start (its images are taken once, when it opens), kept while it closes.
+  const [run, setRun] = useState<{ id: number; images: MediaImage[]; open: boolean } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const more = useRef<HTMLButtonElement>(null);
   const defaultFolder = mediaFolder(schema);
   const screenDrop = useDropZone((files) => void uploader.upload(files, defaultFolder));
 
@@ -148,9 +153,20 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
   const shown = images.filter((i) => matchesFilter(i, filter) && matchesQuery(i, query));
   const detail = open === null ? undefined : images.find((i) => i.path === open);
   const busy = commit.busy || uploader.preparing;
+  /** The queue: the images without alt text that match the search, in grid order, whatever chip is on. */
+  const queueImages = images.filter((i) => hasMissingAlt(i) && matchesQuery(i, query));
+  const altStart = counts['missing-alt'] > 0 && !index?.incomplete && !busy;
 
-  const remove = (paths: string[]) =>
+  const startQueue = () => {
+    const snapshot = queueImages;
+    if (snapshot.length === 0) return setNotice('No image without alt text matches the search.');
+    setNotice(null);
+    setRun((prev) => ({ id: (prev?.id ?? 0) + 1, images: snapshot, open: true }));
+  };
+
+  const remove = (paths: string[], finalFocus?: FinalFocus) =>
     commit.request({
+      finalFocus,
       message: paths.length === 1 ? `Delete ${paths[0]!.split('/').pop()}` : `Delete ${paths.length} images`,
       subject: filesSubject(schema, 'delete', paths),
       build: async () => [deleteChanges(await loadMediaIndex(client, source, schema), paths)],
@@ -201,7 +217,7 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
         banners={banners}
         onClose={() => setOpen(null)}
         onDelete={remove}
-        onUpload={(files, folder) => void uploader.upload(files, folder)}
+        onUpload={(files, folder, finalFocus) => void uploader.upload(files, folder, finalFocus)}
       />
     );
   }
@@ -253,6 +269,7 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
               />
               {images.length > 0 ? (
                 <IconButton
+                  ref={more}
                   label="More actions"
                   aria-haspopup="dialog"
                   icon={<Icon name="more" size={20} />}
@@ -294,6 +311,7 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
     </MediaGrid>
   );
 
+  const addAlt = filter === 'missing-alt' && counts['missing-alt'] > 0;
   const cta = selecting ? (
     <Button
       variant="danger"
@@ -305,6 +323,18 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
       onClick={() => remove([...selected])}
     >
       {selected.size === 0 ? 'Delete' : `Delete ${count(selected.size, 'image', 'images')}`}
+    </Button>
+  ) : addAlt ? (
+    <Button
+      variant="primary"
+      size="lg"
+      full
+      icon={<Icon name="pencil" size={20} />}
+      aria-label={`Add alt text to ${count(queueImages.length, 'image', 'images')}`}
+      disabled={!altStart}
+      onClick={startQueue}
+    >
+      Add alt text
     </Button>
   ) : (
     <Button
@@ -333,7 +363,13 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
           ))}
         </fieldset>
       }
-      hint={selecting ? 'Only unused images can be selected.' : undefined}
+      hint={
+        selecting
+          ? 'Only unused images can be selected.'
+          : addAlt && index?.incomplete
+            ? 'Still reading the entries…'
+            : undefined
+      }
       body={body}
       status={chrome.status}
       cta={cta}
@@ -368,7 +404,18 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
               if (list.length > 0) void uploader.upload(list, defaultFolder);
             }}
           />
-          <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title="Media">
+          <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title="Media" finalFocus={more}>
+            <ActionRow
+              icon="pencil"
+              disabled={counts['missing-alt'] === 0 || !altStart}
+              note={index?.incomplete ? 'Still reading the entries…' : undefined}
+              onClick={() => {
+                setMoreOpen(false);
+                startQueue();
+              }}
+            >
+              Add missing alt text
+            </ActionRow>
             <ActionRow
               icon="check-circle"
               onClick={() => {
@@ -381,6 +428,19 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
             </ActionRow>
           </ActionSheet>
           {commit.dialog}
+          {run ? (
+            <AltQueue
+              key={run.id}
+              schema={schema}
+              images={run.images}
+              open={run.open}
+              onOpenChange={(next) => setRun((r) => (r ? { ...r, open: next } : r))}
+              onOpenImage={(path) => {
+                setRun((r) => (r ? { ...r, open: false } : r));
+                setOpen(path);
+              }}
+            />
+          ) : null}
         </>
       }
     />

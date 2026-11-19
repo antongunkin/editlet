@@ -56,6 +56,19 @@ describe('usePagePreview', () => {
     fromPage({ source: WINDOW_SOURCE, type: 'preview', state });
   });
 
+  it('tells the page the theme right after hello (window.js may not have been listening before)', () => {
+    document.documentElement.dataset.editletTheme = 'dark';
+    try {
+      renderHook(() => usePagePreview(true));
+      expect(messages()).toEqual([
+        { source: WINDOW_SOURCE, type: 'hello' },
+        { source: WINDOW_SOURCE, type: 'theme', theme: 'dark' },
+      ]);
+    } finally {
+      delete document.documentElement.dataset.editletTheme;
+    }
+  });
+
   it('ignores other origins, other sources and malformed messages', () => {
     const { result } = renderHook(() => usePagePreview(true));
     fromPage({ source: WINDOW_SOURCE, type: 'preview', state }, { origin: 'https://evil.test' });

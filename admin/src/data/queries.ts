@@ -8,6 +8,8 @@ import {
 } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+import { batchedReader } from './batchRead';
+
 import { decodeUtf8, parseEntryFile, type EntryFile } from '../../../core/entryFile';
 import { EditletError, type Issue } from '../../../core/issues';
 import { isHiddenContentPath, parseEntryPath } from '../../../core/paths';
@@ -18,6 +20,7 @@ import { useRefreshPullRequestBody } from '../github/style';
 import { useWorkspace } from '../github/workspace';
 import { FILES_KEY, filesKey, useSource } from '../source/context';
 import type { SourceChange } from '../source/local';
+import { LOCAL_GIT_KEY } from '../status/localGit';
 
 /**
  * The common shape of the derived hooks: `data` once loaded, else `isPending` or an `error`. `error` is set only when
@@ -71,8 +74,10 @@ export function findSchemaRef(files: FileRef[]): FileRef | undefined {
   return files.find((f) => f.path === DEFAULT_SCHEMA_PATH) ?? files.find((f) => f.path.endsWith('schema.json'));
 }
 
-async function readText(source: ContentSource, path: string): Promise<string> {
-  const decoded = decodeUtf8(await source.readFile(path), path);
+/** A file as text. `batched`: through the source's batched reader (entry files: many asked at once, `batchRead.ts`). */
+async function readText(source: ContentSource, path: string, batched = false): Promise<string> {
+  const bytes = batched ? await batchedReader(source).read(path) : await source.readFile(path);
+  const decoded = decodeUtf8(bytes, path);
   if ('issue' in decoded) throw new EditletError([decoded.issue]);
   return decoded.text;
 }
@@ -84,7 +89,7 @@ export function entryFileQuery(source: ContentSource, ref: FileRef | undefined) 
     staleTime: Infinity,
     queryFn: async (): Promise<EntryFileData> => {
       const { path, sha } = ref!;
-      const text = await readText(source, path);
+      const text = await readText(source, path, true);
       let file: EntryFile;
       try {
         file = parseEntryFile(text);
@@ -285,8 +290,15 @@ export type CommitInput = {
   newBranch?: string;
 };
 
+/**
+ * After a write: the file lists, and in dev mode the dev server's git state (`['local-git']`, a no-op in GitHub mode),
+ * so the *Changed* statuses follow a save at once instead of on the next 3 s poll.
+ */
 export function invalidateFiles(client: QueryClient): Promise<void> {
-  return client.invalidateQueries({ queryKey: FILES_KEY });
+  return Promise.all([
+    client.invalidateQueries({ queryKey: FILES_KEY }),
+    client.invalidateQueries({ queryKey: LOCAL_GIT_KEY }),
+  ]).then(() => undefined);
 }
 
 /**

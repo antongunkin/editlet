@@ -21,8 +21,16 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/__editlet/files
 
 ## Open the right screen
 
-URL: `http://localhost:<port><page>?editlet=<route>`. Use the page where the content appears (`/blog/spring-sale`), or `/`
-if you do not know it. Keep any existing query parameters.
+URL: `http://localhost:<port><page>?editlet=<route>`. Use the page where the content appears. Keep any existing query
+parameters.
+
+- **The collection has `url`** in `cms/schema.json`: that is its page. Put the slug in for `{slug}`:
+  `"url": "/blog/{slug}"` → `http://localhost:3000/blog/spring-sale?editlet=post/spring-sale`. A `url` without
+  `{slug}` (`/`, `/blog`) is the one page that shows every entry of the collection, or the singleton.
+- **No `url`**: the collection has no page of its own (settings, authors shown inside posts), or its route is one `url`
+  cannot describe (`/[year]/[slug]`, a locale prefix). Use the page you know shows it, else `/`.
+- A draft may have no page on the live site; `next dev` and `astro dev` usually show it (a site that filters drafts
+  itself does not).
 
 | Route | Screen |
 |---|---|

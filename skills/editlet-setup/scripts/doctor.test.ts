@@ -439,3 +439,141 @@ describe('doctor: more local checks', () => {
     expect(noCli['env.vercel']?.status).toBe('manual');
   });
 });
+
+describe('doctor: page addresses', () => {
+  const withUrls = (collections: Record<string, unknown>) => JSON.stringify({ ...SCHEMA, collections });
+  const POST = { label: 'Post', fields: { title: { type: 'string', label: 'Title', required: true } } };
+  const DYNAMIC = { 'src/app/blog/[slug]/page.tsx': 'export default function P() { return null; }\n' };
+
+  it('lists the collections with a page address and names those without', async () => {
+    const root = await project({
+      ...NEXT_FILES,
+      ...DYNAMIC,
+      'cms/schema.json': withUrls({
+        post: { ...POST, pluralLabel: 'Posts', url: '/blog/{slug}' },
+        home: { ...POST, label: 'Home', singleton: true, url: '/' },
+        author: POST,
+        tag: POST,
+      }),
+    });
+    expect(byId(await doctor(ctx(root)))['content.urls']).toEqual({
+      status: 'ok',
+      id: 'content.urls',
+      message: '2 of 4 collections have a page address (post /blog/{slug}, home /); author, tag have none',
+    });
+  });
+
+  it('warns only when no collection has url and the site has a dynamic route', async () => {
+    const warned = byId(await doctor(ctx(await project({ ...NEXT_FILES, ...DYNAMIC }))));
+    expect(warned['content.urls']).toMatchObject({
+      status: 'warn',
+      message:
+        'no collection has a page address, but src/app/blog/[slug]/page.tsx is a dynamic route: add "url" to the collection it shows',
+    });
+    const astro = byId(
+      await doctor(ctx(await project({ ...NEXT_FILES, 'src/pages/posts/[slug].astro': '---\n---\n' }))),
+    );
+    expect(astro['content.urls']?.message).toContain('src/pages/posts/[slug].astro');
+    const plain = byId(await doctor(ctx(await project(NEXT_FILES))));
+    expect(plain['content.urls']).toMatchObject({
+      status: 'ok',
+      message: '0 of 1 collections have a page address; post has none',
+    });
+  });
+
+  it('skips the check when the schema does not load', async () => {
+    const ids = byId(await doctor(ctx(await project({ ...NEXT_FILES, ...DYNAMIC, 'cms/schema.json': '{' }))));
+    expect(ids['content.valid']?.status).toBe('fail');
+    expect(ids['content.urls']).toBeUndefined();
+  });
+
+  const LIVE_POSTS = {
+    ...NEXT_FILES,
+    'cms/schema.json': withUrls({
+      home: { ...POST, label: 'Home', singleton: true, url: '/' },
+      post: { ...POST, url: '/blog/{slug}' },
+    }),
+    'cms/content/home/index.md': '---\ntitle: Home\n---\n',
+    'cms/content/post/alpha.md': '---\ntitle: Alpha\ndraft: true\n---\n',
+    'cms/content/post/beta.md': '---\ntitle: Beta\n---\n',
+    'cms/content/post/gamma.md': '---\ntitle: Gamma\n---\n',
+  };
+
+  it('fetches the first published entry of the first {slug} collection on the live site', async () => {
+    const root = await project(LIVE_POSTS);
+    const seen: string[] = [];
+    const routes = fakeFetch({ ...LIVE, '/blog/beta': { status: 200, body: '<html></html>' } });
+    const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      seen.push(new URL(String(input)).pathname);
+      return routes(input, init);
+    }) as typeof globalThis.fetch;
+    const ids = byId(await doctor(ctx(root, { url: 'https://acme.dev', fetch, execs: GH })));
+    expect(ids['site.entry-url']).toEqual({
+      status: 'ok',
+      id: 'site.entry-url',
+      message: 'https://acme.dev/blog/beta answers 200',
+    });
+    expect(seen).not.toContain('/blog/alpha');
+  });
+
+  it('warns with the URL when the page is not there', async () => {
+    const root = await project(LIVE_POSTS);
+    const ids = byId(await doctor(ctx(root, { url: 'https://acme.dev', fetch: fakeFetch(LIVE), execs: GH })));
+    expect(ids['site.entry-url']).toMatchObject({
+      status: 'warn',
+      message:
+        "https://acme.dev/blog/beta: 404 (expected 2xx): the url of post (/blog/{slug}) may not match the site's routes",
+    });
+  });
+
+  it('skips a file whose name is not a valid slug, and says no answer', async () => {
+    const root = await project({ ...LIVE_POSTS, 'cms/content/post/Aaa_Bad.md': '---\ntitle: Bad\n---\n' });
+    const seen: string[] = [];
+    const fetch = (async (input: string | URL | Request) => {
+      seen.push(new URL(String(input)).pathname);
+      throw new Error('offline');
+    }) as typeof globalThis.fetch;
+    const ids = byId(await doctor(ctx(root, { url: 'https://acme.dev', fetch, execs: GH })));
+    expect(seen).toContain('/blog/beta');
+    expect(seen.some((p) => /null|Aaa_Bad/.test(p))).toBe(false);
+    expect(ids['site.entry-url']?.message).toMatch(/^https:\/\/acme\.dev\/blog\/beta: no answer/);
+  });
+
+  it('a redirect that only changes the trailing / is ok; another redirect warns with its target', async () => {
+    const root = await project(LIVE_POSTS);
+    const slash = fakeFetch({ ...LIVE, '/blog/beta': { status: 308, headers: { location: '/blog/beta/' } } });
+    const slashed = byId(await doctor(ctx(root, { url: 'https://acme.dev', fetch: slash, execs: GH })));
+    expect(slashed['site.entry-url']).toMatchObject({
+      status: 'ok',
+      message: expect.stringContaining('redirects to /blog/beta/'),
+    });
+    const away = fakeFetch({ ...LIVE, '/blog/beta': { status: 302, headers: { location: '/login' } } });
+    const warned = byId(await doctor(ctx(root, { url: 'https://acme.dev', fetch: away, execs: GH })));
+    expect(warned['site.entry-url']).toMatchObject({
+      status: 'warn',
+      message: expect.stringContaining('302 to /login'),
+    });
+  });
+
+  it('has no remote check without a {slug} collection, and none without --url', async () => {
+    const root = await project({
+      ...NEXT_FILES,
+      'cms/schema.json': withUrls({ post: { ...POST, url: '/blog' } }),
+    });
+    const remote = byId(await doctor(ctx(root, { url: 'https://acme.dev', fetch: fakeFetch(LIVE), execs: GH })));
+    expect(remote['site.entry-url']).toBeUndefined();
+    const local = byId(await doctor(ctx(await project(LIVE_POSTS))));
+    expect(local['site.entry-url']).toBeUndefined();
+  });
+
+  it('asks for a check by hand when the collection has only drafts', async () => {
+    const root = await project({
+      ...LIVE_POSTS,
+      'cms/content/post/beta.md': '---\ntitle: Beta\ndraft: true\n---\n',
+      'cms/content/post/gamma.md': '---\ntitle: Gamma\ndraft: true\n---\n',
+      'cms/content/post/hello.md': '---\ntitle: Hello\ndraft: true\n---\n',
+    });
+    const ids = byId(await doctor(ctx(root, { url: 'https://acme.dev', fetch: fakeFetch(LIVE), execs: GH })));
+    expect(ids['site.entry-url']?.status).toBe('manual');
+  });
+});

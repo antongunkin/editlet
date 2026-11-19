@@ -9,7 +9,7 @@ const site = { origin: ORIGIN, href: `${ORIGIN}/blog/` };
 
 function setup(opts?: { standalone?: boolean }) {
   const fake = createFakeWindow(opts);
-  const handlers = { onInit: vi.fn(), onNavigate: vi.fn(), onCloseRequest: vi.fn() };
+  const handlers = { onInit: vi.fn(), onNavigate: vi.fn(), onPage: vi.fn(), onCloseRequest: vi.fn() };
   const bridge = createBridge(fake.win, handlers);
   return { ...fake, handlers, bridge };
 }
@@ -57,7 +57,7 @@ describe('createBridge', () => {
     expect(parent.postMessage).toHaveBeenCalledTimes(1); // only `ready`: not pinned yet
 
     fromSite({ type: 'init', route: 'post/hello-world', site });
-    expect(handlers.onInit).toHaveBeenCalledWith('post/hello-world');
+    expect(handlers.onInit).toHaveBeenCalledWith('post/hello-world', `${ORIGIN}/blog/`);
     expect(bridge.connected()).toBe(true);
 
     bridge.send({ type: 'navigate', route: 'post' });
@@ -73,6 +73,25 @@ describe('createBridge', () => {
     expect(handlers.onCloseRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('passes the page href of a later page message, only after init', () => {
+    const { fromSite, handlers } = setup();
+    fromSite({ type: 'page', href: `${ORIGIN}/early` });
+    expect(handlers.onPage).not.toHaveBeenCalled();
+    fromSite({ type: 'init', route: '', site });
+    fromSite({ type: 'page', href: `${ORIGIN}/posts/tires` });
+    expect(handlers.onPage).toHaveBeenCalledWith(`${ORIGIN}/posts/tires`);
+    fromSite({ type: 'page', href: `${ORIGIN}/evil` }, { origin: 'https://evil.example' });
+    expect(handlers.onPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not take a page message for a close request', () => {
+    const { fromSite, handlers } = setup();
+    fromSite({ type: 'init', route: '', site });
+    fromSite({ type: 'page', href: `${ORIGIN}/posts/a` });
+    expect(handlers.onCloseRequest).not.toHaveBeenCalled();
+    expect(handlers.onNavigate).not.toHaveBeenCalled();
+  });
+
   it('ignores messages from another origin or source after pinning', () => {
     const { fromSite, handlers } = setup();
     fromSite({ type: 'init', route: '', site });
@@ -86,7 +105,7 @@ describe('createBridge', () => {
     const { fromSite, handlers } = setup();
     fromSite({ type: 'init', route: '', site });
     fromSite({ type: 'init', route: 'schema', site });
-    expect(handlers.onInit).toHaveBeenLastCalledWith('schema');
+    expect(handlers.onInit).toHaveBeenLastCalledWith('schema', `${ORIGIN}/blog/`);
   });
 
   it('stops listening after destroy', () => {

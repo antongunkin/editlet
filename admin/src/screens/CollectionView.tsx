@@ -17,7 +17,7 @@ import { IconTile } from '../ui/primitives/icon-tile';
 // the entries as rows in one card, 20 at a time, and the bottom bar with the status line and the one CTA, *New post*. Props only: the container (Collection.tsx) has the
 // data, and /design renders it from fixtures (src/design/fixtures/collection.tsx).
 
-/** The key of a filter chip: `all`, or one of `filters` (the admin has *Drafts*). */
+/** The key of a filter chip: `all`, or one of `filters` (the admin's: `drafts`, `changed`, `review`). */
 export type CollectionFilter = string;
 
 /** One entry of the list. */
@@ -52,6 +52,8 @@ export interface CollectionFilterData {
   label: string;
   /** What the chip says when nothing is in it: *No drafts. Every entry is published.* */
   empty: string;
+  /** Its rows are not known yet (the file statuses load): the count shows *…*. */
+  pending?: boolean;
 }
 
 export interface CollectionViewProps {
@@ -65,7 +67,7 @@ export interface CollectionViewProps {
   banners?: ReactNode;
   /** The entries; `undefined` while they load (placeholder rows, the CTA already works). */
   rows?: CollectionRowData[];
-  /** The chips after *All*: the admin knows *Drafts* (the design also draws *Changed* and *In review*). */
+  /** The chips after *All*: *Drafts*, *Changed*, *In review* (each counts the rows whose `filters` name it). */
   filters: CollectionFilterData[];
   /** Which chip is on. */
   filter: CollectionFilter;
@@ -206,8 +208,13 @@ export function CollectionView({
   children,
 }: CollectionViewProps) {
   const loading = rows === undefined;
-  const chips = filters.map((f) => ({ ...f, count: rows?.filter((r) => r.filters?.includes(f.key)).length ?? 0 }));
+  const chips = filters.map((f) => ({
+    ...f,
+    count: f.pending ? '…' : (rows?.filter((r) => r.filters?.includes(f.key)).length ?? 0),
+  }));
   const on = filters.find((f) => f.key === filter);
+  // A chip whose rows are not known yet shows placeholder rows, never its empty text.
+  const busy = loading || on?.pending === true;
   const matching = on ? (rows ?? []).filter((r) => r.filters?.includes(on.key)) : (rows ?? []);
   const shown = matching.slice(0, limit);
   const rest = matching.length - shown.length;
@@ -259,18 +266,18 @@ export function CollectionView({
             />
             {/* pb-8: the card's shadow reaches 28 px below it; never cut it (ui4.content). */}
             <div ref={list} className="px-4 pb-8">
-              {!loading && shown.length === 0 ? (
+              {!busy && shown.length === 0 ? (
                 <output className="block px-1 py-6 text-center text-base text-tray-muted-foreground">
                   {on?.empty}
                 </output>
               ) : (
-                <Card as="ul" aria-label={`${title} entries`} aria-busy={loading || undefined}>
-                  {loading ? (
+                <Card as="ul" aria-label={`${title} entries`} aria-busy={busy || undefined}>
+                  {busy ? (
                     <Placeholders wide={wide} />
                   ) : (
                     shown.map((row) => <Entry key={row.key} row={row} wide={wide} />)
                   )}
-                  {rest > 0 ? (
+                  {!busy && rest > 0 ? (
                     <li>
                       <Row
                         title={`Show ${Math.min(PAGE_SIZE, rest)} more`}

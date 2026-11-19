@@ -189,8 +189,6 @@ function freeName(candidates: string[], taken: (name: string) => boolean): strin
   return candidates.find((name) => !taken(name)) ?? `${candidates[0]}New`;
 }
 
-const PLURALS: Record<string, string> = { tag: 'tags', category: 'categories', topic: 'topics' };
-
 /** The collection the global prompts name: the first one with entries of its own, else the first, else `post`. */
 const mainCollection = (schema: Schema) => {
   const entries = Object.entries(schema.collections);
@@ -271,7 +269,7 @@ export function globalPrompts(schema: Schema, schemaPath: string, opts: { hasPro
   prompts.push({
     id: 'add-collection',
     title: 'Add a collection',
-    text: `Add a collection "${tag}" (label "${capitalize(tag)}") with a required string field "name", and let "${collection}" reference many ${PLURALS[tag] ?? `${tag}s`}.`,
+    text: `Add a collection "${tag}" (label "${capitalize(tag)}" and its pluralLabel) with a required string field "name", and let "${collection}" reference many "${tag}" entries.`,
   });
   prompts.push({
     id: 'review-schema',

@@ -54,6 +54,8 @@ async function imagePreview(
   return alt.from !== alt.to ? { image: { from, to: blob, alt } } : { image: { from, to: blob } };
 }
 
+const lf = (s: string) => s.replace(/\r\n/g, '\n');
+
 /**
  * Preview values for the fields that differ between `before` and `after` (every field when `before` is `null`, a new
  * entry: `from` is then `''`). `readImage` receives the REPO path of the new asset (the `resolveAssetPath` result,
@@ -71,7 +73,6 @@ export async function fieldPreviews(
   const def = schema.collections[collection];
   const prev = before ?? { data: {}, body: '' };
   const out: EntryPreviews = {};
-  const lf = (s: string) => s.replace(/\r\n/g, '\n');
 
   if (lf(prev.body) !== lf(after.body)) out[markdownFieldKey(def) ?? 'body'] = STALE;
 

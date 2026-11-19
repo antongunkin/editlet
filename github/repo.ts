@@ -120,6 +120,7 @@ export type RepoOps = Pick<
   | 'refreshPullRequestBody'
   | 'pullRequestReview'
   | 'compare'
+  | 'compareFiles'
   | 'publish'
   | 'latestDeployment'
 >;
@@ -256,6 +257,8 @@ const COMPARE_FILES_CAP = 300;
 
 interface RestCompareFile {
   filename: string;
+  /** A rename's old path. */
+  previous_filename?: string;
   status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
 }
 
@@ -578,6 +581,24 @@ export function makeRepoOps(deps: RepoOpsDeps): RepoOps {
         otherFiles,
         complete: (cmp.files ?? []).length < COMPARE_FILES_CAP,
       };
+    },
+
+    async compareFiles(name) {
+      const base = await deps.baseBranch();
+      const cmp = await ctx.client.rest<{ files?: RestCompareFile[] }>(
+        'GET',
+        `${repoPath}/compare/${encodeRef(base)}...${encodeRef(name)}`,
+        { query: { per_page: 1 }, fresh: true },
+      );
+      const files = cmp.files ?? [];
+      const paths = new Set<string>();
+      for (const f of files) {
+        if (f.status === 'unchanged') continue;
+        paths.add(f.filename);
+        // A rename also takes the old path away from the base branch.
+        if (f.status === 'renamed' && f.previous_filename) paths.add(f.previous_filename);
+      }
+      return { paths: [...paths].toSorted(), complete: files.length < COMPARE_FILES_CAP };
     },
   };
   return ops;

@@ -13,7 +13,7 @@ export function Swatch({ color, className, style, children, ...props }: Componen
       data-slot="swatch"
       data-focus-ring=""
       className={cn(
-        'relative inline-flex size-14 shrink-0 rounded-xl inset-ring-1 inset-ring-border has-focus-visible:inset-ring-2 has-focus-visible:inset-ring-foreground',
+        'relative inline-flex size-14 shrink-0 rounded-xl inset-ring-1 inset-ring-border has-focused:inset-ring-2 has-focused:inset-ring-foreground',
         className,
       )}
       style={{ backgroundColor: color, ...style }}

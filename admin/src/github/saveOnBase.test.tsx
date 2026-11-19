@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { tokenSession, writeSession } from './session';
@@ -38,6 +38,21 @@ const notLoading = () => expect(main().querySelector('[data-slot="row"][aria-bus
 function fileAt(fake: AdminFakeGitHub, branch: string, path: string): string | undefined {
   const sha = fake.state.commits.get(fake.state.refs.get(branch)!)!.files.get(path);
   return sha === undefined ? undefined : new TextDecoder().decode(fake.state.blobs.get(sha));
+}
+
+/** How many history reads `versionsAs` has answered (a negative test waits for the read before it asserts). */
+let versionReads = 0;
+
+/** `fake`, with the answer to the history read (`query Versions`) changed by `answer` (it gets the real response). */
+function versionsAs(fake: AdminFakeGitHub, answer: (real: Response) => Promise<Response> | Response): AdminFakeGitHub {
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const body = typeof init?.body === 'string' ? init.body : '';
+    const real = await fake.fetch(input, init);
+    if (!body.includes('query Versions')) return real;
+    versionReads += 1;
+    return answer(real);
+  }) as typeof globalThis.fetch;
+  return { ...fake, fetch };
 }
 
 /** `main` plus `editlet/a`, where post/hello-world is titled "On A". */
@@ -273,7 +288,8 @@ describe('saving on a cms branch', () => {
     expect(compare.getByText('1 field changed on GitHub')).toBeDefined();
     const title = within(compare.getByRole('radiogroup', { name: 'Title' }));
     expect(title.getByRole('radio', { name: 'Yours: Mine' }).getAttribute('aria-checked')).toBe('true');
-    expect(title.getByRole('radio', { name: 'On GitHub: From GitHub' })).toBeDefined();
+    // The newer side says who saved it and when (the latest commit of the file is the file the screen holds).
+    expect(title.getByRole('radio', { name: /^On GitHub · jane, .+: From GitHub$/ })).toBeDefined();
     fireEvent.click(compare.getByRole('button', { name: 'Apply 1 choice' }));
 
     // Yours kept, on top of the newer file: the next save goes through.
@@ -282,6 +298,46 @@ describe('saving on a cms branch', () => {
     fireEvent.click(await findCta('Save 1 change'));
     await saveReview();
     await waitFor(() => expect(fileAt(fake, 'editlet/a', ENTRY)).toContain('title: Mine'));
+  });
+
+  it('compare card without who and when: the history read fails, or its latest file is not the one the screen holds', async () => {
+    const edit = (fake: AdminFakeGitHub) =>
+      fake.commit('editlet/a', {
+        [ENTRY]: fileAt(fake, 'editlet/a', ENTRY)!.replace('title: On A', 'title: From GitHub'),
+      });
+    const compareTitle = async () => {
+      // The read of who saved the newer file starts as soon as the refused save has the newer file: count from here.
+      versionReads = 0;
+      await reviewTitle('Mine');
+      await saveReview();
+      fireEvent.click(await findCta('Compare changes'));
+      const compare = await sheet('Compare changes');
+      // The label would be drawn once the history read has been answered: wait for it, then let the answer settle.
+      await waitFor(() => expect(versionReads).toBeGreaterThan(0));
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 30));
+      });
+      return within(compare.getByRole('radiogroup', { name: 'Title' }));
+    };
+
+    // A rejected read: the plain side name.
+    const refused = versionsAs(fakeWithBranch(), async () => new Response('nope', { status: 500 }));
+    await openEntry(refused, 'editlet/a');
+    edit(refused);
+    expect((await compareTitle()).getByRole('radio', { name: 'On GitHub: From GitHub' })).toBeDefined();
+    cleanup();
+
+    // The latest commit's file is another blob than the one the screen read (a newer commit since): the plain name too.
+    const other = versionsAs(fakeWithBranch(), async (real) => {
+      const json = (await real.json()) as {
+        data: { repository: { ref: { target: { history: { nodes: { file: { oid: string } }[] } } } } };
+      };
+      for (const node of json.data.repository.ref.target.history.nodes) node.file.oid = 'f'.repeat(40);
+      return new Response(JSON.stringify(json), { headers: { 'content-type': 'application/json' } });
+    });
+    await openEntry(other, 'editlet/a');
+    edit(other);
+    expect((await compareTitle()).getByRole('radio', { name: 'On GitHub: From GitHub' })).toBeDefined();
   });
 
   it('picking the GitHub version everywhere leaves the entry clean on the newer file', async () => {
@@ -294,7 +350,7 @@ describe('saving on a cms branch', () => {
     await saveReview();
     fireEvent.click(await findCta('Compare changes'));
     const compare = await sheet('Compare changes');
-    fireEvent.click(compare.getByRole('radio', { name: 'On GitHub: From GitHub' }));
+    fireEvent.click(compare.getByRole('radio', { name: /^On GitHub · jane, .+: From GitHub$/ }));
     fireEvent.click(compare.getByRole('button', { name: 'Apply 1 choice' }));
     await titleShows('From GitHub');
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull());

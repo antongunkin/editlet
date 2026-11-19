@@ -109,8 +109,20 @@
     @slot;
   }
 }
+/* The focus ring is the keyboard's: `window/modality.ts` sets `data-editlet-modality='pointer'` on `<html>` after a tap or a
+   click, and the ring then stays off (a text field is always `:focus-visible`, a tap on it shows the caret only). The guard
+   is `:where()`, so it adds no specificity. `has-focused:` is the same for a wrapper whose control inside has the focus
+   (the input group, a swatch, the rich-text box). */
 @custom-variant focused {
-  &:focus-visible {
+  &:focus-visible:not(:where([data-editlet-modality='pointer'] *)) {
+    @slot;
+  }
+  &[data-state='focus'] {
+    @slot;
+  }
+}
+@custom-variant has-focused {
+  &:has(:focus-visible):not(:where([data-editlet-modality='pointer'] *)) {
     @slot;
   }
   &[data-state='focus'] {
@@ -148,7 +160,7 @@
   }
 }
 @custom-variant group-focused {
-  &:is(:where(.group):focus-visible *) {
+  &:is(:where(.group):focus-visible:not(:where([data-editlet-modality='pointer'] *)) *) {
     @slot;
   }
   &:is(:where(.group)[data-state='focus'] *) {
@@ -290,7 +302,8 @@
   }
 }
 
-/* The window's resize zones (WindowFrame's `ResizeEdge`): invisible, only the cursor shows them. The edges are 4 px
+/* The window's resize zones (WindowFrame's `ResizeEdge`, in the `window-edges` layer over the window and the sheets'
+   scrim, which has the window's size and place): invisible, only the cursor shows them. The edges are 4 px
    strips along the window's sides; the corners are 20 px squares (the window's radius) that pull two edges at once,
    each clipped to the 4 px band along the rounded corner, so a button in the corner never loses a click to them. The
    path draws the bottom-right corner; `scale` mirrors it into the others. Hovering any zone (or pulling one) draws a
@@ -367,7 +380,7 @@
     }
   }
 
-  [data-editlet='window']:has(> [data-editlet='window-edge']:is(:hover, :active)) > [data-editlet='window-edge'] {
+  [data-editlet='window-edges']:has(> [data-editlet='window-edge']:is(:hover, :active)) > [data-editlet='window-edge'] {
     &[data-edge='n'] {
       box-shadow: inset 0 2px var(--ring);
     }

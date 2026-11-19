@@ -43,15 +43,16 @@ It has two modes with the same screens:
 | `?editlet` routes, navigation, protocol bridge, unsaved-changes guard | [docs/admin/routing-and-bridge.md](../../../docs/admin/routing-and-bridge.md) |
 | Accessibility checks at every screen key: axe, 44 px targets, focus ring, 320 px reflow; the exceptions list; the VoiceOver smoke tests (`npm run e2e:voiceover`, a Mac) | [docs/admin/accessibility.md](../../../docs/admin/accessibility.md) |
 | Home (your changes, All content, the account button), the All content list, the collapsed pill | [docs/admin/home.md](../../../docs/admin/home.md) |
-| Search (⌘K) over the entries' titles and addresses, from Home's header or the keyboard | [docs/admin/search.md](../../../docs/admin/search.md) |
+| Search (⌘K) over the entries' titles and addresses, with how many entries use each one, and actions (*New post*, *Duplicate this entry*, Go to, *Switch branch…*, Appearance), from Home's header or the keyboard | [docs/admin/search.md](../../../docs/admin/search.md) |
 | The account sheet: who, role, Appearance (System, Light, Dark), Reviewers, Sign out | [docs/admin/account.md](../../../docs/admin/account.md) |
-| Collection list: filter chips, entries as rows (title, status, when it changed), New post | [docs/admin/collection.md](../../../docs/admin/collection.md) |
+| Collection list: the plural heading (`pluralLabel`), filter chips (Drafts, Changed, In review), entries as rows (title, file status, when it changed), New post | [docs/admin/collection.md](../../../docs/admin/collection.md) |
 | Entry form: values, validation, new entry, Duplicate, Set as draft, delete, conflicts | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md) |
+| Page addresses from the collection's `url`: New entry's address, Details' *Page*, ⋯ → **Open on the page** | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#open-on-the-page) |
 | Field groups as tabs (`groups` in the schema), a dot on a changed or invalid tab | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#field-groups) |
 | References: search and pick in a modal, Open link, broken references, **Used by**, Rename, delete with the references removed | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#used-by) |
 | `object` and `blocks`: fields as rows one level down, drag or arrow keys to move, Add block, remove, nested errors and images | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#widgets) |
 | Image fields: upload staging, naming, limits, choose existing (`MediaPicker`) | [docs/admin/images.md](../../../docs/admin/images.md) |
-| Media at `?editlet=media`: usage index, upload, replace, alt text across uses, delete unused, SVG cleaning, large uploads | [docs/admin/media.md](../../../docs/admin/media.md) |
+| Media at `?editlet=media`: usage index, upload, replace, alt text across uses and the missing alt queue, delete unused, SVG cleaning, large uploads | [docs/admin/media.md](../../../docs/admin/media.md) |
 | Markdown body: Rich (Milkdown, block splice, raw blocks, toolbar, links, images) and Source | [docs/admin/rich-text.md](../../../docs/admin/rich-text.md) |
 | Select to edit: open the entry and select the words from the page (matching, Source and Rich) | [docs/admin/select.md](../../../docs/admin/select.md) |
 | History: the entry's versions from git, a version's diff, Restore as an unsaved edit | [docs/admin/history.md](../../../docs/admin/history.md) |

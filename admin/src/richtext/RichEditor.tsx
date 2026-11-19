@@ -306,7 +306,7 @@ export default function RichEditor({
     ) : null;
   return (
     <div
-      className="rounded-2xl bg-card shadow-raised focus-within:inset-ring-2 focus-within:inset-ring-ring"
+      className="rounded-2xl bg-card shadow-raised has-focused:inset-ring-2 has-focused:inset-ring-ring"
       data-focus-ring=""
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onBlur?.();

@@ -65,16 +65,16 @@ describe('preview snapshot storage', () => {
     const idb = new IDBFactory();
     await new Promise<void>((resolve, reject) => {
       const open = idb.open(PREVIEW_DB, 1);
-      open.onupgradeneeded = () => open.result.createObjectStore(PREVIEW_STORE);
-      open.onsuccess = () => {
+      open.addEventListener('upgradeneeded', () => open.result.createObjectStore(PREVIEW_STORE));
+      open.addEventListener('success', () => {
         const tx = open.result.transaction(PREVIEW_STORE, 'readwrite');
         tx.objectStore(PREVIEW_STORE).put({ v: 9 }, PREVIEW_KEY);
-        tx.oncomplete = () => {
+        tx.addEventListener('complete', () => {
           open.result.close();
           resolve();
-        };
-        tx.onerror = () => reject(tx.error);
-      };
+        });
+        tx.addEventListener('error', () => reject(tx.error));
+      });
     });
     expect(await readSnapshot(idb)).toBeNull();
   });

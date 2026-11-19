@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { DoctorContext, Finding } from './doctorTypes';
 
 import { EditletError } from '../../../core/issues';
+import type { Schema } from '../../../core/schema';
+import { DEFAULT_SCHEMA_PATH, loadProjectSchema } from '../../../node/fs';
 import { validateProject } from '../../../node/project';
 
 const read = (path: string): string | null => (existsSync(path) ? readFileSync(path, 'utf8') : null);
@@ -116,6 +118,71 @@ async function checkContent(root: string): Promise<Finding> {
   if (issues.length === 0) return { status: 'ok', id: 'content.valid', message: 'schema and entries valid' };
   const shown = issues.slice(0, 5).map((i) => `${i.file ?? 'schema'}: ${i.path} — ${i.message}`);
   return { status: 'fail', id: 'content.valid', message: `${issues.length} issue(s): ${shown.join('; ')}` };
+}
+
+/** Folders a dynamic route file lives in, and the file it must be: Next `[slug]/page.*`, Astro `[slug].astro`. */
+const DYNAMIC_ROUTES: { base: string; file: RegExp }[] = [
+  { base: 'app', file: /(^|\/)\[slug\]\/page\.(tsx|ts|jsx|js|mdx)$/ },
+  { base: 'src/app', file: /(^|\/)\[slug\]\/page\.(tsx|ts|jsx|js|mdx)$/ },
+  { base: 'src/pages', file: /(^|\/)\[slug\]\.astro$/ },
+];
+
+/** The first dynamic route file of the site (`src/app/blog/[slug]/page.tsx`), or `null`. */
+export function dynamicRoute(root: string): string | null {
+  for (const { base, file } of DYNAMIC_ROUTES) {
+    if (!existsSync(join(root, base))) continue;
+    let files: string[];
+    try {
+      files = readdirSync(join(root, base), { recursive: true, encoding: 'utf8' });
+    } catch {
+      continue;
+    }
+    const hit = files
+      .map((rel) => rel.split('\\').join('/'))
+      .toSorted()
+      .find((rel) => file.test(rel));
+    if (hit) return `${base}/${hit}`;
+  }
+  return null;
+}
+
+/**
+ * Which collections have a page address (`url`). `warn` only when none has one and the site has a dynamic route:
+ * a missing `url` only hides Open on the page and the page address in the editor. Skipped when the schema does not
+ * load (`content.valid` reports it).
+ */
+async function checkUrls(root: string): Promise<Finding[]> {
+  let schema: Schema;
+  try {
+    schema = await loadProjectSchema(root, DEFAULT_SCHEMA_PATH);
+  } catch {
+    return [];
+  }
+  const all = Object.entries(schema.collections);
+  const withUrl = all.filter(([, c]) => c.url !== undefined);
+  const without = all.filter(([, c]) => c.url === undefined).map(([key]) => key);
+  if (withUrl.length === 0) {
+    const route = dynamicRoute(root);
+    if (route) {
+      return [
+        {
+          status: 'warn',
+          id: 'content.urls',
+          message: `no collection has a page address, but ${route} is a dynamic route: add "url" to the collection it shows`,
+        },
+      ];
+    }
+  }
+  const verb = withUrl.length === 1 ? 'has' : 'have';
+  const list = withUrl.map(([key, c]) => `${key} ${c.url}`).join(', ');
+  const rest = without.length === 0 ? '' : `; ${without.join(', ')} ${without.length === 1 ? 'has' : 'have'} none`;
+  return [
+    {
+      status: 'ok',
+      id: 'content.urls',
+      message: `${withUrl.length} of ${all.length} collections ${verb} a page address${list ? ` (${list})` : ''}${rest}`,
+    },
+  ];
 }
 
 function routeFile(root: string, segments: string, needle: string, exts = ['ts', 'js', 'tsx', 'jsx']): string | null {
@@ -298,6 +365,7 @@ function checkEnv(ctx: DoctorContext, facts: ProjectFacts): Finding[] {
 export async function localChecks(ctx: DoctorContext, facts: ProjectFacts): Promise<Finding[]> {
   const out = checkProject(ctx, facts);
   out.push(await checkContent(ctx.root));
+  out.push(...(await checkUrls(ctx.root)));
   if (facts.framework === 'next') out.push(...checkNext(ctx.root, facts));
   if (facts.framework === 'astro') out.push(...checkAstro(ctx.root, facts));
   out.push(...checkEnv(ctx, facts));

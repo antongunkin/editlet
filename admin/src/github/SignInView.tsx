@@ -121,7 +121,7 @@ function TokenFields({
       <p id={hintId} className="m-0 text-sm text-tray-muted-foreground">
         Needs Contents and Pull requests (read and write), Deployments (read). Fine-grained, for {repo}.{' '}
         <a
-          className="rounded-md text-foreground underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="rounded-md text-foreground underline focused:outline-2 focused:outline-offset-2 focused:outline-ring"
           href={NEW_TOKEN_URL}
           target="_blank"
           rel="noreferrer"

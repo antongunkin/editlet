@@ -8,7 +8,8 @@ export const DEV_API_BASE = '/__editlet';
 // PUT    /__editlet/file?path=<repo path> → 204 | 412 | 422 { issues: Issue[] }   body = raw bytes
 // DELETE /__editlet/file?path=<repo path> → 204 | 404 | 412 | 422 { issues: Issue[] }
 // POST   /__editlet/commit                → 204 | 400 | 409 | 422 { issues: Issue[] }   body = DevCommitRequest (JSON)
-// GET    /__editlet/git                   → 200 DevGitResponse   (read-only: the checkout's branch and uncommitted content files)
+// GET    /__editlet/git                   → 200 DevGitResponse   (read-only: the checkout's branch, its uncommitted content
+//                                            files (count and list) and the project id; no paths outside contentDir)
 // GET    /__editlet/history?path=<path>   → 200 FileHistory      (read-only: `git log` of one file; empty without git)
 // GET    /__editlet/versions?path=<path>[&limit=<n>] → 200 DevVersionsResponse (read-only: `git log` of one file,
 //                                            newest first, with the file's blob sha per commit; [] without git)
@@ -38,11 +39,27 @@ export interface DevFilesResponse {
   files: FileRef[];
 }
 
+export interface DevGitFile {
+  /** Repo path as the listing has it (relative to the project root). A rename: the new path `added`, the old `removed`. */
+  path: string;
+  status: 'added' | 'modified' | 'removed';
+}
+
 export interface DevGitResponse {
   /** The checked-out branch; `null` when `root` is not a git checkout, git is missing, or HEAD is detached. */
   branch: string | null;
-  /** Files under `contentDir` with uncommitted changes (modified, added, deleted or untracked). */
+  /** Files under `contentDir` with uncommitted changes (modified, added, deleted or untracked); a rename counts once. */
   changes: number;
+  /**
+   * The uncommitted files under `contentDir`, one by one; `[]` when git is not usable. Also on a detached HEAD.
+   * An older dev server leaves it out, so clients read a missing one as `[]`.
+   */
+  files: DevGitFile[];
+  /**
+   * A stable id of this project (a hex SHA-256 of its resolved root), for client-side storage keys; never the path.
+   * Clients read a missing one (an older dev server) as `'default'`.
+   */
+  project: string;
 }
 
 export interface DevVersionsResponse {

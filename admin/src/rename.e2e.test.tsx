@@ -101,7 +101,7 @@ describe('rename and delete with references, end to end', () => {
     await setField('Prompt', 'Changed');
     const item = (await moreActions()).getByRole('button', { name: /^Rename…/ }) as HTMLButtonElement;
     expect(item.disabled).toBe(true);
-    expect(item.textContent).toContain('Save first');
+    expect(item.textContent).toContain('Save or discard your changes first');
   });
 
   it('has no Rename for a singleton', async () => {

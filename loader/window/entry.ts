@@ -21,7 +21,7 @@ import {
   type Gesture,
   type Rect,
 } from './geometry';
-import { EDGE_ATTR, edgeName, sheetHandle, type Pull } from './handle';
+import { EDGE_ATTR, edgeName, sheetHandle, THEME_ATTR, type Pull } from './handle';
 import { startSelect } from './select';
 import { startViewport } from './viewport';
 
@@ -156,6 +156,7 @@ function start(): void {
     const m = e.data as unknown;
     if (!isAdminToWindowMessage(m)) return;
     if (m.type === 'hello') return viewport(true);
+    if (m.type === 'theme') return dialog()?.setAttribute(THEME_ATTR, m.theme);
     if (m.type === 'collapse' || m.type === 'expand') {
       pill = m.type === 'collapse' ? { w: m.w, h: m.h, shadow: m.shadow } : null;
       apply(true);

@@ -13,3 +13,4 @@ export * from './gitStyle';
 export * from './references';
 export * from './walk';
 export * from './rename';
+export * from './urls';

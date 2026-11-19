@@ -44,6 +44,13 @@ async function surveySite(edit?: (root: string) => Promise<void>) {
 }
 
 const main = () => screen.getByRole('main');
+
+/** From a reference's open modal: *Edit <title>* (or the chosen title in a list) opens the entry on top; *Go to* leaves. */
+async function goOnTop(opener: ReturnType<typeof within>, trigger: { role: 'button'; name: string }, title: string) {
+  fireEvent.click(await opener.findByRole(trigger.role, { name: trigger.name }));
+  const top = await sheet(title);
+  fireEvent.click(top.getByRole('link', { name: new RegExp(`^Go to ${title}`) }));
+}
 const route = () => new URLSearchParams(window.location.search).get('editlet');
 
 /** A reference to many (`label`): opens its modal, then *Add*, searches `query`, ticks `option`, adds it, Done. */
@@ -87,12 +94,12 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
     await screen.findByRole('button', { name: /^Sections/ });
     const sections = await openField('Sections');
     const chips = sections.getByRole('list', { name: 'Sections selected' });
-    await within(chips).findByRole('link', { name: 'Feedback' });
+    await within(chips).findByRole('button', { name: 'Feedback' });
     await doneField();
 
     // Add "About you" from a search for "about" and save: the file on disk gets the reference.
     const modal = await pickMany('Sections', 'about', 'About you');
-    await within(modal.getByRole('list', { name: 'Sections selected' })).findByRole('link', { name: 'About you' });
+    await within(modal.getByRole('list', { name: 'Sections selected' })).findByRole('button', { name: 'About you' });
     await doneField();
     await save();
     const pulse = join(root, 'cms/content/survey/pulse.md');
@@ -107,9 +114,11 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
         fireEvent.click(fieldRow('Sections'));
         throw new Error('Opening Sections');
       }
-      fireEvent.click(within(open).getByRole('link', { name: 'About you' }));
-      expect(route()).toBe('section/about-you');
+      fireEvent.click(within(open).getByRole('button', { name: 'About you' }));
     });
+    // The chosen title opens the entry on top of the list; *Go to* then navigates.
+    fireEvent.click((await sheet('About you')).getByRole('link', { name: /^Go to About you/ }));
+    await waitFor(() => expect(route()).toBe('section/about-you'));
     await waitFor(() => expect(rowText('Title')).toContain('About you'));
 
     // Its "Used by" lists both surveys now, each a link back.
@@ -135,7 +144,7 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
     });
     await waitFor(() => expect(rowText('Sections')).toContain('About you and your team'));
     const again = await openField('Sections');
-    await within(again.getByRole('list', { name: 'Sections selected' })).findByRole('link', {
+    await within(again.getByRole('list', { name: 'Sections selected' })).findByRole('button', {
       name: 'About you and your team',
     });
   });
@@ -145,16 +154,21 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
     renderApp({ source, route: 'question/role' });
     await screen.findByRole('button', { name: /^Next question/ });
     const next = await openField('Next question');
-    fireEvent.click(await next.findByRole('link', { name: 'Open How likely are you to recommend us?' }));
+    await goOnTop(
+      next,
+      { role: 'button', name: 'Edit How likely are you to recommend us?' },
+      'How likely are you to recommend us?',
+    );
     await waitFor(() => expect(route()).toBe('question/rating'));
     await screen.findByRole('button', { name: /^Options/ });
     const options = within((await openField('Options')).getByRole('list', { name: 'Options selected' }));
-    expect(await options.findByRole('link', { name: 'Very likely' })).toBeDefined();
-    fireEvent.click(options.getByRole('link', { name: 'Very likely' }));
+    expect(await options.findByRole('button', { name: 'Very likely' })).toBeDefined();
+    fireEvent.click(options.getByRole('button', { name: 'Very likely' }));
+    fireEvent.click((await sheet('Very likely')).getByRole('link', { name: /^Go to Very likely/ }));
     await waitFor(() => expect(route()).toBe('option/rating-high'));
     // The cycle back up the tree is just another link.
     await screen.findByRole('button', { name: /^Follow-up question/ });
-    await (await openField('Follow-up question')).findByRole('link', { name: 'Open What is your role?' });
+    await (await openField('Follow-up question')).findByRole('button', { name: 'Edit What is your role?' });
   });
 
   it('marks a broken reference in the field before Save', async () => {
@@ -235,7 +249,7 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
     await screen.findByRole('button', { name: /^Options/ });
     const chips = within((await openField('Options')).getByRole('list', { name: 'Options selected' }));
     // A draft target is a normal choice in the admin.
-    await chips.findByRole('link', { name: 'Prefer not to say' });
+    await chips.findByRole('button', { name: 'Prefer not to say' });
     fireEvent.click(chips.getByRole('button', { name: 'Remove Prefer not to say' }));
     await doneField();
     await save();
@@ -270,7 +284,7 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
     const { source } = await surveySite();
     renderApp({ source, route: 'survey/onboarding' });
     await screen.findByRole('button', { name: /^Brand/ });
-    fireEvent.click(await (await openField('Brand')).findByRole('link', { name: 'Open Acme Research' }));
+    await goOnTop(await openField('Brand'), { role: 'button', name: 'Edit Acme Research' }, 'Acme Research');
     await waitFor(() => expect(route()).toBe('brand/index'));
     const usedBy = await within(main()).findByRole('region', { name: 'Used by 1 entry' });
     expect(within(usedBy).getByText('survey/onboarding · via Brand')).toBeDefined();
@@ -284,8 +298,10 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
     fireEvent.click(within(usedBy).getByRole('link', { name: /^18 or older / }));
     await waitFor(() => expect(route()).toBe('option/age-adult'));
     await screen.findByRole('button', { name: /^Follow-up question/ });
-    fireEvent.click(
-      await (await openField('Follow-up question')).findByRole('link', { name: 'Open How old are you?' }),
+    await goOnTop(
+      await openField('Follow-up question'),
+      { role: 'button', name: 'Edit How old are you?' },
+      'How old are you?',
     );
     await waitFor(() => expect(route()).toBe('question/age'));
   });

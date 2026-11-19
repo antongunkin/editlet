@@ -26,6 +26,7 @@ function ResizeEdge({ edge }: { edge: Edge }) {
       data-editlet="window-edge"
       data-edge={edge}
       aria-hidden="true"
+      className="pointer-events-auto"
       {...resize}
       {...hover}
     />
@@ -52,7 +53,7 @@ function useEscapeToCollapse(collapse: () => void, collapsed: boolean) {
 
 /**
  * The floating window's frame, inside the loader's iframe: the screen (which draws its own header and bottom bar, with
- * the window's Move and Minimize from `useScreenChrome`), the resize zones, the pill and the sheets. window.js (in the
+ * the window's Move and Minimize from `useScreenChrome`), the resize zones (over the sheets), the pill and the sheets. window.js (in the
  * site page) owns the geometry and obeys the gestures sent from here.
  */
 export function WindowFrame({
@@ -112,11 +113,19 @@ export function WindowFrame({
                   >
                     {children}
                   </div>
-                  {/* Pull any edge or corner to resize. A bottom sheet has none: window.js's handle on its top edge resizes
-                    it, outside this iframe. Alt+arrows on the move button resize too. */}
-                  {sheet ? null : EDGES.map((edge) => <ResizeEdge key={edge} edge={edge} />)}
                 </div>
               </SheetScreen>
+              {/* Pull any edge or corner to resize. The layer is not in the screen a sheet pushes back, and is over
+                the sheets' scrim (z-60 over their z-50), so the window resizes under an open modal. A bottom sheet has
+                none: window.js's handle on its top edge resizes it, outside this iframe. Collapsed, the window is
+                the pill and there is nothing to resize. Alt+arrows on the move button resize too. */}
+              {sheet || collapsed ? null : (
+                <div data-editlet="window-edges" aria-hidden="true" className="pointer-events-none fixed inset-0 z-60">
+                  {EDGES.map((edge) => (
+                    <ResizeEdge key={edge} edge={edge} />
+                  ))}
+                </div>
+              )}
             </ChromeProvider>
             <Pill collapsed={collapsed} onExpand={() => setCollapsed(false)} />
           </EntryStatusProvider>

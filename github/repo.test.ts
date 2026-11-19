@@ -200,6 +200,67 @@ describe('pull requests', () => {
   });
 });
 
+describe('compareFiles', () => {
+  it('lists every path another branch changes against the base, from one REST compare', async () => {
+    const { fake, make } = setup({ main: FILES, 'editlet/edit': FILES, 'editlet/other': FILES });
+    fake.commit('editlet/other', {
+      'cms/content/post/hello.md': '---\ntitle: Other\n---\n',
+      'cms/content/post/world.md': null,
+      'README.md': 'changed',
+    });
+    fake.commit('main', { 'other.txt': 'main moved' });
+    const source = make('main');
+    // Warm the snapshot: compareFiles itself reads no trees.
+    await source.listFiles();
+    const before = fake.calls.length;
+    expect(await source.compareFiles('editlet/other')).toEqual({
+      paths: ['README.md', 'cms/content/post/hello.md', 'cms/content/post/world.md'],
+      complete: true,
+    });
+    const calls = fake.calls.slice(before);
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0]!.url).pathname).toBe('/repos/o/r/compare/main...editlet/other');
+  });
+
+  it('a rename lists the new and the old path', async () => {
+    const { fake, source } = setup();
+    fake.restRoutes.unshift({
+      method: 'GET',
+      pattern: /^\/compare\/.+$/,
+      handle: () =>
+        json({
+          files: [
+            {
+              filename: 'cms/content/post/new-slug.md',
+              previous_filename: 'cms/content/post/hello.md',
+              status: 'renamed',
+            },
+            { filename: 'cms/content/post/world.md', status: 'modified' },
+          ],
+        }),
+    });
+    expect((await source.compareFiles('editlet/edit')).paths).toEqual([
+      'cms/content/post/hello.md',
+      'cms/content/post/new-slug.md',
+      'cms/content/post/world.md',
+    ]);
+  });
+
+  it('drops unchanged entries and flags a capped list', async () => {
+    const { fake, source } = setup();
+    const filler = Array.from({ length: 300 }, (_, i) => ({ filename: `pad/${i}.txt`, status: 'added' }));
+    fake.restRoutes.unshift({
+      method: 'GET',
+      pattern: /^\/compare\/.+$/,
+      handle: () => json({ files: [{ filename: 'a.md', status: 'unchanged' }, ...filler] }),
+    });
+    const result = await source.compareFiles('editlet/edit');
+    expect(result.complete).toBe(false);
+    expect(result.paths).toHaveLength(300);
+    expect(result.paths).not.toContain('a.md');
+  });
+});
+
 describe('compare', () => {
   it('lists added, modified and removed CMS files and ignores the rest', async () => {
     const { fake, source } = setup();

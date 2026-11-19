@@ -30,6 +30,9 @@ import {
 const ENTRY = 'cms/content/post/hello-world.md';
 
 const main = () => screen.getByRole('main');
+/** The big title's status badge. */
+const titleBadge = () =>
+  within(main()).getByRole('heading', { level: 1 }).parentElement!.querySelector('[data-slot="badge"]');
 const editletRoute = () => readEditletRoute(window.location.href);
 const setTitle = (value: string) => setField('Title', value);
 
@@ -120,6 +123,19 @@ describe('Entry', () => {
     expect(await screen.findByRole('dialog', { name: 'Your changes' })).toBeDefined();
   });
 
+  it('the title badge: the file status of a clean form (Changed), Unsaved while edited', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (!String(input).endsWith('/git')) return new Response('{}', { status: 404 });
+      const files = [{ path: ENTRY, status: 'modified' }];
+      return new Response(JSON.stringify({ branch: 'main', changes: 1, files, project: 'p' }));
+    });
+    await openEntry();
+    await waitFor(() => expect(titleBadge()?.textContent).toBe('Changed'));
+    await setTitle('Hello there');
+    await waitFor(() => expect(titleBadge()?.textContent).toBe('Unsaved'));
+    vi.restoreAllMocks();
+  });
+
   it('Discard restores the saved values after confirmation', async () => {
     await openEntry();
     expect(discard(await moreActions()).disabled).toBe(true);
@@ -206,7 +222,7 @@ describe('Entry', () => {
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
     expect(commit).toHaveBeenCalledWith([{ path: ENTRY, content: null, sha }], 'Delete post/hello-world');
     await waitFor(() => expect(editletRoute()).toBe('post'));
-    expect(await within(main()).findByRole('heading', { name: 'Post' })).toBeDefined();
+    expect(await within(main()).findByRole('heading', { name: /^Posts?$/ })).toBeDefined();
   });
 
   it('embedded, a delete moves the site to the collection before it asks for a refresh', async () => {

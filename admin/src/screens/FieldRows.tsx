@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 
+import { EntrySearch, matches } from './EntrySearch';
+
 import { BLOCK_KEY, type BlockDef, type Field } from '../../../core/schema';
 import { fieldSummary, itemTitle } from '../entry/summary';
 import { ITEM_KEY, newItem } from '../entry/values';
@@ -15,7 +17,6 @@ import { ActionRow, BlockList, BlockRow, FieldRow, Option, Row, SelectedRow } fr
 import { Sheet } from '../ui/parts/sheet';
 import { Button } from '../ui/primitives/button';
 import { Icon } from '../ui/primitives/icon';
-import { InputGroup, InputGroupInput } from '../ui/primitives/input';
 import { Switch } from '../ui/primitives/switch';
 
 // The entry's fields as rows, each opening its own modal (FigCraft *Entry*, *Edit · <field>*; spec decision 17): one
@@ -322,27 +323,6 @@ function SelectSheet({ item, sub, open, onOpenChange }: SheetProps) {
   );
 }
 
-/** The search field over a list of entries. */
-function Search({ label, value, onChange }: { label: string; value: string; onChange(v: string): void }) {
-  return (
-    <InputGroup lead={<Icon name="search" size={20} />}>
-      <InputGroupInput
-        type="search"
-        aria-label={label}
-        placeholder={label}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </InputGroup>
-  );
-}
-
-const matches = (query: string) => {
-  const q = query.trim().toLowerCase();
-  return (e: { ref: string; title: string }) =>
-    q === '' || e.title.toLowerCase().includes(q) || e.ref.toLowerCase().includes(q);
-};
-
 const entryLabel = (field: Field) => (field.type === 'reference' ? field.label.toLowerCase() : 'entries');
 
 /**
@@ -352,6 +332,7 @@ const entryLabel = (field: Field) => (field.type === 'reference' ? field.label.t
 function ReferenceSheet({ item, ctx, sub, open, onOpenChange }: SheetProps) {
   const { field } = item;
   const [query, setQuery] = useState('');
+  const [onTop, setOnTop] = useState(false);
   if (field.type !== 'reference') return null;
   const value = asString(item.value);
   const entries = ctx.entries(field.collections);
@@ -362,11 +343,11 @@ function ReferenceSheet({ item, ctx, sub, open, onOpenChange }: SheetProps) {
     item.onChange(next);
     onOpenChange(false);
   };
-  const { EntryLink } = ctx;
+  const { EntryLink, EntrySheet } = ctx;
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title={field.label} sub={sub}>
       <div className="flex flex-col gap-3 px-4 pt-1 pb-8">
-        <Search label={`Search ${entryLabel(field)}`} value={query} onChange={setQuery} />
+        <EntrySearch label={`Search ${entryLabel(field)}`} value={query} onChange={setQuery} />
         {missing ? (
           <Card>
             {/* No second line: muted text is under 4.5 : 1 on the danger tint, and the title says it all. */}
@@ -390,7 +371,13 @@ function ReferenceSheet({ item, ctx, sub, open, onOpenChange }: SheetProps) {
           ))}
           {shown.length === 0 ? <p className="m-0 p-4 text-base text-muted-foreground">No entries match</p> : null}
         </Card>
-        {chosen && EntryLink ? (
+        {chosen && EntrySheet && ctx.selfRef !== chosen.ref ? (
+          // The chosen entry edited on top of this picker (one entry on top; the entry's own fields only).
+          <Button variant="secondary" full aria-haspopup="dialog" onClick={() => setOnTop(true)}>
+            <Icon name="pencil" size={20} />
+            Edit {chosen.title}
+          </Button>
+        ) : chosen && EntryLink ? (
           <EntryLink
             to={chosen.ref}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-full text-base font-medium text-foreground underline-offset-2 hovered:underline"
@@ -405,6 +392,7 @@ function ReferenceSheet({ item, ctx, sub, open, onOpenChange }: SheetProps) {
           </Button>
         ) : null}
         <Problems name={item.name} error={item.error} />
+        {EntrySheet && chosen ? <EntrySheet entryRef={chosen.ref} open={onTop} onOpenChange={setOnTop} /> : null}
       </div>
     </Sheet>
   );
@@ -419,6 +407,8 @@ function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
+  // The chosen entry edited on top of this list (a chosen title is a button, not a link).
+  const [onTop, setOnTop] = useState<string | null>(null);
   useLater(
     nested?.[0] === 'add'
       ? () => {
@@ -433,7 +423,7 @@ function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
   const titles = new Map(entries.map((e) => [e.ref, e.title]));
   const full = field.max !== undefined && value.length >= field.max;
   const available = entries.filter((e) => !value.includes(e.ref)).filter(matches(query));
-  const { EntryLink } = ctx;
+  const { EntryLink, EntrySheet } = ctx;
   const add = () => {
     item.onChange([...value, ...picked]);
     setPicked([]);
@@ -459,7 +449,16 @@ function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
               <li key={i}>
                 <SelectedRow
                   title={
-                    name !== undefined && EntryLink ? (
+                    name !== undefined && EntrySheet && ctx.selfRef !== ref ? (
+                      <button
+                        type="button"
+                        aria-haspopup="dialog"
+                        className="cursor-pointer border-0 bg-transparent p-0 text-left font-sans text-base text-foreground hovered:underline"
+                        onClick={() => setOnTop(ref)}
+                      >
+                        {name}
+                      </button>
+                    ) : name !== undefined && EntryLink ? (
                       <EntryLink to={ref} className="text-foreground no-underline hovered:underline">
                         {name}
                       </EntryLink>
@@ -488,6 +487,9 @@ function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
           </li>
         </Card>
         <Problems name={item.name} error={item.error} />
+        {EntrySheet && onTop !== null ? (
+          <EntrySheet entryRef={onTop} open onOpenChange={(next) => (next ? undefined : setOnTop(null))} />
+        ) : null}
       </div>
       <Sheet
         open={adding}
@@ -505,7 +507,7 @@ function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
         }
       >
         <div className="flex flex-col gap-3 px-4 pt-1 pb-8">
-          <Search label={`Search ${noun}`} value={query} onChange={setQuery} />
+          <EntrySearch label={`Search ${noun}`} value={query} onChange={setQuery} />
           <Card as="fieldset" aria-label={`${field.label} to add`}>
             {available.map((e) => (
               <Option
@@ -646,7 +648,7 @@ function nestedItems(
 }
 
 /** Nested widgets get no select-to-edit target: only the body takes part in it. */
-const nestedCtx = (ctx: FieldContext): FieldContext => ({ ...ctx, selectTarget: undefined });
+const nestedCtx = (ctx: FieldContext): FieldContext => ({ ...ctx, selectTarget: undefined, EntrySheet: undefined });
 
 /** An object (FigCraft *Edit · Scale*): its fields as rows; each opens one level down (*Edit · Labels*). */
 function ObjectSheet({ item, ctx, sub, title, open, nested, onOpenChange }: SheetProps) {

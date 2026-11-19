@@ -1,6 +1,9 @@
 import type { ProjectFacts } from './doctorLocal';
 import type { DoctorContext, Finding } from './doctorTypes';
 
+import type { Schema } from '../../../core/schema';
+import { entryUrl } from '../../../core/urls';
+import type { Entry } from '../../../core/validate';
 import { CODEOWNERS_PATHS, ownersOf, parseCodeowners } from '../../../github/codeowners';
 
 /** What the GitHub checks need from the local schema. */
@@ -91,6 +94,64 @@ export async function siteChecks(ctx: DoctorContext): Promise<{ findings: Findin
     });
   }
   return { findings: out, config };
+}
+
+/** A path without its trailing `/` (the root stays `/`). */
+const bare = (p: string) => (p.length > 1 ? p.replace(/\/+$/, '') : p);
+
+/**
+ * One entry's page on the live site: the first collection in schema order whose `url` has `{slug}`, its first entry
+ * by file name that is not a draft. A 2xx is `ok`; anything else is `warn` (the pattern may not match the routes).
+ * No such collection: no check.
+ */
+export async function entryUrlCheck(
+  ctx: DoctorContext,
+  project: { schema: Schema; entries: Entry[] },
+): Promise<Finding[]> {
+  const { schema, entries } = project;
+  const key = Object.keys(schema.collections).find((k) => schema.collections[k]?.url?.includes('{slug}'));
+  if (!key) return [];
+  // An invalid file name (`Hello_World.md`) has no page: `entryUrl` gives `null` for it.
+  const entry = entries
+    .filter((e) => e.collection === key && e.data.draft !== true && entryUrl(schema, key, e.slug) !== null)
+    .toSorted((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))[0];
+  if (!entry) {
+    return [
+      {
+        status: 'manual',
+        id: 'site.entry-url',
+        message: `${key} has no published entry: open one of its pages by hand`,
+      },
+    ];
+  }
+  const path = entryUrl(schema, key, entry.slug) ?? '/';
+  const url = new URL(path, ctx.url).href;
+  const res = await get(ctx, url);
+  if (res && res.status >= 200 && res.status < 300) {
+    return [{ status: 'ok', id: 'site.entry-url', message: `${url} answers ${res.status}` }];
+  }
+  const where = res?.headers.get('location');
+  // A redirect that only adds or drops the trailing `/`: the browser follows it, and the editor ignores the slash.
+  const target = where && URL.canParse(where, url) ? new URL(where, url) : null;
+  if (res && res.status >= 300 && res.status < 400 && target?.origin === new URL(url).origin) {
+    if (bare(target.pathname) === bare(new URL(url).pathname)) {
+      return [
+        {
+          status: 'ok',
+          id: 'site.entry-url',
+          message: `${url} redirects to ${target.pathname} (only the trailing / differs: match the site's slash in url)`,
+        },
+      ];
+    }
+  }
+  const answer = !res ? 'no answer' : where ? `${res.status} to ${where}` : String(res.status);
+  return [
+    {
+      status: 'warn',
+      id: 'site.entry-url',
+      message: `${url}: ${answer} (expected 2xx): the url of ${key} (${schema.collections[key]!.url}) may not match the site's routes`,
+    },
+  ];
 }
 
 async function authChecks(ctx: DoctorContext, site: URL, authUrl: string | undefined): Promise<Finding[]> {

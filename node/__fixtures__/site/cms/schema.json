@@ -4,6 +4,8 @@
   "collections": {
     "post": {
       "label": "Post",
+      "pluralLabel": "Posts",
+      "url": "/posts/{slug}",
       "fields": {
         "title": { "type": "string", "label": "Title", "required": true },
         "body": { "type": "markdown", "label": "Body" },
@@ -13,6 +15,7 @@
     },
     "author": {
       "label": "Author",
+      "pluralLabel": "Authors",
       "fields": {
         "name": { "type": "string", "label": "Name", "required": true }
       }

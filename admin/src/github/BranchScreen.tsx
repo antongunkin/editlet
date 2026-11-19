@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { fileDiff, type FileDiff } from './branchDiff';
 import { branchFromRoute, routeFromBranch } from './branchName';
@@ -205,10 +205,28 @@ function BranchReview({ workspace, branch }: { workspace: Workspace; branch: str
       void queryClient.invalidateQueries({ queryKey: BRANCHES_KEY });
     });
 
+  // *Edit on this branch* makes this the active branch, and the screen loses its ⋯: the focus goes to the big title.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const focusTitle = useRef(false);
+  const active = workspace.active === branch;
+  useEffect(() => {
+    if (active && focusTitle.current) {
+      focusTitle.current = false;
+      titleRef.current?.focus();
+    }
+  }, [active]);
   const editHere = () => {
     setSheet(null);
     if (!canLeave()) return;
-    void run('edit', () => activateKeepingScreen(workspace, queryClient, branch));
+    focusTitle.current = true;
+    void run('edit', async () => {
+      try {
+        await activateKeepingScreen(workspace, queryClient, branch);
+      } catch (error) {
+        focusTitle.current = false;
+        throw error;
+      }
+    });
   };
 
   const data = loaded.data;
@@ -332,6 +350,7 @@ function BranchReview({ workspace, branch }: { workspace: Workspace; branch: str
         </>
       }
       title={pr ? `Pull request #${pr.number}` : 'Review changes'}
+      titleProps={{ ref: titleRef, tabIndex: -1 }}
       meta={
         <>
           {pr?.isDraft ? <Badge tone="neutral">Draft</Badge> : null}

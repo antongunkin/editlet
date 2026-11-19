@@ -29,14 +29,15 @@ const issues = validateEntry(schema, { collection: 'post', slug: 'hello', data, 
 
 | Feature | Doc |
 |---|---|
-| Schema: field types, field groups (`fieldGroups`) and the rules `loadSchema` enforces | [docs/schema.md](../../../docs/core/schema.md) |
+| Schema: field types, field groups (`fieldGroups`), names (`pluralLabel`, `collectionNames`), page URLs (`url`) and the rules `loadSchema` enforces | [docs/schema.md](../../../docs/core/schema.md) |
 | Entry files: frontmatter, YAML rules, paths, slugs, references | [docs/entry-files.md](../../../docs/core/entry-files.md) |
 | Validation: `validateEntry`, `normalizeData`, `initialData`, the "absent" rule | [docs/validation.md](../../../docs/core/validation.md) |
 | JSON Schema and `.d.ts` generation | [docs/generation.md](../../../docs/core/generation.md) |
 | Write rules and batch integrity: `validateChanges`, `validateCommit` | [docs/writes.md](../../../docs/core/writes.md) |
-| `ContentSource`, the memory source, the error contract, `gitBlobSha`, file versions | [docs/content-source.md](../../../docs/core/content-source.md) |
+| `ContentSource`, batched reads (`readFiles?`), the memory source, the error contract, `gitBlobSha`, file versions | [docs/content-source.md](../../../docs/core/content-source.md) |
 | Image references in fields and body, in-place alt and `src` edits | [docs/assets.md](../../../docs/core/assets.md) |
 | References between entries: referrers, resolving several levels deep, the `Resolved` type | [docs/references.md](../../../docs/core/references.md) |
+| Page URLs: an entry's path from its collection's `url` and a path back to entries | [docs/urls.md](../../../docs/core/urls.md) |
 | Rename an entry's slug or delete it, with references and images rewritten in one change | [docs/rename.md](../../../docs/core/rename.md) |
 | Git style: branch prefix, commit messages and trailer, pull request title and body | [docs/git-style.md](../../../docs/core/git-style.md) |
 
@@ -50,19 +51,20 @@ throw for bad content.
 
 | File | Role |
 |---|---|
-| `schema.ts` | Types, `loadSchema` / `parseSchemaText`, `markdownFieldKey`, `fieldGroups` |
+| `schema.ts` | Types, `loadSchema` / `parseSchemaText`, `markdownFieldKey`, `fieldGroups`, `collectionNames` |
+| `urls.ts` | `URL_PLACEHOLDERS`, `urlPatternIssues`, `entryUrl`, `matchEntryUrls` |
 | `fields.ts` | Zod schema per field type, the "absent" rule |
 | `entryFile.ts` | Parse and write `.md` + frontmatter, `decodeUtf8` |
 | `paths.ts` | Entry paths, slugs, ref keys, asset resolution |
 | `assets.ts` | `findBodyImages`, `findImageRefs`, `editBodyImages` |
-| `references.ts` | `referenceFields`, `entryReferences`, `findReferrers`, `createResolver`, `Resolved` |
+| `references.ts` | `referenceFields`, `entryReferences`, `findReferrers`, `countReferrers`, `createResolver`, `Resolved` |
 | `rename.ts` | `planRename`, `planRemove`: the file changes of a slug rename and of a delete with references removed |
 | `walk.ts` | `visitFields`, `mapFields`, `blockFields`, `allFields`: data with its fields, into `object` and `blocks` |
 | `gitStyle.ts` | `resolveGitStyle`, `isEditletBranchName`, commit subjects and messages, pull request title and body |
 | `validate.ts` | `validateEntry`, `buildDataSchema`, `normalizeData`, `initialData` |
 | `generate.ts` | `toJsonSchema`, `generateTypes` |
 | `writes.ts` | `isWritablePath`, `validateChanges`, `validateCommit` |
-| `source.ts` | `ContentSource` (with the optional `listVersions` / `readVersion`), `FileVersion`, `versionLimit`, `createMemorySource` |
+| `source.ts` | `ContentSource` (with the optional `readFiles`, `listVersions` / `readVersion`), `FileVersion`, `versionLimit`, `createMemorySource` (`{ batch: true }` adds `readFiles`: `BatchingContentSource`) |
 | `sha.ts` | `gitBlobSha` |
 | `devApi.ts` | Types and constants of the dev file API ([node dev API](../../../docs/node/dev-api.md)) |
 | `issues.ts` | `Issue`, `EditletError` |

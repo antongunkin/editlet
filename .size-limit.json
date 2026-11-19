@@ -3,7 +3,7 @@
     "name": "editlet/loader",
     "path": "dist/loader/index.js",
     "import": "{ mountEditletLoader }",
-    "limit": "1770 B"
+    "limit": "1898 B"
   },
   {
     "name": "editlet window.js (select-to-edit, window geometry)",
@@ -15,7 +15,7 @@
     "name": "editlet admin entry JS (index-*.js)",
     "path": "dist/admin/dist/assets/index-*.js",
     "gzip": true,
-    "limit": "360334 B",
+    "limit": "383500 B",
     "rolldown": false
   },
   {

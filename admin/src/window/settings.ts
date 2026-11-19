@@ -1,4 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useSyncExternalStore } from 'react';
+
+import { postTheme } from './channel';
 
 /** What the editor chooses in Appearance (docs/admin/account.md): the operating system's setting, or one theme. */
 export const THEME_CHOICES = [
@@ -20,6 +22,14 @@ const LIGHT = '(prefers-color-scheme: light)';
 
 /** The choice made in this session; the source of truth when storage is blocked. */
 let remembered: ThemeChoice | null = null;
+
+/** Who draws the choice (Account's radios, Search's Appearance rows): told by `chooseTheme`. */
+const listeners = new Set<() => void>();
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 const systemMedia = (): MediaQueryList | null => (typeof matchMedia === 'function' ? matchMedia(LIGHT) : null);
 
@@ -47,6 +57,7 @@ export function resolveTheme(choice: ThemeChoice): ThemeId {
 
 export function applyTheme(theme: ThemeId): void {
   document.documentElement.dataset.editletTheme = theme;
+  postTheme(theme);
 }
 
 /** Saves a choice (*System* removes the key) and draws it. */
@@ -59,6 +70,7 @@ export function chooseTheme(choice: ThemeChoice): void {
     /* storage blocked: the choice lasts until reload */
   }
   applyTheme(resolveTheme(choice));
+  for (const listener of listeners) listener();
 }
 
 /** Call before the first render so the page never flashes the wrong theme; *System* then follows the system's changes. */
@@ -69,14 +81,13 @@ export function initTheme(): void {
   });
 }
 
-/** The editor's choice and the setter (Appearance). */
+/**
+ * The editor's choice and the setter (Appearance). One store: a choice made anywhere (Account, Search) redraws every
+ * reader.
+ */
 export function useThemeChoice(): [ThemeChoice, (choice: ThemeChoice) => void] {
-  const [choice, setChoice] = useState(readChoice);
-  const choose = useCallback((next: ThemeChoice) => {
-    setChoice(next);
-    chooseTheme(next);
-  }, []);
-  return [choice, choose];
+  const choice = useSyncExternalStore(subscribe, readChoice, readChoice);
+  return [choice, chooseTheme];
 }
 
 /** Forgets the session's choice (tests). */

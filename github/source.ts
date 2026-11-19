@@ -59,8 +59,10 @@ export interface GitHubSource extends ContentSource {
   readonly owner: string;
   readonly repo: string;
   readonly branch: string;
-  /** Unsaved edits for this repo + branch. */
+  /** Unsaved edits for this repo + branch (scope `owner/repo#branch` of `cache`). */
   readonly pending: PendingQueue;
+  /** The blob and pending cache, shared by every source of this client (other scopes, `persistent`). */
+  readonly cache: GitHubCache;
   /** Refreshes the snapshot (head oid + tree). Non-hidden `contentDir` files plus the schema file, sorted by path. */
   listFiles(): Promise<FileRef[]>;
   /** From the current snapshot (loaded if none). A missing path rejects with an `EditletError`. */
@@ -130,6 +132,12 @@ export interface GitHubSource extends ContentSource {
    */
   compare(): Promise<BranchDiff>;
   /**
+   * The paths `branch` changes against the base branch, from GitHub's three-dot compare alone (one REST call, no tree
+   * reads): every path, CMS or not, a rename by both its new and its old name. `complete: false` when GitHub's list was capped (300
+   * files). For the admin's *In review* of other branches' pull requests.
+   */
+  compareFiles(branch: string): Promise<{ paths: string[]; complete: boolean }>;
+  /**
    * Only from a prefixed branch (else `invalid_branch`). Opens (or finds) the pull request; when its head is not the
    * reviewed `headOid`, returns `stale` without touching it. Otherwise marks it ready and merges it into the base
    * branch, but only when GitHub reports `CLEAN`, `HAS_HOOKS` or `UNSTABLE` and the head is still `headOid`;
@@ -196,7 +204,8 @@ function blobsQuery(shas: string[]): string {
 
 /**
  * Reads blobs by sha: cache first, then batched GraphQL text (accepted only when its git sha matches), then raw REST
- * for binary, truncated or mismatching blobs. Every fetched blob is sha-verified and cached.
+ * for binary, truncated or mismatching blobs. Every fetched blob is sha-verified and cached (each GraphQL chunk as it
+ * lands).
  */
 export async function readBlobs(ctx: SourceContext, shas: string[]): Promise<Map<string, Uint8Array>> {
   const unique = [...new Set(shas)];
@@ -211,27 +220,32 @@ export async function readBlobs(ctx: SourceContext, shas: string[]): Promise<Map
   const raw: string[] = [];
   const chunks: string[][] = [];
   for (let i = 0; i < missing.length; i += BLOB_BATCH) chunks.push(missing.slice(i, i + BLOB_BATCH));
+  // Each chunk is cached as it lands: a chunk that fails does not lose the others (a retry reads only what is left).
   await Promise.all(
     chunks.map(async (chunk) => {
       const data = await ctx.client.graphql<{ repository: Record<string, BlobNode | null> | null }>(blobsQuery(chunk), {
         owner: ctx.owner,
         name: ctx.repo,
       });
+      const landed: { sha: string; bytes: Uint8Array }[] = [];
       await Promise.all(
         chunk.map(async (sha, i) => {
           const node = data.repository?.[`b${i}`];
           if (node && !node.isBinary && !node.isTruncated && typeof node.text === 'string') {
             const bytes = encoder.encode(node.text);
             if ((await gitBlobSha(bytes)) === sha) {
-              fetched.push({ sha, bytes });
+              landed.push({ sha, bytes });
               return;
             }
           }
           raw.push(sha);
         }),
       );
+      fetched.push(...landed);
+      await ctx.cache.putBlobs(landed);
     }),
   );
+  const rawFetched: { sha: string; bytes: Uint8Array }[] = [];
   await Promise.all(
     raw.map(async (sha) => {
       const body = await ctx.client.rest<Uint8Array>('GET', `/repos/${ctx.owner}/${ctx.repo}/git/blobs/${sha}`, {
@@ -240,11 +254,11 @@ export async function readBlobs(ctx: SourceContext, shas: string[]): Promise<Map
       });
       const bytes = new Uint8Array(body);
       if ((await gitBlobSha(bytes)) !== sha) throw new GitHubError('http_error', 'Blob sha mismatch');
-      fetched.push({ sha, bytes });
+      rawFetched.push({ sha, bytes });
     }),
   );
-  await ctx.cache.putBlobs(fetched);
-  for (const { sha, bytes } of fetched) out.set(sha, bytes);
+  await ctx.cache.putBlobs(rawFetched);
+  for (const { sha, bytes } of [...fetched, ...rawFetched]) out.set(sha, bytes);
   return out;
 }
 
@@ -397,7 +411,8 @@ export async function loadSnapshotAt(ctx: SourceContext, oid: string): Promise<S
 // ---------------------------------------------------------------------------------------------------------------
 // Commit
 
-const MAX_COMMIT_BYTES = 20 * 1024 * 1024;
+/** The largest commit the source sends (the sum of the changed files' bytes); over it a commit is refused. */
+export const MAX_COMMIT_BYTES = 20 * 1024 * 1024;
 const MAX_COMMIT_ATTEMPTS = 3;
 
 const HISTORY_QUERY = `query History($owner: String!, $name: String!, $ref: String!, $path: String!) {
@@ -697,6 +712,7 @@ function makeSource(ctx: SourceContext, branch: string): GitHubSource {
     repo: ctx.repo,
     branch,
     pending: ctx.cache.pending(`${ctx.owner}/${ctx.repo}#${branch}`),
+    cache: ctx.cache,
 
     async listFiles() {
       const snap = await reload();

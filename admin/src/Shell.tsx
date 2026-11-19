@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+import { ChangesProvider } from './changes/ChangesProvider';
 import { invalidateFiles, useFiles, useSchema, type SchemaData } from './data/queries';
 import { BranchScreen, BranchUnavailableScreen } from './github/BranchScreen';
 import { errorText } from './github/errors';
@@ -160,8 +161,10 @@ export function Shell({ overlay }: { overlay?: ReactNode } = {}) {
   return (
     <SelectProvider>
       <WindowFrame banners={banners}>
-        <main>{main}</main>
-        {overlay}
+        <ChangesProvider>
+          <main>{main}</main>
+          {overlay}
+        </ChangesProvider>
       </WindowFrame>
     </SelectProvider>
   );

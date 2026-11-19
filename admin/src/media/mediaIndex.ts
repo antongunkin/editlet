@@ -94,6 +94,9 @@ export function buildMediaIndex(
 
 export const isUsed = (image: MediaImage) => image.uses.length > 0;
 export const hasMissingAlt = (image: MediaImage) => image.uses.some((u) => u.alt.trim() === '');
+/** The uses of an image whose alt text is blank (the alt queue writes its one text into these only). */
+export const blankUses = (image: MediaImage | undefined): MediaUse[] =>
+  image?.uses.filter((u) => u.alt.trim() === '') ?? [];
 
 export function matchesFilter(image: MediaImage, filter: MediaFilter): boolean {
   switch (filter) {

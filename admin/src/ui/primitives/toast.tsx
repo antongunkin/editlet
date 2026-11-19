@@ -2,19 +2,38 @@ import { Toast as ToastPrimitive } from '@base-ui/react/toast';
 import type { ComponentProps, ReactNode } from 'react';
 
 import { Icon } from './icon';
+import type { IconName } from './icons';
 
 import { cn } from '../cn';
 
+export type ToastIcon = { name: IconName; tone: 'success' | 'foreground' | 'danger' };
+
+const TONE_CLASS: Record<ToastIcon['tone'], string> = {
+  success: 'text-chart-2',
+  foreground: 'text-foreground',
+  danger: 'text-destructive',
+};
+
+/** The icon for Base UI's `toast.type` (`toastManager.add({ type })`); no type is a plain confirmation. */
+export const TOAST_ICONS: Record<string, ToastIcon> = {
+  default: { name: 'check-circle', tone: 'success' },
+  copy: { name: 'copy', tone: 'foreground' },
+  error: { name: 'alert', tone: 'danger' },
+};
+
 /**
- * A short confirmation that goes away by itself (FigCraft `Toast`, proposal §14.9): a 343 × 48 pill on the toast
- * shadow with a check, 16 px medium text and an optional action (`View`, `Undo`). It is not for errors: those are banners.
+ * A short line that goes away by itself (FigCraft `Toast`, proposal §14.9): a 343 × 48 pill on the toast shadow with an
+ * icon, 16 px medium text and an optional action (`View`, `Undo`). The icon says what happened: a green check for a
+ * save (the default), a copy icon in the text colour for a copy or a duplicate, an alert in the danger colour for a
+ * failure that has no screen to put a banner on (a refused clipboard). Anything the editor must act on is a banner.
  */
 export function ToastView({
   className,
   action,
+  icon = TOAST_ICONS.default!,
   children,
   ...props
-}: Omit<ComponentProps<'div'>, 'children'> & { action?: ReactNode; children?: ReactNode }) {
+}: Omit<ComponentProps<'div'>, 'children'> & { action?: ReactNode; icon?: ToastIcon; children?: ReactNode }) {
   return (
     <div
       data-slot="toast"
@@ -24,7 +43,7 @@ export function ToastView({
       )}
       {...props}
     >
-      <Icon name="check-circle" size={20} className="shrink-0 text-chart-2" />
+      <Icon name={icon.name} size={20} className={cn('shrink-0', TONE_CLASS[icon.tone])} />
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {action}
     </div>
@@ -33,7 +52,7 @@ export function ToastView({
 
 /** The toast's action, drawn as the design does: muted, underlined, 44 px tall. */
 export const toastActionClass =
-  'h-11 min-w-11 cursor-pointer border-0 bg-transparent p-0 font-sans text-base font-medium text-muted-foreground underline outline-none focus-visible:inset-ring-2 focus-visible:inset-ring-foreground';
+  'h-11 min-w-11 cursor-pointer border-0 bg-transparent p-0 font-sans text-base font-medium text-muted-foreground underline outline-none focused:inset-ring-2 focused:inset-ring-foreground';
 
 /** The same button outside a live toast (the /design board draws it so): Base UI's `Toast.Action` needs a toast around it. */
 export function ToastAction({ className, ...props }: ComponentProps<'button'>) {
@@ -51,6 +70,7 @@ function Toasts() {
   return toasts.map((toast) => (
     <ToastPrimitive.Root key={toast.id} toast={toast} className="outline-none">
       <ToastView
+        icon={TOAST_ICONS[toast.type ?? 'default']}
         action={
           toast.actionProps ? (
             <ToastPrimitive.Action className={toastActionClass}>{toast.actionProps.children}</ToastPrimitive.Action>

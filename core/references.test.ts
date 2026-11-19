@@ -8,12 +8,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { refKey } from './paths';
 import {
   checkReferenceDepth,
+  countReferrers,
   createResolver,
   entryReferences,
   findReferrers,
   MAX_REFERENCE_DEPTH,
   referenceFields,
 } from './references';
+import { loadSchema } from './schema';
 import type { Entry } from './validate';
 
 import { readProject, validateProject } from '../node/project';
@@ -108,6 +110,96 @@ describe('findReferrers', () => {
     expect(age.map((r) => refKey(r.entry.collection, r.entry.slug))).toEqual(['option/age-adult', 'section/about-you']);
     expect(findReferrers(schema, entries, 'brand/index').map((r) => r.entry.slug)).toEqual(['onboarding']);
     expect(findReferrers(schema, entries, 'survey/pulse')).toEqual([]);
+  });
+});
+
+const entryOf = (collection: string, slug: string, fields: Record<string, unknown>): Entry => ({
+  collection,
+  slug,
+  data: fields,
+  body: '',
+});
+
+describe('countReferrers', () => {
+  const schema = loadSchema({
+    contentDir: 'cms/content',
+    git: { baseBranch: 'main' },
+    collections: {
+      post: {
+        label: 'Post',
+        fields: {
+          tags: { type: 'reference', label: 'Tags', collections: ['tag'], multiple: true },
+          main: { type: 'reference', label: 'Main tag', collections: ['tag'] },
+        },
+      },
+      page: { label: 'Page', fields: { tag: { type: 'reference', label: 'Tag', collections: ['tag'] } } },
+      tag: { label: 'Tag', fields: { name: { type: 'string', label: 'Name' } } },
+    },
+  });
+
+  it('counts the entries pointing at each one by collection, once per entry', () => {
+    const counts = countReferrers(schema, [
+      // The same tag twice in the list and once more in another field: one post.
+      entryOf('post', 'a', { tags: ['tag/budget', 'tag/budget'], main: 'tag/budget' }),
+      entryOf('post', 'b', { tags: ['tag/budget', 'tag/steel'] }),
+      entryOf('page', 'about', { tag: 'tag/budget' }),
+      entryOf('tag', 'budget', { name: 'Budget' }),
+    ]);
+    expect(counts.get('tag/budget')).toEqual(
+      new Map([
+        ['post', 2],
+        ['page', 1],
+      ]),
+    );
+    expect(counts.get('tag/steel')).toEqual(new Map([['post', 1]]));
+    expect(counts.has('tag/none')).toBe(false);
+  });
+
+  it('counts an entry that points at itself', () => {
+    const selfish = loadSchema({
+      contentDir: 'cms/content',
+      git: { baseBranch: 'main' },
+      collections: {
+        page: { label: 'Page', fields: { parent: { type: 'reference', label: 'Parent', collections: ['page'] } } },
+      },
+    });
+    const counts = countReferrers(selfish, [entryOf('page', 'a', { parent: 'page/a' })]);
+    expect(counts.get('page/a')).toEqual(new Map([['page', 1]]));
+  });
+
+  it('counts references inside an object and a block', () => {
+    const nested = loadSchema({
+      contentDir: 'cms/content',
+      git: { baseBranch: 'main' },
+      collections: {
+        tag: { label: 'Tag', fields: { name: { type: 'string', label: 'Name' } } },
+        post: {
+          label: 'Post',
+          fields: {
+            meta: {
+              type: 'object',
+              label: 'Meta',
+              fields: { tag: { type: 'reference', label: 'Tag', collections: ['tag'] } },
+            },
+            content: {
+              type: 'blocks',
+              label: 'Content',
+              blocks: {
+                note: { label: 'Note', fields: { tag: { type: 'reference', label: 'Tag', collections: ['tag'] } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const counts = countReferrers(nested, [
+      entryOf('post', 'a', { meta: { tag: 'tag/x' }, content: [{ block: 'note', tag: 'tag/x' }] }),
+    ]);
+    expect(counts.get('tag/x')).toEqual(new Map([['post', 1]]));
+  });
+
+  it('skips entries of a collection the schema lacks', () => {
+    expect(countReferrers(schema, [entryOf('gone', 'x', { tag: 'tag/budget' })]).size).toBe(0);
   });
 });
 
@@ -218,9 +310,9 @@ describe('references inside object and blocks (page/landing)', () => {
     const page = resolve(byRef.get('page/landing')!, 4);
     const blocks = page.data.content as Record<string, unknown>[];
     expect(blocks.map((b) => b.block)).toEqual(['hero', 'features', 'prose', 'survey', 'quote']);
-    const survey = blocks[3]!.survey as Tree;
-    expect(survey.data.title).toBe('Onboarding survey');
-    const [aboutYou] = list(survey, 'sections');
+    const poll = blocks[3]!.survey as Tree;
+    expect(poll.data.title).toBe('Onboarding survey');
+    const [aboutYou] = list(poll, 'sections');
     const [age] = list(aboutYou, 'questions');
     expect(list(age, 'options').map((o) => o.data.label)).toEqual(['Under 18', '18 or older', 'Prefer not to say']);
     // Everything else in the blocks is kept as it is.

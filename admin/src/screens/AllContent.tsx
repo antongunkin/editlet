@@ -1,6 +1,7 @@
 import { AllContentView } from './AllContentView';
 import { RouteRow } from './RouteRow';
 
+import { collectionNames } from '../../../core/schema';
 import { entryRefs, useFiles, type SchemaData } from '../data/queries';
 import { RouteLink } from '../RouteLink';
 import { SearchButton } from '../search/SearchProvider';
@@ -38,7 +39,7 @@ export function AllContent({ schema }: { schema: SchemaData }) {
             <RouteRow
               to={{ kind: 'collection', collection: key }}
               lead={collection.singleton ? 'file' : 'folder'}
-              title={collection.label}
+              title={collection.singleton ? collection.label : collectionNames(collection).many}
               sub={
                 collection.singleton
                   ? 'Single page'

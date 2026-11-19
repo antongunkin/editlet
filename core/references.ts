@@ -91,6 +91,25 @@ export function findReferrers<E extends Entry>(schema: Schema, entries: Iterable
   return out;
 }
 
+/**
+ * How many entries point at each entry, by the referring collection: `tag/budget` → `{ post: 4 }`. One pass over every
+ * entry's references (`findReferrers` for all targets at once); an entry counts once per target however many fields or
+ * list items hold it, an entry pointing at itself counts, entries of a collection the schema lacks are skipped.
+ */
+export function countReferrers(schema: Schema, entries: Iterable<Entry>): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const entry of entries) {
+    if (!Object.hasOwn(schema.collections, entry.collection)) continue;
+    const targets = new Set(entryReferences(schema.collections[entry.collection], entry.data).map((r) => r.ref));
+    for (const ref of targets) {
+      const by = out.get(ref) ?? new Map<string, number>();
+      by.set(entry.collection, (by.get(entry.collection) ?? 0) + 1);
+      out.set(ref, by);
+    }
+  }
+  return out;
+}
+
 /** Throws `RangeError` unless `depth` is a whole number from 0 to `MAX_REFERENCE_DEPTH`. */
 export function checkReferenceDepth(depth: number): void {
   if (!Number.isInteger(depth) || depth < 0 || depth > MAX_REFERENCE_DEPTH) {

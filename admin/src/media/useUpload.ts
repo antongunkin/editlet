@@ -6,6 +6,7 @@ import type { MediaCommit } from './useMediaCommit';
 import { filesSubject } from '../../../core/gitStyle';
 import type { Schema } from '../../../core/schema';
 import { useFiles } from '../data/queries';
+import type { FinalFocus } from '../ui/parts/focus';
 
 /** A drag that carries files (not text or a link). */
 const hasFiles = (e: DragEvent<HTMLElement>) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
@@ -26,7 +27,8 @@ export function useUpload(schema: Schema, commit: MediaCommit, setNotice: (text:
   const [preparing, setPreparing] = useState(false);
   return {
     preparing,
-    async upload(list: File[], folder: string) {
+    /** `finalFocus`: where the focus goes when the commit's dialog closes (the ⋯ the upload was started from). */
+    async upload(list: File[], folder: string, finalFocus?: FinalFocus) {
       setNotice(null);
       commit.clearError();
       const skipped = list.map(imageFileError).filter((e): e is string => e !== null);
@@ -62,6 +64,7 @@ export function useUpload(schema: Schema, commit: MediaCommit, setNotice: (text:
           changes.map((c) => c.path),
         ),
         build: () => batchBySize(changes),
+        finalFocus,
       });
     },
   };

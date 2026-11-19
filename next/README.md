@@ -45,7 +45,7 @@ Add `/.editlet/` and `/public/editlet/` to `.gitignore`. Both are generated.
 | Dev file API at `/__editlet` without a route file; the production build guard | [docs/next/dev-api.md](../../../docs/next/dev-api.md) |
 | Admin at `/editlet/` and content images in `public/editlet/` | [docs/next/admin-and-images.md](../../../docs/next/admin-and-images.md) |
 | Production editing: `admin` option, `config.json`, auth handler route | [docs/admin/production.md](../../../docs/admin/production.md) |
-| `EditletLoader`: the `?editlet` editor over the page | [docs/next/loader.md](../../../docs/next/loader.md) |
+| `EditletLoader`: the `?editlet` editor over the page (opening an entry's page with `router.push`) | [docs/next/loader.md](../../../docs/next/loader.md) |
 | Live preview: `admin.preview`, the `editlet/next/preview` route (signed draft-mode cookie), `previewRef()`, the reader's `{ ref }` option, `editletField()` marks | [docs/next/preview.md](../../../docs/next/preview.md) |
 
 ## Configuration

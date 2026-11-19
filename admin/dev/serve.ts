@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import { build } from 'esbuild';
 
+import type { Schema } from '../../core/schema';
+import { matchEntryUrls } from '../../core/urls';
 import type { Entry } from '../../core/validate';
 import { DEFAULT_ADMIN_URL } from '../../loader/protocol';
 
@@ -111,6 +113,17 @@ export async function serveAdmin(
     return;
   }
   send(res, 200, await readFile(target), type);
+}
+
+/**
+ * The entries the page at `pathname` shows, by the schema's `url` patterns (`/posts/hello-world` → `post/hello-world`;
+ * a many-entry page → every entry of the collection). Nothing for a path no pattern matches.
+ */
+export function pageEntries(schema: Schema, entries: Entry[], pathname: string): Entry[] {
+  const hits = matchEntryUrls(schema, pathname);
+  return entries.filter((e) =>
+    hits.some((m) => m.collection === e.collection && (m.slug === undefined || m.slug === e.slug)),
+  );
 }
 
 export type DemoSite = { siteJs: Uint8Array; page: (entries: Entry[]) => string };

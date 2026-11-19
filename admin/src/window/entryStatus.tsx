@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { useBuffer, useOpenChanges } from '../changes/trayContext';
 import { ChangesChip } from '../ui/parts/status-chips';
 import { StatusBadge } from '../ui/StatusBadge';
 
@@ -48,12 +49,28 @@ export function useReportEntryStatus(
   }, [report, draft, dirty, isNew, changes]);
 }
 
-/** What is not saved yet, as a link that opens the review dialog. Nothing when the form is clean. */
-export function UnsavedLink({ entry }: { entry: EntryStatus }) {
-  if (!entry.dirty && !entry.isNew) return null;
+/**
+ * The fields not saved yet, on every screen: the changes buffer's (every entry), or the open entry's own count while its
+ * row is not written yet (300 ms), whichever is more.
+ */
+export function useUnsavedCount(entry: EntryStatus | null): number {
+  const buffered = useBuffer().count;
+  const live = entry && entry.dirty ? entry.changes : 0;
+  return Math.max(buffered, live);
+}
+
+/**
+ * What is not saved yet, as a link that opens *Your changes*: *Unsaved changes (3)*, counting every entry. Nothing when
+ * there is nothing. A new entry still untouched says *New entry*. The open entry's own link validates it first.
+ */
+export function UnsavedLink({ entry }: { entry: EntryStatus | null }) {
+  const count = useUnsavedCount(entry);
+  const openChanges = useOpenChanges();
+  const fresh = entry?.isNew === true && count === 0;
+  if (count === 0 && !fresh) return null;
   return (
-    <ChangesChip title="Review and save" onClick={entry.review}>
-      {entry.isNew ? 'New entry' : `Unsaved changes (${entry.changes})`}
+    <ChangesChip title="Review and save" onClick={entry?.dirty ? entry.review : openChanges}>
+      {fresh ? 'New entry' : `Unsaved changes (${count})`}
     </ChangesChip>
   );
 }

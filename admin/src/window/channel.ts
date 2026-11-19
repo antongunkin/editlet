@@ -27,6 +27,11 @@ function post(body: WindowBody<AdminToWindowMessage | AdminToPreviewMessage>): v
   window.parent.postMessage({ source: WINDOW_SOURCE, ...body }, window.location.origin);
 }
 
+/** Tells window.js the theme the admin is drawn in, so the sheet's grab handle (on the page) follows it. Embedded only. */
+export function postTheme(theme: 'light' | 'dark'): void {
+  if (window.parent !== window) post({ type: 'theme', theme });
+}
+
 /** The live-preview state the site page reports (null: no preview). The overlay answers `hello` with the state. */
 export function usePagePreview(embedded: boolean): PreviewState | null {
   const [state, setState] = useState<PreviewState | null>(null);
@@ -38,6 +43,9 @@ export function usePagePreview(embedded: boolean): PreviewState | null {
     };
     window.addEventListener('message', onMessage);
     post({ type: 'hello' });
+    // window.js may not have been listening when the theme was first applied: say it again after `hello`.
+    const theme = document.documentElement.dataset.editletTheme;
+    if (theme === 'light' || theme === 'dark') post({ type: 'theme', theme });
     return () => window.removeEventListener('message', onMessage);
   }, [embedded]);
   return state;
@@ -161,17 +169,65 @@ export function useEdgeHover(edge?: Edge) {
   return { onPointerEnter: () => set(true), onPointerLeave: () => set(false) };
 }
 
+/** What had the focus when a gesture began: an element and, for a text control, its selection. */
+type FocusSnapshot = {
+  el: HTMLElement;
+  selection?: { start: number; end: number; direction: 'forward' | 'backward' | 'none' };
+};
+
+function snapshotFocus(): FocusSnapshot | null {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement) || el === document.body) return null;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    try {
+      const { selectionStart: start, selectionEnd: end, selectionDirection: direction } = el;
+      if (start !== null && end !== null) return { el, selection: { start, end, direction: direction ?? 'none' } };
+    } catch {
+      // An input type without a selection (number, date): the focus alone.
+    }
+  }
+  return { el };
+}
+
+/**
+ * An edge is not focusable, so pressing one can move the focus to `<body>`, out of an open modal (Base UI's focus
+ * guards catch Tab, not a click), and engines differ on whether cancelling `pointerdown` prevents it. Only when the focus
+ * fell to `<body>` does it go back to the element that had it, with its selection.
+ */
+function restoreFocus(snapshot: FocusSnapshot | null): void {
+  if (!snapshot || !snapshot.el.isConnected) return;
+  const now = document.activeElement;
+  if (now && now !== document.body) return;
+  snapshot.el.focus({ preventScroll: true });
+  const { el, selection } = snapshot;
+  if (selection && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+    try {
+      el.setSelectionRange(selection.start, selection.end, selection.direction);
+    } catch {
+      // See snapshotFocus.
+    }
+  }
+}
+
 /**
  * Pointer and keyboard handlers that move the window or resize it by one edge or corner. Deltas are screen pixels since
  * the gesture began, so they stay right while the window (and this iframe) moves under the pointer. Arrow keys repeat
- * the gesture by a step; with Alt they resize from the bottom-right corner instead (the only keyboard resize).
+ * the gesture by a step; with Alt they resize from the bottom-right corner instead (the only keyboard resize). The
+ * focus survives a pointer press (`restoreFocus`): `pointerdown` is cancelled, so no `mousedown` handler would run.
  */
 export function useWindowGesture(kind: Gesture) {
   const from = useRef<{ x: number; y: number } | null>(null);
+  const focus = useRef<FocusSnapshot | null>(null);
+  const settle = () => {
+    const snapshot = focus.current;
+    focus.current = null;
+    restoreFocus(snapshot);
+  };
   return {
     onPointerDown(e: PointerEvent<HTMLElement>) {
       if (e.button !== 0) return;
       e.preventDefault();
+      focus.current = snapshotFocus();
       e.currentTarget.setPointerCapture(e.pointerId);
       from.current = { x: e.screenX, y: e.screenY };
       post({ type: 'drag', kind, phase: 'start', dx: 0, dy: 0 });
@@ -184,7 +240,9 @@ export function useWindowGesture(kind: Gesture) {
       if (!from.current) return;
       post({ type: 'drag', kind, phase: 'end', dx: e.screenX - from.current.x, dy: e.screenY - from.current.y });
       from.current = null;
+      settle();
     },
+    onLostPointerCapture: settle,
     onKeyDown(e: KeyboardEvent<HTMLElement>) {
       const dir = ARROWS[e.key];
       if (!dir) return;

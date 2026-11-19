@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { HistorySheet, OlderVersions, VersionSheet, type HistoryItem } from './HistoryView';
 
@@ -12,6 +12,7 @@ import { entryToForm, formToEntry, type DataBody, type FormValues } from '../ent
 import { relativeTime } from '../github/relativeTime';
 import { shortName } from '../screens/EntryMeta';
 import { sourceKey, useSource } from '../source/context';
+import type { FinalFocus } from '../ui/parts/focus';
 import { Banner } from '../ui/primitives/banner';
 import { Button } from '../ui/primitives/button';
 
@@ -105,6 +106,8 @@ export interface EntryHistoryProps {
   historyUrl: string | null;
   /** Puts the version's values into the form (an unsaved edit). */
   onRestore(values: FormValues): void;
+  /** Where the focus goes when History closes: the ⋯ button that opened it (`ui/parts/focus.ts`). */
+  finalFocus?: FinalFocus;
 }
 
 /**
@@ -122,12 +125,20 @@ export function EntryHistory({
   dirty,
   historyUrl,
   onRestore,
+  finalFocus,
 }: EntryHistoryProps) {
   const source = useSource();
   const key = sourceKey(source);
   // The version shown stays while its sheet slides away (`versionOpen` false): no blank title or *Loading…* on the way out.
   const [opened, setOpened] = useState<FileVersion | null>(null);
   const [versionOpen, setVersionOpen] = useState(false);
+  // The row whose press opened the version: closing the version (back, ×, Escape) returns the focus to it. Restore closes
+  // both sheets and the focus goes to ⋯ through History's own `finalFocus`, so the version steps aside then.
+  const rowRef = useRef<HTMLElement | null>(null);
+  const restoring = useRef(false);
+  useEffect(() => {
+    if (open) restoring.current = false;
+  }, [open]);
 
   const versions = useQuery({
     queryKey: ['file-versions', key, path, sha] as const,
@@ -194,9 +205,11 @@ export function EntryHistory({
           )
         ) : undefined
       }
-      onOpenVersion={(commit) => {
+      finalFocus={finalFocus}
+      onOpenVersion={(commit, row) => {
         const found = versions.data?.find((v) => v.commit === commit);
         if (!found) return;
+        rowRef.current = row ?? null;
         setOpened(found);
         setVersionOpen(true);
       }}
@@ -224,8 +237,10 @@ export function EntryHistory({
           ) : undefined
         }
         replacesEdits={dirty}
+        finalFocus={() => !restoring.current && (rowRef.current ?? true)}
         onRestore={() => {
           if (!values) return;
+          restoring.current = true;
           onRestore(structuredClone(values));
           close(false);
         }}

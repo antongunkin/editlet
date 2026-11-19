@@ -29,12 +29,14 @@ const adminBodies = [
   { type: 'highlight', entry: null },
   { type: 'layout', layout: 'side' },
   { type: 'layout', layout: 'full' },
+  { type: 'open', path: '/posts/a' },
 ] as const;
 
 const siteBodies = [
   { type: 'init', route: '', site: { origin: 'https://s.dev', href: 'https://s.dev/a' } },
   { type: 'navigate', route: 'post/a' },
   { type: 'close-request' },
+  { type: 'page', href: 'https://s.dev/posts/a' },
 ] as const;
 
 describe('protocol', () => {
@@ -67,6 +69,9 @@ describe('protocol', () => {
     ['navigate route number', { ...env, type: 'navigate', route: 1 }],
     ['highlight entry number', { ...env, type: 'highlight', entry: 5 }],
     ['layout wide', { ...env, type: 'layout', layout: 'wide' }],
+    ['open without path', { ...env, type: 'open' }],
+    ['open path number', { ...env, type: 'open', path: 1 }],
+    ['page (site to admin)', { ...env, type: 'page', href: 'https://s.dev/' }],
   ];
   it.each(bad)('admin guard rejects %s', (_n, data) => {
     expect(isAdminToSiteMessage(data)).toBe(false);
@@ -113,6 +118,12 @@ describe('protocol', () => {
   it('withEditletRoute handles protocol-relative and URL inputs', () => {
     expect(withEditletRoute('//host.dev/a?x=1', 'schema')).toBe('//host.dev/a?x=1&editlet=schema');
     expect(withEditletRoute(new URL('https://s.dev/a?x=1'), 'schema')).toBe('https://s.dev/a?x=1&editlet=schema');
+  });
+
+  it('site guard rejects page without a string href, and open (admin to site)', () => {
+    expect(isSiteToAdminMessage({ ...env, type: 'page' })).toBe(false);
+    expect(isSiteToAdminMessage({ ...env, type: 'page', href: null })).toBe(false);
+    expect(isSiteToAdminMessage({ ...env, type: 'open', path: '/a' })).toBe(false);
   });
 
   it('guards reject missing highlight entry and non-string init route', () => {

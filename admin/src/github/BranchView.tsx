@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, type ComponentProps, type ReactNode } from 'react';
 
 import type { FileDiff } from './branchDiff';
 
@@ -26,6 +26,8 @@ export interface BranchViewProps {
   actions?: ReactNode;
   /** The page's `h1`: *Review changes*, *Pull request #1*, *Branch not found*. */
   title: string;
+  /** Props of the `h1`: a `ref` and `tabIndex={-1}` for the focus after *Edit on this branch*. */
+  titleProps?: ComponentProps<'h1'>;
   /** After the title: the pull request's Draft badge, *3 entries · PR #2*. */
   meta?: ReactNode;
   /** Under the title: errors, the labels notice, the branch that is gone. */
@@ -48,6 +50,7 @@ export function BranchView({
   back,
   actions,
   title,
+  titleProps,
   meta,
   banners,
   steps,
@@ -57,12 +60,20 @@ export function BranchView({
   cta,
   children,
 }: BranchViewProps) {
+  // The screen stays mounted while its state changes (*Review changes* → *Pull request #1* after Create pull request), so
+  // its scroller keeps the offset the editor had when they pressed the CTA, on a phone often below the big title. A
+  // new title is a new state: show it from the top.
+  const scroller = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (scroller.current) scroller.current.scrollTop = 0;
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- runs again on a new title on purpose
+  }, [title]);
   return (
     // `branch-screen`: the demo's sandbox shim (src/sandbox/shim.ts) finds the Create pull request button under it.
     <section data-editlet="branch-screen" className="flex min-h-0 flex-1 flex-col bg-background text-foreground">
       <Header as="span" title={branch} back={back} actions={actions} className="shrink-0" />
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <BigTitle as="h1" title={title} meta={meta} />
+      <div ref={scroller} data-editlet="branch-scroller" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <BigTitle as="h1" title={title} titleProps={titleProps} meta={meta} />
         {banners ? <div className="flex flex-col gap-2 px-4 pb-3 empty:hidden">{banners}</div> : null}
         {/* pb-8: the card's shadow reaches 28 px below it (ui4.content). */}
         <div className="flex flex-col gap-4 px-4 pb-8 empty:hidden">

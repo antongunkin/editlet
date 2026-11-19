@@ -40,7 +40,10 @@
       window.addEventListener('message', function (event) {
         var data = event.data;
         if (event.source !== window.parent || !data || data.source !== 'editlet' || data.type !== 'init') return;
-        if (origin === null) origin = event.origin;
+        if (origin === null) {
+          if (event.origin !== location.origin) return;
+          origin = event.origin;
+        }
         if (event.origin !== origin) return;
         document.getElementById('route').textContent = 'Route: ' + (data.route || '/');
       });

@@ -3,16 +3,30 @@ import type { Table } from 'dexie';
 
 export interface PendingChange {
   path: string;
+  /** The new file (an entry: its serialised text; an image: its bytes); `null` deletes it. */
   content: Uint8Array | string | null;
+  /** The blob sha it is based on; `null` = the file must not exist (a new entry, an upload). */
   sha: string | null;
+  /** When it was written: strictly increasing within a page, so `removeIf` can tell a newer row. */
   updatedAt: number;
+  /** Entries: the file text at `sha` (`null` for a new entry), for the diff, the conflict compare and a restore. */
+  base?: string | null;
+  /** Row format; absent = 1. A row of an unknown format is not written over or committed by an older admin. */
+  v?: number;
 }
+
+/** What a write gives: `updatedAt` is stamped by the queue. */
+export type PendingWrite = Omit<PendingChange, 'updatedAt'>;
 
 export interface PendingQueue {
   list(): Promise<PendingChange[]>;
   get(path: string): Promise<PendingChange | undefined>;
-  put(change: { path: string; content: Uint8Array | string | null; sha: string | null }): Promise<void>;
+  put(change: PendingWrite): Promise<void>;
+  /** Writes several rows in one transaction (an entry row and its images). */
+  putMany(changes: PendingWrite[]): Promise<void>;
   remove(paths: string[]): Promise<void>;
+  /** Removes the row of `path` only when it is not newer than `updatedAt` (one transaction). */
+  removeIf(path: string, updatedAt: number): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -20,6 +34,10 @@ export interface GitHubCache {
   getBlobs(shas: string[]): Promise<Map<string, Uint8Array>>;
   putBlobs(blobs: { sha: string; bytes: Uint8Array }[]): Promise<void>;
   pending(scope: string): PendingQueue;
+  /** The scopes that have pending rows. */
+  scopes(): Promise<string[]>;
+  /** `false` for the memory cache (no IndexedDB): pending rows do not survive a reload. */
+  readonly persistent: boolean;
   clear(): Promise<void>;
   /** Releases the underlying database connection (no-op for the memory cache). */
   close?(): Promise<void>;
@@ -29,12 +47,8 @@ interface BlobRow {
   sha: string;
   bytes: Uint8Array;
 }
-interface PendingRow {
+interface PendingRow extends PendingChange {
   scope: string;
-  path: string;
-  content: Uint8Array | string | null;
-  sha: string | null;
-  updatedAt: number;
 }
 
 type CacheDb = Dexie & { blobs: Table<BlobRow, string>; pending: Table<PendingRow, [string, string]> };
@@ -47,6 +61,25 @@ const toChange = (r: PendingRow): PendingChange => ({
   content: copyContent(r.content),
   sha: r.sha,
   updatedAt: r.updatedAt,
+  ...(r.base !== undefined ? { base: r.base } : {}),
+  ...(r.v !== undefined ? { v: r.v } : {}),
+});
+
+let lastStamp = 0;
+/** `Date.now()`, but never the same twice: two writes in one millisecond stay ordered. */
+function stamp(): number {
+  lastStamp = Math.max(Date.now(), lastStamp + 1);
+  return lastStamp;
+}
+
+const toRow = (scope: string, change: PendingWrite): PendingRow => ({
+  scope,
+  path: change.path,
+  content: copyContent(change.content),
+  sha: change.sha,
+  updatedAt: stamp(),
+  ...(change.base !== undefined ? { base: change.base } : {}),
+  ...(change.v !== undefined ? { v: change.v } : {}),
 });
 
 const byPath = (a: PendingChange, b: PendingChange): number => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
@@ -90,22 +123,29 @@ export function openGitHubCache(
           return row ? toChange(row) : undefined;
         },
         async put(change) {
-          await db.pending.put({
-            scope,
-            path: change.path,
-            content: copyContent(change.content),
-            sha: change.sha,
-            updatedAt: Date.now(),
-          });
+          await db.pending.put(toRow(scope, change));
+        },
+        async putMany(changes) {
+          await db.transaction('rw', db.pending, () => db.pending.bulkPut(changes.map((c) => toRow(scope, c))));
         },
         async remove(paths) {
           await db.pending.bulkDelete(paths.map((p): [string, string] => [scope, p]));
+        },
+        async removeIf(path, updatedAt) {
+          await db.transaction('rw', db.pending, async () => {
+            const row = await db.pending.get([scope, path]);
+            if (row && row.updatedAt <= updatedAt) await db.pending.delete([scope, path]);
+          });
         },
         async clear() {
           await db.pending.where('scope').equals(scope).delete();
         },
       };
     },
+    async scopes() {
+      return (await db.pending.orderBy('scope').uniqueKeys()).map(String);
+    },
+    persistent: true,
     async clear() {
       await Promise.all([db.blobs.clear(), db.pending.clear()]);
     },
@@ -145,23 +185,33 @@ export function createMemoryCache(): GitHubCache {
           return row ? toChange(row) : undefined;
         },
         async put(change) {
-          scopeMap(scope).set(change.path, {
-            scope,
-            path: change.path,
-            content: copyContent(change.content),
-            sha: change.sha,
-            updatedAt: Date.now(),
-          });
+          scopeMap(scope).set(change.path, toRow(scope, change));
+        },
+        async putMany(changes) {
+          const m = scopeMap(scope);
+          for (const c of changes) m.set(c.path, toRow(scope, c));
         },
         async remove(paths) {
           const m = scopeMap(scope);
           for (const p of paths) m.delete(p);
+        },
+        async removeIf(path, updatedAt) {
+          const m = scopeMap(scope);
+          const row = m.get(path);
+          if (row && row.updatedAt <= updatedAt) m.delete(path);
         },
         async clear() {
           scopeMap(scope).clear();
         },
       };
     },
+    async scopes() {
+      return [...pending]
+        .filter(([, rows]) => rows.size > 0)
+        .map(([scope]) => scope)
+        .toSorted();
+    },
+    persistent: false,
     async clear() {
       blobs.clear();
       pending.clear();

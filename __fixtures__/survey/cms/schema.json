@@ -26,6 +26,7 @@
     },
     "survey": {
       "label": "Survey",
+      "pluralLabel": "Surveys",
       "titleField": "title",
       "slugFrom": "title",
       "fields": {
@@ -73,6 +74,7 @@
     },
     "section": {
       "label": "Section",
+      "pluralLabel": "Sections",
       "titleField": "title",
       "fields": {
         "title": {
@@ -102,6 +104,7 @@
     },
     "question": {
       "label": "Question",
+      "pluralLabel": "Questions",
       "titleField": "prompt",
       "fields": {
         "prompt": {
@@ -197,6 +200,7 @@
     },
     "option": {
       "label": "Option",
+      "pluralLabel": "Options",
       "titleField": "label",
       "fields": {
         "label": {
@@ -223,6 +227,7 @@
     },
     "page": {
       "label": "Page",
+      "pluralLabel": "Pages",
       "titleField": "title",
       "fields": {
         "title": {

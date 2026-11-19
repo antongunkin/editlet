@@ -84,7 +84,7 @@ export function WindowStatus() {
       {workspace ? (
         <>
           <BranchChip />
-          {entry ? <UnsavedLink entry={entry} /> : null}
+          <UnsavedLink entry={entry} />
         </>
       ) : (
         <LocalBranchBadge />

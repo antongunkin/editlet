@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { fieldValueSchema } from './fields';
 import { EditletError, type Issue } from './issues';
 import { isCanonicalPath } from './paths';
+import { urlPatternIssues } from './urls';
 
 export type FieldType =
   | 'string'
@@ -64,8 +65,17 @@ export interface FieldGroup {
 }
 
 export interface Collection {
+  /** The collection's name for one entry (*Post*); a singleton's only name. */
   label: string;
+  /** The name for many entries (*Posts*), for headings; not on a singleton. Without it the admin shows `label`. */
+  pluralLabel?: string;
   singleton?: boolean;
+  /**
+   * The path of the collection's page on the site, from its root: `/posts/{slug}` (one page per entry, `{slug}` the
+   * only placeholder) or a fixed path where every entry is shown (`/`). Without it the collection has no page.
+   * Rules: `urlPatternIssues` (`core/urls.ts`).
+   */
+  url?: string;
   titleField?: string;
   slugFrom?: string;
   /**
@@ -255,7 +265,9 @@ const fieldSchema = z.discriminatedUnion('type', [
 
 const collectionSchema = z.strictObject({
   label: z.string(),
+  pluralLabel: z.string().max(100).optional(),
   singleton: z.boolean().optional(),
+  url: z.string().optional(),
   titleField: z.string().optional(),
   slugFrom: z.string().optional(),
   groups: z
@@ -349,6 +361,16 @@ const schemaSchema = z
       if (fields.filter(([, f]) => f.type === 'markdown').length > 1) {
         add(['collections', ck, 'fields'], 'a collection can have at most one markdown field');
       }
+      if (col.pluralLabel !== undefined) {
+        if (col.pluralLabel.trim() === '') add(['collections', ck, 'pluralLabel'], 'pluralLabel must not be empty');
+        if (col.singleton) {
+          add(['collections', ck, 'pluralLabel'], 'pluralLabel is only for collections with many entries');
+        }
+      }
+      if (col.url !== undefined) {
+        for (const message of urlPatternIssues(col.url, col.singleton === true))
+          add(['collections', ck, 'url'], message);
+      }
       if (col.titleField !== undefined && !Object.hasOwn(col.fields, col.titleField)) {
         add(['collections', ck, 'titleField'], `titleField "${col.titleField}" is not a field of ${ck}`);
       }
@@ -405,6 +427,11 @@ export function parseSchemaText(text: string, file: string): Schema {
     if (error instanceof EditletError) throw new EditletError(error.issues.map((issue) => ({ ...issue, file })));
     throw error;
   }
+}
+
+/** The collection's names: `one` for an entry (`label`), `many` for headings (`pluralLabel`, else `label`). */
+export function collectionNames(collection: Collection): { one: string; many: string } {
+  return { one: collection.label, many: collection.pluralLabel ?? collection.label };
 }
 
 export function markdownFieldKey(collection: Collection): string | undefined {

@@ -63,6 +63,7 @@ so `?editlet` has something to show. Say that it is a sample.
   "collections": {
     "post": {
       "label": "Post",
+      "pluralLabel": "Posts",
       "titleField": "title",
       "slugFrom": "title",
       "fields": {
@@ -89,6 +90,29 @@ The first post. Edit it at `/?editlet`.
 ```
 
 If the project already has Markdown, MDX or another CMS, do not create sample content: offer `editlet-migrate`.
+
+### Page addresses and plural labels
+
+For each collection in `cms/schema.json` (the sample, or a schema that already exists), add two optional keys:
+
+- **`pluralLabel`**: the list heading (`"label": "Post", "pluralLabel": "Posts"`). `label` stays the singular (*New
+  post*). Not on a singleton.
+- **`url`**: the path of the page that shows an entry, with `{slug}` standing for the entry's slug. Read it from the
+  site's routes:
+  - `src/app/<path>/[slug]/page.tsx` (or `app/…` at the root) that shows the collection (it reads it itself, or through
+    a helper in `src/lib/` it calls) → `"url": "/<path>/{slug}"` (`src/app/blog/[slug]/page.tsx` → `/blog/{slug}`).
+    Leave out route-group folders `(name)` and parallel-route folders `@slot`: they are not in the URL
+    (`src/app/(public)/docs/[slug]/page.tsx` → `/docs/{slug}`).
+  - A fixed page that shows a singleton, or every entry of a collection (home sections on the home page) → its path:
+    `"/"`, `"/blog"`.
+  - `trailingSlash: true` in `next.config.*` → end the pattern with `/` (`/blog/{slug}/`).
+  - `{slug}` is the only placeholder. Routes with other parameters (`/[year]/[slug]`, `/[locale]/…`), catch-all routes
+    and `basePath` cannot be written: leave `url` out and say so.
+  - A collection with no page of its own (settings, authors shown inside posts) gets no `url`. If you cannot tell
+    which route shows a collection, ask the human. Never add a route to have a `url`.
+
+`url` turns on the page address in the editor's *New entry* and *Details*, and **⋯ → Open on the page**. The doctor
+lists it (`content.urls`) and, with `--url`, opens one entry's page on the live site (`site.entry-url`).
 
 ## 5. The reader
 

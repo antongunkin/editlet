@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type RefObject } from 'react';
 
 import { BranchesSheet, NewBranchSheet, type BranchItem } from './BranchesSheet';
 import { normalizeBranchInput, routeFromBranch } from './branchName';
@@ -8,19 +8,28 @@ import { useBranches, useWorkspace, type Workspace } from './workspace';
 
 import { isEditletBranchName } from '../../../core/gitStyle';
 import { GitHubError, type CmsBranch } from '../../../github';
+import { useBufferScopes } from '../changes/scopes';
 import { RouteLink } from '../RouteLink';
 import { cn } from '../ui/cn';
 import { Badge } from '../ui/primitives/badge';
 import { buttonVariants } from '../ui/primitives/button';
 import { useBridge } from '../useRoute';
 
-export type BranchDialogProps = { open: boolean; onOpenChange(open: boolean): void };
+export type BranchDialogProps = {
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  /** Where the focus returns on close (opened from Search: what had it before Search). */
+  finalFocus?: RefObject<HTMLElement | null>;
+};
 
 function pullRequestText(branch: CmsBranch): string {
   const pr = branch.pullRequest;
   const text = !pr ? 'No pull request' : pr.isDraft ? `Draft pull request #${pr.number}` : `Pull request #${pr.number}`;
   return branch.committedAt ? `${text} · ${relativeTime(branch.committedAt)}` : text;
 }
+
+/** ` · 2 unsaved`: the entries the changes buffer holds for that branch. */
+const unsavedText = (n: number | undefined) => (n ? ` · ${n} unsaved` : '');
 
 function pullRequestBadge(branch: CmsBranch) {
   const pr = branch.pullRequest;
@@ -42,8 +51,9 @@ function ReviewLink({ name, route, onClick }: { name: string; route: string; onC
   );
 }
 
-function BranchPicker({ workspace, open, onOpenChange }: { workspace: Workspace } & BranchDialogProps) {
+function BranchPicker({ workspace, open, onOpenChange, finalFocus }: { workspace: Workspace } & BranchDialogProps) {
   const branches = useBranches();
+  const unsaved = useBufferScopes().counts;
   const { canLeave } = useBridge();
   const [input, setInput] = useState('');
   const [naming, setNaming] = useState<string | null>(null);
@@ -94,7 +104,7 @@ function BranchPicker({ workspace, open, onOpenChange }: { workspace: Workspace 
   const rows: BranchItem[] = [
     {
       name: base,
-      sub: 'Live site · edits here start a new branch',
+      sub: `Live site · edits here start a new branch${unsavedText(unsaved.get(base))}`,
       active: workspace.onBase,
       onChoose: () => choose(base),
     },
@@ -102,7 +112,7 @@ function BranchPicker({ workspace, open, onOpenChange }: { workspace: Workspace 
       .filter((b) => routeFromBranch(b.name, prefix).includes(query))
       .map((b) => ({
         name: b.name,
-        sub: pullRequestText(b),
+        sub: pullRequestText(b) + unsavedText(unsaved.get(b.name)),
         active: b.name === workspace.active,
         badge: pullRequestBadge(b),
         review: <ReviewLink name={b.name} route={routeFromBranch(b.name, prefix)} onClick={close} />,
@@ -113,6 +123,7 @@ function BranchPicker({ workspace, open, onOpenChange }: { workspace: Workspace 
   return (
     <BranchesSheet
       open={open}
+      finalFocus={finalFocus}
       onOpenChange={(next) => {
         if (!next) {
           setNaming(null);
@@ -171,8 +182,8 @@ function BranchPicker({ workspace, open, onOpenChange }: { workspace: Workspace 
 }
 
 /** Branch picker: find or create a `<prefix>*` branch, switch to one (asking the unsaved-changes guard), or review one. */
-export function BranchDialog({ open, onOpenChange }: BranchDialogProps) {
+export function BranchDialog({ open, onOpenChange, finalFocus }: BranchDialogProps) {
   const workspace = useWorkspace();
   if (!workspace) return null;
-  return <BranchPicker workspace={workspace} open={open} onOpenChange={onOpenChange} />;
+  return <BranchPicker workspace={workspace} open={open} onOpenChange={onOpenChange} finalFocus={finalFocus} />;
 }

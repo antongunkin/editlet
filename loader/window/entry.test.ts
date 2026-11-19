@@ -111,6 +111,25 @@ describe('window.js', () => {
     expect(handle.hidden).toBe(true);
   });
 
+  it('marks the dialog with the admin’s theme, and the handle takes the Dark grabber colour from it', async () => {
+    pageWidth(true);
+    const { dialog, frame } = openDialog();
+    await import('./entry');
+    expect(dialog.hasAttribute('data-editlet-theme')).toBe(false);
+    send(frame, { type: 'theme', theme: 'dark' });
+    expect(dialog.getAttribute('data-editlet-theme')).toBe('dark');
+    send(frame, { type: 'theme', theme: 'light' });
+    expect(dialog.getAttribute('data-editlet-theme')).toBe('light');
+    // A theme from another origin or window is ignored, like every message.
+    send(frame, { type: 'theme', theme: 'dark' }, 'https://evil.example');
+    expect(dialog.getAttribute('data-editlet-theme')).toBe('light');
+    // The page's style: Dark's grey tab, only while not hovered or pulled (the accent wins then).
+    const css = document.querySelector('style[data-editlet-handle]')!.textContent!;
+    expect(css).toContain(
+      'dialog[data-editlet-theme=dark] [data-editlet-handle]:not(:hover,[data-active])::before{background:#a3a3a3}',
+    );
+  });
+
   it('marks the dialog with the sides a hovered or pulled resize edge moves, not while it moves', async () => {
     const { dialog, frame } = openDialog();
     await import('./entry');

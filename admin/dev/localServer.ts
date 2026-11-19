@@ -3,7 +3,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { mountDevApi } from './devApi';
-import { ADMIN_PREFIX, buildDemoSite, CONTENT_TYPES, listen, send, serveAdmin } from './serve';
+import { ADMIN_PREFIX, buildDemoSite, CONTENT_TYPES, listen, pageEntries, send, serveAdmin } from './serve';
 
 import { readProject } from '../../node/project';
 
@@ -47,6 +47,13 @@ export async function startLocalHost(opts: { root: string; port?: number }): Pro
     }
     if (pathname.startsWith(ADMIN_PREFIX)) {
       await serveAdmin(pathname, res);
+      return;
+    }
+    // An entry's own page (`/posts/<slug>` on the fixture): only its card. Any other path stays a plain 404.
+    const project = await readProject(root).catch(() => null);
+    const shown = project ? pageEntries(project.schema, project.entries, pathname) : [];
+    if (shown.length > 0) {
+      send(res, 200, site.page(shown), CONTENT_TYPES['.html']);
       return;
     }
     send(res, 404, 'Not found');

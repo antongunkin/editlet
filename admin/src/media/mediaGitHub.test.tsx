@@ -5,6 +5,7 @@ import { withEditletRoute } from '../../../loader/protocol';
 import { tokenSession, writeSession } from '../github/session';
 import { activeBranchKey } from '../github/workspace';
 import { createAdminFakeGitHub, type AdminFakeGitHub } from '../test/fakeGitHub';
+import { fixtureFiles } from '../test/fixture';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
 
 // The Media screen on the live site: commits go to an Editlet branch, never to the base branch.
@@ -108,5 +109,91 @@ describe('Media on GitHub', () => {
     await openMedia(fake, 'editlet/a', failing);
     upload();
     expect((await within(main()).findByRole('alert')).textContent).toContain("Can't reach GitHub");
+  });
+
+  it('Replace… on the base branch: the branch sheet closes back onto ⋯', async () => {
+    await openMedia(createAdminFakeGitHub());
+    fireEvent.click(screen.getByTitle(COVER));
+    await within(main()).findByRole('heading', { level: 1, name: 'cover.webp' });
+    const more = within(main()).getByRole('button', { name: 'More actions' });
+    fireEvent.click(more);
+    fireEvent.click(await screen.findByRole('button', { name: /^Replace…/ }));
+    fireEvent.change(screen.getByTestId('media-replace-file'), {
+      target: { files: [new File([new Uint8Array([1, 2])], 'cover.webp', { type: 'image/webp' })] },
+    });
+    const dialog = await screen.findByRole('dialog', { name: /^Replace/ });
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Replace/ })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(more));
+  });
+});
+
+describe('the missing alt queue on GitHub', () => {
+  const ONE = 'cms/content/post/one.md';
+  const BODY = (a: string, b: string) => `---\ntitle: One\n---\n![${a}](one/a.png) and ![${b}](one/b.png)\n`;
+  const files = () => ({
+    ...fixtureFiles(),
+    [ONE]: BODY('', ''),
+    'cms/content/post/one/a.png': new Uint8Array([1]),
+    'cms/content/post/one/b.png': new Uint8Array([2]),
+  });
+  const text = (fake: AdminFakeGitHub, branch: string, path: string) =>
+    new TextDecoder().decode(
+      fake.state.blobs.get(fake.state.commits.get(fake.state.refs.get(branch)!)!.files.get(path)!)!,
+    );
+
+  /** ⋯ → Add missing alt text, on `?editlet=media`. */
+  async function startQueue(fake: AdminFakeGitHub) {
+    await openMedia(fake);
+    await within(main()).findByRole('button', { name: /^Missing alt\s*2$/ });
+    fireEvent.click(within(main()).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add missing alt text' }));
+    return within(await screen.findByRole('dialog', { name: 'Missing alt' }));
+  }
+  const save = (q: ReturnType<typeof within>, alt: string) => {
+    fireEvent.change(q.getByRole('textbox', { name: /^Alt text for / }), { target: { value: alt } });
+    fireEvent.click(q.getByRole('button', { name: /^Save & / }));
+  };
+
+  it('asks for a branch at the first save, inside the queue, and commits the next image there without asking', async () => {
+    const fake = createAdminFakeGitHub({ files: files() });
+    const mainHead = fake.state.refs.get('main');
+    const q = await startQueue(fake);
+    save(q, 'Alpha');
+
+    // The new-branch sheet is a second level over the queue, which is still open under it.
+    const branch = await screen.findByRole('dialog', { name: 'Update alt text of a.png' });
+    expect(
+      screen.getAllByRole('dialog', { hidden: true }).filter((d) => d.getAttribute('aria-modal') !== 'false'),
+    ).toHaveLength(2);
+    const field = within(branch).getByLabelText(/^New branch/) as HTMLInputElement;
+    await waitFor(() => expect(field.value).toBe('media'));
+    const commit = within(branch).getByRole('button', { name: 'Commit on branch' });
+    await waitFor(() => expect(commit).toHaveProperty('disabled', false));
+    await act(async () => fireEvent.click(commit));
+
+    await waitFor(() => expect(has(fake, 'editlet/media', ONE)).toBe(true));
+    await q.findByText('2 of 2');
+    expect(fake.state.refs.get('main')).toBe(mainHead);
+    expect(text(fake, 'editlet/media', ONE)).toContain('![Alpha](one/a.png)');
+
+    // The second image goes to the new branch with no question.
+    save(q, 'Bravo');
+    await q.findByText('All done');
+    expect(text(fake, 'editlet/media', ONE)).toContain('![Bravo](one/b.png)');
+    expect(screen.queryByRole('dialog', { name: 'Update alt text of b.png' })).toBeNull();
+    expect(fake.state.refs.get('main')).toBe(mainHead);
+  });
+
+  it('creates no branch for an image that was fixed meanwhile', async () => {
+    const fake = createAdminFakeGitHub({ files: files() });
+    const q = await startQueue(fake);
+    // Someone gives both images their alt on main while the queue is open.
+    fake.commit('main', { [ONE]: BODY('Done', 'Done') });
+    const refs = [...fake.state.refs.keys()];
+    save(q, 'Too late');
+    await q.findByText('2 of 2');
+    expect(screen.queryByRole('dialog', { name: /^Update alt text/ })).toBeNull();
+    expect([...fake.state.refs.keys()]).toEqual(refs);
   });
 });

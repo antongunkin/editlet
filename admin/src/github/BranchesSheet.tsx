@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useId, type ReactNode, type RefObject } from 'react';
 
 import { cn } from '../ui/cn';
 import { BottomBar } from '../ui/parts/bottom-bar';
@@ -128,6 +128,8 @@ export interface BranchesSheetProps {
   note?: ReactNode;
   /** The *New branch* sheet, one level down. */
   children?: ReactNode;
+  /** Where the focus returns on close (`Sheet`'s `finalFocus`). */
+  finalFocus?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -143,9 +145,10 @@ export function BranchesSheet({
   create,
   note,
   children,
+  finalFocus,
 }: BranchesSheetProps) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} title="Branches" sub="Switch or create">
+    <Sheet open={open} onOpenChange={onOpenChange} title="Branches" sub="Switch or create" finalFocus={finalFocus}>
       <form
         className="flex flex-col gap-2 px-4 pt-1 pb-8"
         onSubmit={(e) => {

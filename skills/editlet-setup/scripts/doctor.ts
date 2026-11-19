@@ -3,11 +3,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
 import { localChecks, projectFacts } from './doctorLocal';
-import { githubChecks, siteChecks, type RepoStyle } from './doctorRemote';
+import { entryUrlCheck, githubChecks, siteChecks, type RepoStyle } from './doctorRemote';
 import type { DoctorContext, Finding } from './doctorTypes';
 
 import { resolveGitStyle } from '../../../core/gitStyle';
 import type { GitConfig } from '../../../core/schema';
+import { readProject } from '../../../node/project';
 
 const SCHEMA_PATH = 'cms/schema.json';
 
@@ -39,6 +40,8 @@ export async function doctor(ctx: DoctorContext): Promise<Finding[]> {
     const site = await siteChecks(ctx);
     findings.push(...site.findings);
     config = site.config;
+    const project = await readProject(ctx.root).catch(() => null);
+    if (project) findings.push(...(await entryUrlCheck(ctx, project)));
   }
   if (ctx.url || facts.admin) findings.push(...githubChecks(ctx, facts, config, repoStyle(ctx.root)));
   return findings;

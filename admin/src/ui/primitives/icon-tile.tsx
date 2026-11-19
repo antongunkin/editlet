@@ -8,12 +8,17 @@ import { cn } from '../cn';
 
 /**
  * An icon on a rounded tile (FigCraft `IconTile/<icon>`): 32 and 40 px with a radius of 12, 56 px with a radius of 16
- * (the scale's steps), the muted fill or the danger tint.
+ * (the scale's steps), the muted fill or a tint (danger, unsaved, success).
  */
 export const iconTileVariants = cva('inline-flex shrink-0 items-center justify-center text-foreground', {
   variants: {
     size: { 32: 'size-8 rounded-xl', 40: 'size-10 rounded-xl', 56: 'size-14 rounded-2xl' },
-    tone: { neutral: 'bg-muted', danger: 'bg-tint-danger text-tint-danger-foreground' },
+    tone: {
+      neutral: 'bg-muted',
+      danger: 'bg-tint-danger text-tint-danger-foreground',
+      unsaved: 'bg-tint-unsaved text-tint-unsaved-foreground',
+      success: 'bg-tint-success text-tint-success-foreground',
+    },
   },
   defaultVariants: { size: 40, tone: 'neutral' },
 });

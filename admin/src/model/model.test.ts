@@ -220,7 +220,7 @@ describe('globalPrompts', () => {
       text: 'Run the content validation and fix the problems shown in the content model.',
     });
     expect(prompts[1]!.text).toBe(
-      'Add a collection "tag" (label "Tag") with a required string field "name", and let "post" reference many tags.',
+      'Add a collection "tag" (label "Tag" and its pluralLabel) with a required string field "name", and let "post" reference many "tag" entries.',
     );
   });
 
@@ -230,6 +230,8 @@ describe('globalPrompts', () => {
     const taken = withField(fixture(), 'post', 'x', { type: 'string', label: 'X' });
     taken.collections.tag = taken.collections.post;
     const next = globalPrompts(taken, 'cms/schema.json', { hasProblems: false });
-    expect(next.find((p) => p.id === 'add-collection')!.text).toContain('many categories.');
+    const add = next.find((p) => p.id === 'add-collection')!.text;
+    expect(add).toContain('(label "Category" and its pluralLabel)');
+    expect(add).toContain('many "category" entries.');
   });
 });

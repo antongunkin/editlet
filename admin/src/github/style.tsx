@@ -23,6 +23,7 @@ import {
   type CodeownersRule,
   type GitHubSource,
 } from '../../../github';
+import { fetchBranchDiff } from '../status/branchDiff';
 
 /**
  * The commit message for a subject: the workspace's `git.commitMessage` (plus `suffix`, for example ` (1/3)`) and
@@ -66,7 +67,8 @@ export function pullRequestBodyFor(
 
 /**
  * After a commit on a branch whose open pull request is known (the branch listing), rewrites the Editlet part of its
- * body from a fresh compare. Best effort: a failure leaves the body as it was, and the next save tries again.
+ * body from the branch's diff at its new head (the shared branch status query: the same compare Home and the preview
+ * read). Best effort: a failure leaves the body as it was, and the next save tries again.
  */
 export async function refreshPullRequestBody(
   queryClient: QueryClient,
@@ -78,7 +80,7 @@ export async function refreshPullRequestBody(
   const listed = queryClient.getQueryData<CmsBranch[]>(BRANCHES_KEY);
   if (!listed?.find((b) => b.name === source.branch)?.pullRequest) return;
   try {
-    const diff = await source.compare();
+    const diff = await fetchBranchDiff(queryClient, source);
     await source.refreshPullRequestBody(pullRequestBodyFor(workspace, source.branch, schema, diff.files, login));
   } catch {
     // Not part of the save: the commit already landed.

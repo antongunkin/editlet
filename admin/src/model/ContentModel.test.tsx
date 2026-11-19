@@ -42,6 +42,15 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
+/** The icon of the toast that says `title` (`data-icon` of its Icon). */
+const toastIcon = (title: string) =>
+  screen
+    .getAllByText(title)
+    .map((el) => el.closest('[data-slot="toast"]'))
+    .find(Boolean)
+    ?.querySelector('[data-icon]')
+    ?.getAttribute('data-icon');
+
 describe('ContentModel', () => {
   it('lists a row per collection with its counts and opens its fields in a sheet', async () => {
     await openModel();
@@ -62,6 +71,16 @@ describe('ContentModel', () => {
     expect(within(titleRow).getByText('Required', { exact: false })).toBeDefined();
     expect(within(titleRow).getByText('Title')).toBeDefined();
     expect(post.getByRole('link', { name: /^Open 1 entry/ }).getAttribute('href')).toContain('editlet=post');
+  });
+
+  it("shows the collection's page address, or No page address", async () => {
+    await openModel();
+    const post = await openCollection('Post');
+    expect(within(post.getByRole('list', { name: 'Post page' })).getByText('/posts/{slug}')).toBeDefined();
+    fireEvent.click(post.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    const author = await openCollection('Author');
+    expect(within(author.getByRole('list', { name: 'Author page' })).getByText('No page address')).toBeDefined();
   });
 
   it('shows who points at a collection and opens that one in the same sheet', async () => {
@@ -204,6 +223,16 @@ describe('ContentModel', () => {
     const ask = await openAsk();
     fireEvent.click(ask.getByRole('button', { name: 'Copy', description: 'Add a collection' }));
     expect(await screen.findByText('Copy failed')).toBeDefined();
+    expect(toastIcon('Copy failed')).toBe('alert');
+  });
+
+  it('says Copy failed with the alert icon when the schema copy is refused', async () => {
+    stubClipboard(() => Promise.reject(new Error('denied')));
+    await openModel();
+    fireEvent.click(within(main()).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy schema' }));
+    expect(await screen.findByText('Copy failed')).toBeDefined();
+    expect(toastIcon('Copy failed')).toBe('alert');
   });
 
   it('offers prompts for the whole model, the fix prompt first when there are problems', async () => {
@@ -226,6 +255,7 @@ describe('ContentModel', () => {
     const arg = (write.mock.calls[0] as unknown as [string])[0];
     expect(JSON.parse(arg).collections.post.label).toBe('Post');
     expect(await screen.findByText('Schema copied')).toBeDefined();
+    expect(toastIcon('Schema copied')).toBe('copy');
   });
 
   it('renders an empty schema', async () => {

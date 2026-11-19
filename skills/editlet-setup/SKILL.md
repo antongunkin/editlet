@@ -64,7 +64,10 @@ normal install: everything it needs is here.
    `bun add`).
 4. **Skills.** `node node_modules/editlet/skills/editlet/scripts/link.mjs --hooks` ([skills](references/skills.md)).
 5. **Framework.** [Next.js](references/next.md) or [Astro](references/astro.md), steps 1–4 there: config, `.gitignore`,
-   loader or collections, and a minimal schema with one sample entry only if no content exists.
+   loader or collections, and a minimal schema with one sample entry only if no content exists. Then give each
+   collection that is not a singleton its `pluralLabel`, and each collection that has a page its `url` (read from the
+   site's routes); ask the human for a collection you cannot map
+   ([next § page addresses](references/next.md#page-addresses-and-plural-labels)).
 6. **Verify** (rule 5), the reference's last step.
 7. **Hand over:** the files changed, the `?editlet` URL, what is not set up yet (the live site), and, if content exists,
    the offer to migrate it with `editlet-migrate`.
@@ -101,6 +104,7 @@ no `fail`.
 | Copying existing posts into `cms/content` during setup | Leave them; offer `editlet-migrate` |
 | "Build passes" as the only proof | Also the dev server checks and `?editlet` |
 | A preview or auth route nobody asked for | Only what the task needs |
+| A guessed `url`, or a new route so a collection has one | `url` only from a route that exists; otherwise leave it out or ask |
 | No `authUrl`, hoping the editor asks for it | `admin.authUrl` in the config |
 | GitHub App without Deployments: Read | Contents RW, Pull requests RW, Deployments R |
 | Branch protection as "optional" | Required: a ruleset that requires a PR |

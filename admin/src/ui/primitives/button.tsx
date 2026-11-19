@@ -42,6 +42,10 @@ export const buttonVariants = cva(
           'bg-transparent text-foreground',
           'hovered:bg-accent pressed:bg-muted-active focused:bg-card focused:inset-ring-foreground',
         ],
+        'ghost-danger': [
+          'bg-transparent text-tint-danger-foreground',
+          'hovered:bg-tint-danger pressed:bg-tint-danger focused:bg-card focused:inset-ring-foreground',
+        ],
         link: 'h-auto bg-transparent px-0 text-foreground underline-offset-4 hovered:underline focused:inset-ring-foreground',
       },
       size: {

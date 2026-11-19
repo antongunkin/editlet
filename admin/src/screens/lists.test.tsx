@@ -2,10 +2,14 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createMemorySource } from '../../../core/source';
-import { readEditletRoute } from '../../../loader/protocol';
+import { readEditletRoute, withEditletRoute } from '../../../loader/protocol';
 import { App } from '../App';
 import { pendingNewEntries } from '../entry/pending';
+import { tokenSession, writeSession } from '../github/session';
+import { activeBranchKey } from '../github/workspace';
+import { createAdminFakeGitHub } from '../test/fakeGitHub';
 import { createFakeWindow, ORIGIN } from '../test/fakeWindow';
+import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
 import { createTestQueryClient, doneField, fixtureFiles, HOME_LOADED, renderApp, sheet } from '../test/render';
 
 /** The fixture site with `titleField: 'title'` on post and one extra draft post. */
@@ -20,7 +24,22 @@ function variantFiles(): Record<string, string | Uint8Array> {
   return files;
 }
 
+/** The fixture site with `post`'s keys changed (`pluralLabel`, `url`; `undefined` removes one). */
+function postWith(keys: Record<string, unknown>): Record<string, string | Uint8Array> {
+  const files = variantFiles();
+  const schema = JSON.parse(files['cms/schema.json'] as string) as {
+    collections: Record<string, Record<string, unknown>>;
+  };
+  for (const [key, value] of Object.entries(keys)) {
+    if (value === undefined) delete schema.collections.post![key];
+    else schema.collections.post![key] = value;
+  }
+  files['cms/schema.json'] = JSON.stringify(schema, null, 2);
+  return files;
+}
+
 const main = () => screen.getByRole('main');
+const filterChips = () => within(main()).getByRole('group', { name: 'Show' });
 const editletRoute = () => readEditletRoute(window.location.href);
 
 afterEach(() => {
@@ -52,8 +71,8 @@ describe('All content', () => {
   it('lists the collections with counts, Media and the Content model; a row opens its screen', async () => {
     renderApp({ route: 'all-content' });
     const collections = await within(main()).findByRole('list', { name: 'Collections' });
-    await within(collections).findByRole('link', { name: /^Post\s*1 entry$/ });
-    expect(within(collections).getByRole('link', { name: /^Author\s*1 entry$/ })).toBeDefined();
+    await within(collections).findByRole('link', { name: /^Posts?\s*1 entry$/ });
+    expect(within(collections).getByRole('link', { name: /^Authors?\s*1 entry$/ })).toBeDefined();
     expect(within(collections).getByRole('link', { name: /^Home page\s*Single page/ })).toBeDefined();
     expect(within(main()).getByRole('link', { name: /^Media/ })).toBeDefined();
     fireEvent.click(within(main()).getByRole('link', { name: /^Content model/ }));
@@ -88,7 +107,7 @@ describe('Collection', () => {
     const hello = await within(main()).findByRole('button', { name: /^Hello world/ });
     expect(hello.textContent).toBe('Hello worldPublished');
     expect(within(list()).getByRole('button', { name: /^Second post/ }).textContent).toBe('Second postDraft');
-    expect(within(main()).getByRole('heading', { level: 1, name: 'Post' })).toBeDefined();
+    expect(within(main()).getByRole('heading', { level: 1, name: /^Posts?$/ })).toBeDefined();
     expect(within(main()).getByRole('link', { name: 'Back' })).toBeDefined();
   });
 
@@ -123,6 +142,69 @@ describe('Collection', () => {
     fireEvent.click(within(main()).getByRole('button', { name: /^Drafts\s*0$/ }));
     expect(within(main()).getByRole('status').textContent).toBe('No drafts. Every entry is published.');
     expect(within(main()).queryByRole('list')).toBeNull();
+  });
+
+  /** The dev server's `GET /__editlet/git` answering `files` (other requests: 404, so no history). */
+  function mockGit(files: { path: string; status: string }[] | null) {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (!url.pathname.endsWith('/git')) return new Response('{}', { status: 404 });
+      if (files === null) return new Response('{}', { status: 500 });
+      return new Response(JSON.stringify({ branch: 'main', changes: files.length, files, project: 'p' }));
+    });
+  }
+
+  it('Changed: the files saved to disk and not committed, counted and narrowed; the row says Changed', async () => {
+    window.innerWidth = 375;
+    mockGit([{ path: 'cms/content/post/second-post.md', status: 'modified' }]);
+    renderApp({ files: variantFiles(), route: 'post' });
+    await within(main()).findByRole('button', { name: /^Hello world/ });
+    const changed = await within(filterChips()).findByRole('button', { name: /^Changed\s*1$/ });
+    // The status word comes first: Changed, not Draft.
+    expect(within(list()).getByRole('button', { name: /^Second post/ }).textContent).toBe('Second postChanged');
+    expect(within(list()).getByRole('button', { name: /^Hello world/ }).textContent).toBe('Hello worldPublished');
+    // The draft stays under Drafts too.
+    expect(within(filterChips()).getByRole('button', { name: /^Drafts\s*1$/ })).toBeDefined();
+    fireEvent.click(changed);
+    expect(within(list()).getAllByRole('button')).toHaveLength(1);
+    expect(within(list()).getByRole('button', { name: /^Second post/ })).toBeDefined();
+  });
+
+  it('in a wide window a changed row has the Changed badge', async () => {
+    window.innerWidth = 600;
+    mockGit([{ path: 'cms/content/post/hello-world.md', status: 'modified' }]);
+    renderApp({ files: variantFiles(), route: 'post' });
+    const hello = await within(main()).findByRole('button', { name: /^Hello world/ });
+    await waitFor(() => expect(hello.querySelector('[data-slot="badge"]')?.textContent).toBe('Changed'));
+  });
+
+  it('dev mode has no In review chip; Changed with nothing in it says so', async () => {
+    mockGit([]);
+    renderApp({ files: variantFiles(), route: 'post' });
+    await within(main()).findByRole('button', { name: /^Hello world/ });
+    fireEvent.click(await within(filterChips()).findByRole('button', { name: /^Changed\s*0$/ }));
+    expect(within(main()).getByRole('status').textContent).toBe(
+      'Nothing changed. Edits and saved changes that are not live show here.',
+    );
+    expect(within(filterChips()).queryByRole('button', { name: /^In review/ })).toBeNull();
+  });
+
+  it('Changed counts … until the statuses load, then 0 when the git route fails', async () => {
+    let answer!: () => void;
+    const gate = new Promise<void>((r) => (answer = r));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (!String(input).endsWith('/git')) return new Response('{}', { status: 404 });
+      await gate;
+      return new Response('{}', { status: 500 });
+    });
+    renderApp({ files: variantFiles(), route: 'post' });
+    await within(main()).findByRole('button', { name: /^Hello world/ });
+    const pending = await within(filterChips()).findByRole('button', { name: /^Changed\s*…$/ });
+    fireEvent.click(pending);
+    // Placeholder rows, not the empty text, while it loads.
+    expect(within(main()).queryByRole('status')).toBeNull();
+    answer();
+    await within(filterChips()).findByRole('button', { name: /^Changed\s*0$/ });
   });
 
   it('when it changed comes from the git history; newest first by default', async () => {
@@ -205,9 +287,114 @@ describe('Collection', () => {
     expect(within(main()).getByRole('button', { name: 'New post' })).toBeDefined();
   });
 
+  it('the heading and the All content row read pluralLabel; New post stays singular', async () => {
+    renderApp({ files: postWith({ pluralLabel: 'Posts' }), route: 'post' });
+    expect(await within(main()).findByRole('heading', { level: 1, name: 'Posts' })).toBeDefined();
+    fireEvent.click(within(main()).getByRole('button', { name: 'New post' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'New post' }));
+    expect(dialog.getByText('Posts')).toBeDefined();
+    expect(dialog.getByRole('button', { name: 'Create post' })).toBeDefined();
+  });
+
+  it('All content names a collection by its pluralLabel, a singleton by its label', async () => {
+    renderApp({ files: postWith({ pluralLabel: 'Posts' }), route: 'all-content' });
+    const collections = await within(main()).findByRole('list', { name: 'Collections' });
+    await within(collections).findByRole('link', { name: /^Posts\s*2 entries$/ });
+    expect(within(collections).getByRole('link', { name: /^Home page\s*Single page/ })).toBeDefined();
+  });
+
   it('a singleton route renders the entry screen', async () => {
     renderApp({ route: 'homePage' });
     expect(await within(main()).findByRole('group', { name: / fields$/ })).toBeDefined();
+  });
+});
+
+describe('Collection in GitHub mode', () => {
+  const ENTRY = 'cms/content/post/hello-world.md';
+
+  /**
+   * `main` plus `editlet/a`, which edits post/hello-world (titled by its slug), with an open pull request or none; the
+   * admin opens `route` (the collection) on `active`.
+   */
+  function fakeOnBranch(pull: { draft: boolean } | null, active = 'editlet/a', route = 'post') {
+    const fake = createAdminFakeGitHub();
+    const sha = fake.state.commits.get(fake.state.refs.get('main')!)!.files.get(ENTRY)!;
+    const text = new TextDecoder().decode(fake.state.blobs.get(sha));
+    fake.state.refs.set('editlet/a', fake.state.refs.get('main')!);
+    fake.commit('editlet/a', { [ENTRY]: text.replace('Hello world', 'On A') });
+    if (pull) {
+      fake.state.pulls.push({
+        number: 2,
+        title: 'A',
+        body: '',
+        draft: pull.draft,
+        head: 'editlet/a',
+        base: 'main',
+        state: 'open',
+      });
+    }
+    window.localStorage.setItem(activeBranchKey('o', 'r'), active);
+    window.history.replaceState(null, '', withEditletRoute('/editlet/', route));
+    writeSession(window.sessionStorage, tokenSession('pat_1'));
+    renderLiveApp(siteFetch(LIVE_CONFIG, fake));
+  }
+
+  afterEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  it('a branch with an open pull request: the entry is in review and changed; the badge says In review', async () => {
+    window.innerWidth = 375;
+    fakeOnBranch({ draft: false });
+    const row = await screen.findByRole('button', { name: /^hello-world/ });
+    await within(filterChips()).findByRole('button', { name: /^In review\s*1$/ });
+    expect(within(filterChips()).getByRole('button', { name: /^Changed\s*1$/ })).toBeDefined();
+    expect(row.textContent).toMatch(/^hello-worldIn review · /);
+    fireEvent.click(within(filterChips()).getByRole('button', { name: /^In review/ }));
+    expect(within(main()).getAllByRole('button', { name: /^hello-world/ })).toHaveLength(1);
+  });
+
+  it('the base branch: another branch’s open pull request puts its entry in review', async () => {
+    window.innerWidth = 375;
+    fakeOnBranch({ draft: false }, 'main');
+    const row = await screen.findByRole('button', { name: /^hello-world/ });
+    await within(filterChips()).findByRole('button', { name: /^In review\s*1$/ });
+    // Nothing changed on main itself.
+    expect(within(filterChips()).getByRole('button', { name: /^Changed\s*0$/ })).toBeDefined();
+    expect(row.textContent).toMatch(/^hello-worldIn review/);
+  });
+
+  it('the entry’s title badge: In review beats Changed on a branch with an open pull request', async () => {
+    fakeOnBranch({ draft: false }, 'editlet/a', 'post/hello-world');
+    await screen.findByRole('button', { name: /^Title/ });
+    const badge = () =>
+      within(main()).getByRole('heading', { level: 1 }).parentElement!.querySelector('[data-slot="badge"]');
+    await waitFor(() => expect(badge()?.textContent).toBe('In review'));
+  });
+
+  it('in a wide window an entry in review has the In review badge', async () => {
+    window.innerWidth = 600;
+    fakeOnBranch({ draft: false });
+    const row = await screen.findByRole('button', { name: /^hello-world/ });
+    await waitFor(() => expect(row.querySelector('[data-slot="badge"]')?.textContent).toBe('In review'));
+  });
+
+  it('the base branch: a draft pull request puts nothing in review; the chip says so', async () => {
+    fakeOnBranch({ draft: true }, 'main');
+    await screen.findByRole('button', { name: /^hello-world/ });
+    fireEvent.click(await within(filterChips()).findByRole('button', { name: /^In review\s*0$/ }));
+    expect(within(main()).getByRole('status').textContent).toBe('Nothing in review.');
+  });
+
+  it('a draft pull request: Changed, nothing in review', async () => {
+    window.innerWidth = 375;
+    fakeOnBranch({ draft: true });
+    const row = await screen.findByRole('button', { name: /^hello-world/ });
+    await within(filterChips()).findByRole('button', { name: /^Changed\s*1$/ });
+    expect(row.textContent).toMatch(/^hello-worldChanged · /);
+    fireEvent.click(within(filterChips()).getByRole('button', { name: /^In review\s*0$/ }));
+    expect(within(main()).getByRole('status').textContent).toBe('Nothing in review.');
   });
 });
 
@@ -314,6 +501,31 @@ describe('New entry', () => {
     await waitFor(() => expect(document.activeElement).toBe(address));
     fireEvent.change(address, { target: { value: 'hello-world-2' } });
     expect((dialog.getByRole('button', { name: 'Create post' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows the page's address around the slug from the collection's url; Edit edits the slug only", async () => {
+    renderApp({ files: postWith({ url: '/posts/{slug}/' }), route: 'post' });
+    const dialog = await open();
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Tires' } });
+    const line = dialog.getByText('Address').parentElement!;
+    expect(line.textContent).toBe('Address/posts/tires/Edit');
+    fireEvent.click(dialog.getByRole('button', { name: 'Edit the address' }));
+    const address = dialog.getByLabelText('Address') as HTMLInputElement;
+    expect(address.value).toBe('tires');
+    expect(address.parentElement!.textContent).toBe('/posts//');
+    fireEvent.change(address, { target: { value: 'tires-2' } });
+    fireEvent.click(dialog.getByRole('button', { name: 'Create post' }));
+    expect(editletRoute()).toBe('post/tires-2');
+  });
+
+  it('without {slug} in url, or without url, the address is the slug alone', async () => {
+    for (const url of ['/blog', undefined]) {
+      const { unmount } = renderApp({ files: postWith({ url }), route: 'post' });
+      const dialog = await open();
+      fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Tires' } });
+      expect(dialog.getByText('Address').parentElement!.textContent).toBe('AddresstiresEdit');
+      unmount();
+    }
   });
 
   it('opens empty each time', async () => {

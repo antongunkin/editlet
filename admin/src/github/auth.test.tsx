@@ -625,8 +625,8 @@ describe('a session that ends by itself keeps the open form', () => {
   it('a 401 lapses too; a different account then gets a fresh admin, not the old form', async () => {
     const { control, form } = await dirtyEntry();
     control.revoked = true;
+    // Opening *Your changes* reads the branches and CODEOWNERS: the 401 may come before or after its Save.
     fireEvent.click(await findCta(/^Save/));
-    await saveReview();
 
     const dialog = await screen.findByRole('dialog', { name: 'Sign in again' });
     expect(within(dialog).getByText('Your GitHub session expired. Sign in again.')).toBeDefined();
@@ -656,7 +656,7 @@ describe('a session that ends by itself keeps the open form', () => {
     // The account sheet is Home's: leave the entry, the collection and All content first.
     fireEvent.click(screen.getByRole('link', { name: 'Back' }));
     fireEvent.click(
-      await screen.findByRole('heading', { name: 'Post' }).then(() => screen.getByRole('link', { name: 'Back' })),
+      await screen.findByRole('heading', { name: /^Posts?$/ }).then(() => screen.getByRole('link', { name: 'Back' })),
     );
     fireEvent.click(
       await screen

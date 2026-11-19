@@ -41,6 +41,15 @@ describe('⋯ → Duplicate', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Hello world (copy)' })).toBeTruthy();
     expect(window.location.href).toContain('post/hello-world-copy');
     expect(await screen.findByText('Duplicated')).toBeTruthy();
+    // A copy, not a save: the toast's icon is the copy icon.
+    expect(
+      screen
+        .getAllByText('Duplicated')
+        .map((el) => el.closest('[data-slot="toast"]'))
+        .find(Boolean)
+        ?.querySelector('[data-icon]')
+        ?.getAttribute('data-icon'),
+    ).toBe('copy');
     fireEvent.click(await findCta('Save'));
     await saveReview();
     await waitFor(() => expect(commit).toHaveBeenCalled());

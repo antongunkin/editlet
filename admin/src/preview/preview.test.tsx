@@ -127,7 +127,7 @@ describe('preview snapshot from the entry form (local mode)', () => {
     expect(messages).toEqual([{ name: PREVIEW_CHANNEL, data: { source: 'editlet', type: 'snapshot' } }]);
   });
 
-  it('closing the entry removes its form preview', async () => {
+  it('leaving the entry drops its form layer; its unsaved edit stays in the page through the buffer layer', async () => {
     renderApp({ route: REF });
     const title = await openTitle();
     typeInto(title, 'New');
@@ -136,7 +136,11 @@ describe('preview snapshot from the entry form (local mode)', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     await closeSheets();
     fireEvent.click(screen.getByRole('link', { name: 'Back' }));
-    await waitFor(async () => expect(await readSnapshot()).toBeNull());
+    // The buffer keeps the edit (the leave guard asked nothing of it here only because this store cannot persist).
+    await screen.findByRole('heading', { level: 1, name: /^Posts?$/ });
+    await waitFor(async () =>
+      expect((await readSnapshot())?.entries[REF]?.title).toEqual({ text: { from: 'Hello world', to: 'New' } }),
+    );
   });
 
   it('a dirty close via close-request drops the form preview before the admin sends close', async () => {
@@ -296,7 +300,7 @@ function previewSite(
   return { fetch: fetchFn, calls };
 }
 
-const headOf = (fake: AdminFakeGitHub, branch: string) => fake.state.refs.get(branch)!;
+const headOf = (fake: AdminFakeGitHub, name: string) => fake.state.refs.get(name)!;
 
 /** An embedded admin (fake window at `route`) whose bridge `send` calls go to `log` as `msg:<type>`. */
 function embeddedAt(route: string, log: string[]) {
@@ -361,7 +365,7 @@ describe('Layer B: the preview cookie (GitHub mode, config.preview)', () => {
     // The account sheet is Home's: leave the entry, the collection and All content first.
     fireEvent.click(screen.getByRole('link', { name: 'Back' }));
     fireEvent.click(
-      await screen.findByRole('heading', { name: 'Post' }).then(() => screen.getByRole('link', { name: 'Back' })),
+      await screen.findByRole('heading', { name: /^Posts?$/ }).then(() => screen.getByRole('link', { name: 'Back' })),
     );
     fireEvent.click(
       await screen
@@ -429,6 +433,56 @@ function previewWrapper({ children }: { children: ReactNode }) {
     </BridgeProvider>
   );
 }
+
+describe('the layers: branch < buffer < form', () => {
+  const text = (from: string, to: string) => ({ text: { from, to } });
+
+  it('the buffer covers the branch per field, the open form covers the buffer; both go before close', async () => {
+    const fake = createFakeWindow();
+    const { result } = renderHook(() => usePreview(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <BridgeProvider win={fake.win}>
+          <PreviewProvider flag={false}>{children}</PreviewProvider>
+        </BridgeProvider>
+      ),
+    });
+    act(() => {
+      result.current.setBranchPreview('editlet/a', { [REF]: { title: text('Old', 'Branch'), body: text('a', 'b') } });
+      result.current.setBufferPreview({
+        [REF]: { title: text('Branch', 'Buffer') },
+        'author/jane': { name: text('Jane', 'J') },
+      });
+    });
+    await waitFor(async () => expect((await readSnapshot())?.entries['author/jane']).toBeDefined());
+    let snap = await readSnapshot();
+    // The buffer's value wins, keeping the branch's `from`; the other fields stay the branch's.
+    expect(snap!.entries[REF]!.title).toEqual(text('Old', 'Buffer'));
+    expect(snap!.entries[REF]!.body).toEqual(text('a', 'b'));
+    act(() => result.current.setFormPreview(REF, { title: text('Branch', 'Form') }));
+    await waitFor(async () => expect((await readSnapshot())?.entries[REF]?.title).toEqual(text('Old', 'Form')));
+    // The form unmounts: the buffer's value shows again.
+    act(() => result.current.setFormPreview(REF, null));
+    await waitFor(async () => expect((await readSnapshot())?.entries[REF]?.title).toEqual(text('Old', 'Buffer')));
+    // Discarding one buffered entry drops it, the other stays.
+    act(() => result.current.setBufferPreview({ [REF]: { title: text('Branch', 'Buffer') } }));
+    await waitFor(async () => expect((await readSnapshot())?.entries['author/jane']).toBeUndefined());
+    snap = await readSnapshot();
+    expect(snap!.entries[REF]!.title).toEqual(text('Old', 'Buffer'));
+
+    // Close: the form and buffer layers are dropped and written before `close` goes out; the branch layer stays.
+    act(() => result.current.setFormPreview(REF, { title: text('Branch', 'Form') }));
+    let atClose: Promise<unknown> | null = null;
+    fake.parent.postMessage.mockImplementation((m: { type: string }) => {
+      if (m.type === 'close') atClose = readSnapshot();
+    });
+    act(() => fake.fromSite({ type: 'init', route: REF, site: { origin: ORIGIN, href: `${ORIGIN}/` } }));
+    act(() => fake.fromSite({ type: 'close-request' }));
+    await waitFor(() => expect(atClose).not.toBeNull());
+    expect(await atClose).toMatchObject({
+      entries: { [REF]: { title: text('Old', 'Branch') } },
+    });
+  });
+});
 
 describe('useSiteRefresh', () => {
   it('runs the function set by setRefreshSite, until it is reset', async () => {

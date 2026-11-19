@@ -1,6 +1,7 @@
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { chooseTheme, initTheme, readChoice, resetThemeChoice, resolveTheme } from './settings';
+import { chooseTheme, initTheme, readChoice, resetThemeChoice, resolveTheme, useThemeChoice } from './settings';
 
 // Appearance (docs/admin/account.md#appearance): System, Light or Dark; remembered in `editlet:theme`.
 
@@ -102,5 +103,48 @@ describe('initTheme', () => {
     chooseTheme('light');
     setSystem(false);
     expect(theme()).toBe('light');
+  });
+});
+
+describe('useThemeChoice', () => {
+  it('is one store: a choice made outside the hook (Search) redraws it (Account)', () => {
+    const { result } = renderHook(() => useThemeChoice());
+    expect(result.current[0]).toBe('system');
+    act(() => chooseTheme('dark'));
+    expect(result.current[0]).toBe('dark');
+    act(() => result.current[1]('light'));
+    expect(result.current[0]).toBe('light');
+    expect(theme()).toBe('light');
+  });
+});
+
+describe('the page is told the theme (embedded)', () => {
+  it('posts the resolved theme to the parent whenever it changes, and only when embedded', () => {
+    const postMessage = vi.fn();
+    stubSystem(true);
+    // Standalone: the window is its own parent, nothing is posted.
+    chooseTheme('dark');
+    expect(postMessage).not.toHaveBeenCalled();
+
+    vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window);
+    chooseTheme('light');
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { source: 'editlet-window', type: 'theme', theme: 'light' },
+      location.origin,
+    );
+    chooseTheme('system');
+    // System with a light OS is Light; the OS switching to Dark posts Dark.
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { source: 'editlet-window', type: 'theme', theme: 'light' },
+      location.origin,
+    );
+    const system = stubSystem(true);
+    initTheme();
+    postMessage.mockClear();
+    system(false);
+    expect(postMessage).toHaveBeenCalledWith(
+      { source: 'editlet-window', type: 'theme', theme: 'dark' },
+      location.origin,
+    );
   });
 });

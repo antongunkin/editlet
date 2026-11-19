@@ -236,9 +236,9 @@ describe('findImageRefs inside object and blocks', () => {
   it('finds images in nested fields and in a nested Markdown string, with their paths', async () => {
     const { readProject } = await import('../node/project');
     const root = `${import.meta.dirname}/../__fixtures__/survey`;
-    const { schema, entries } = await readProject(root);
+    const { schema: project, entries } = await readProject(root);
     const page = entries.find((e) => e.collection === 'page')!;
-    const uses = findImageRefs(schema, schema.collections.page!, 'cms/content/page/landing.md', page.data, page.body);
+    const uses = findImageRefs(project, project.collections.page!, 'cms/content/page/landing.md', page.data, page.body);
     expect(uses.map((u) => [u.field, u.path, u.label ?? '', u.body ? 'text' : 'field'])).toEqual([
       ['content.0.image', 'cms/content/page/landing/hero.webp', 'Image (content.0)', 'field'],
       ['content.1.items.0.icon', 'cms/content/page/landing/fast.webp', 'Icon (content.1.items.0)', 'field'],

@@ -5,7 +5,7 @@ import { gzipSync } from 'node:zlib';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
 
-it('stays within the size budget (5.5 KB minified, 2.2 KB gzip)', async () => {
+it('stays within the size budget (5.5 KB minified, 2.35 KB gzip)', async () => {
   const result = await build({
     stdin: {
       contents: "import { mountEditletLoader } from './index'; mountEditletLoader();",
@@ -19,5 +19,5 @@ it('stays within the size budget (5.5 KB minified, 2.2 KB gzip)', async () => {
   });
   const out = result.outputFiles[0]!.contents;
   expect(out.byteLength).toBeLessThanOrEqual(5632);
-  expect(gzipSync(out).byteLength).toBeLessThanOrEqual(2253);
+  expect(gzipSync(out).byteLength).toBeLessThanOrEqual(2397);
 });

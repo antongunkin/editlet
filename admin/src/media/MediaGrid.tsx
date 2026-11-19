@@ -76,7 +76,8 @@ export interface MediaTileProps {
  * One image (FigCraft `MediaCard`): the picture, with its flags (Unused, No alt) at the bottom and, in select mode,
  * the check at the top left. The whole tile is the button. Keyboard focus, the open image and a drag over it are a
  * 2 px ring on the picture, drawn above it. With a `caption` (select mode, the Gallery: where two files can share a
- * name and a tooltip does not exist on a touch screen) the file name and its folder are under the picture.
+ * name and a tooltip does not exist on a touch screen) the file name (it wraps at a word, and inside one only when it must) and its folder (one line, cut with an
+ * ellipsis; the tooltip has all of it) are under the picture.
  */
 export function MediaTile({
   preview,
@@ -108,8 +109,10 @@ export function MediaTile({
     >
       {caption ? (
         <span className="order-last flex min-w-0 flex-col px-0.5">
-          <span className="text-sm font-medium break-all text-foreground">{caption.name}</span>{' '}
-          <span className="text-xs break-all text-tray-muted-foreground">{caption.folder}</span>
+          <span className="text-sm font-medium wrap-break-word text-foreground">{caption.name}</span>{' '}
+          <span className="truncate text-xs text-tray-muted-foreground" title={caption.folder}>
+            {caption.folder}
+          </span>
         </span>
       ) : null}{' '}
       <span className="relative block aspect-square w-full overflow-hidden rounded-xl bg-muted">

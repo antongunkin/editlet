@@ -8,10 +8,10 @@ import { cn } from '../cn';
 
 /**
  * The text input of the redesign (FigCraft `Input/<state>`, proposal §14.9; docs/admin/ui.md): a 48 px white pill lifted
- * by the raised shadow, 18 px text (no zoom on iOS), no edge. `focused:` matches every focus of a text input (a text
- * field always shows `:focus-visible`), so clicking in it shows the 2 px ink ring too; the design's caret-only "typing"
- * look is the unfocused field. `aria-invalid` is a 2 px red ring; read-only and disabled are flat. With several lines
- * (`multiline`) the radius is 24. One class set for `<input>`, `<textarea>`, `<select>` and the group's pill.
+ * by the raised shadow, 18 px text (no zoom on iOS), no edge. The 2 px ink ring is the keyboard's: `focused:` is
+ * `:focus-visible` unless the editor's last input was a tap or a click (`window/modality.ts`; a text field is always
+ * `:focus-visible`), so tapping a field shows the design's caret-only "typing" look and Tab shows the ring. `aria-invalid` is a 2 px red ring; read-only and
+ * disabled are flat. With several lines (`multiline`) the radius is 24. One class set for `<input>`, `<textarea>`, `<select>` and the group's pill.
  * `readOnlyLook: false` for what `:read-only` also matches but is not an input being read-only (a `<select>`, the group's
  * label).
  */
@@ -116,7 +116,7 @@ export function InputGroup({
         'flex cursor-text items-center gap-2',
         lead ? 'pl-4' : null,
         trail ? 'pr-0.5' : null,
-        'has-focus-visible:inset-ring-2 has-focus-visible:inset-ring-foreground',
+        'has-focused:inset-ring-2 has-focused:inset-ring-foreground',
         'has-aria-invalid:inset-ring-2 has-aria-invalid:inset-ring-destructive',
         disabled ? 'cursor-not-allowed bg-background opacity-50 shadow-none' : null,
         className,

@@ -3,8 +3,10 @@ import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { EditletError } from '../../../core/issues';
 import { planRename, type RenamePlan } from '../../../core/rename';
 import type { Schema } from '../../../core/schema';
+import { entryUrl } from '../../../core/urls';
 import type { PlanFile, ReferrerItem } from '../data/queries';
 import { Confirm, Field, Input } from '../ui';
+import type { FinalFocus } from '../ui/parts/focus';
 
 type Props = {
   open: boolean;
@@ -24,6 +26,8 @@ type Props = {
   children?: ReactNode;
   /** The slug the field starts with (the entry's own); /design shows it typed. */
   initialSlug?: string;
+  /** Where the focus goes when it closes (the entry's ⋯). */
+  finalFocus?: FinalFocus;
 };
 
 /** The plan for `slug`, or why it cannot be renamed to it. */
@@ -43,7 +47,7 @@ function tryPlan(props: Props, slug: string): { plan: RenamePlan<PlanFile> } | {
  * `<new>/`, and the entries that reference it point at the new ref.
  */
 export function RenameDialog(props: Props) {
-  const { open, onOpenChange, self, pending, blocked, onConfirm, children } = props;
+  const { open, onOpenChange, self, pending, blocked, onConfirm, children, finalFocus } = props;
   const inputId = useId();
   const field = useRef<HTMLInputElement>(null);
   const [slug, setSlug] = useState(props.initialSlug ?? self.slug);
@@ -51,6 +55,8 @@ export function RenameDialog(props: Props) {
   const plan = result && 'plan' in result ? result.plan : null;
   const error = result && 'error' in result ? result.error : undefined;
   const others = plan ? plan.write.filter((w) => w.entry.path !== self.path) : [];
+  // The page's URL follows the slug only when the collection's `url` has `{slug}`.
+  const pageMoves = props.schema.collections[self.collection]?.url?.includes('{slug}') === true;
   return (
     <Confirm
       open={open}
@@ -59,12 +65,17 @@ export function RenameDialog(props: Props) {
         onOpenChange(next);
       }}
       title={`Rename ${self.collection}/${self.slug}`}
-      description="The slug is the file name and the page URL. Links to the old URL on the site or elsewhere stop working."
+      description={
+        pageMoves
+          ? 'The slug is the file name and the page URL. Links to the old URL on the site or elsewhere stop working.'
+          : 'The slug is the file name. Links to the entry by its slug stop working.'
+      }
       confirmLabel="Rename"
       pending={pending}
       confirmDisabled={blocked || plan === null}
       onConfirm={() => plan && onConfirm(plan)}
       initialFocus={field}
+      finalFocus={finalFocus}
     >
       <Field label="New slug" htmlFor={inputId} error={error} describedById={inputId}>
         <Input
@@ -86,6 +97,11 @@ export function RenameDialog(props: Props) {
           <li>
             {self.path} → {plan.write[0]!.path}
           </li>
+          {pageMoves ? (
+            <li>
+              {entryUrl(props.schema, self.collection, self.slug)} → {entryUrl(props.schema, self.collection, slug)}
+            </li>
+          ) : null}
           {plan.move.length > 0 ? (
             <li>
               Moves {plan.move.length} {plan.move.length === 1 ? 'file' : 'files'} to{' '}

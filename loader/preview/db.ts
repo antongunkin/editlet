@@ -19,12 +19,12 @@ function defaultIdb(): IDBFactory | undefined {
 function open(idb: IDBFactory): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = idb.open(PREVIEW_DB, 1);
-    req.onupgradeneeded = () => {
+    req.addEventListener('upgradeneeded', () => {
       if (!req.result.objectStoreNames.contains(PREVIEW_STORE)) req.result.createObjectStore(PREVIEW_STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error('blocked'));
+    });
+    req.addEventListener('success', () => resolve(req.result));
+    req.addEventListener('error', () => reject(req.error));
+    req.addEventListener('blocked', () => reject(new Error('blocked')));
   });
 }
 
@@ -41,9 +41,9 @@ async function run<T>(
     return await new Promise<T | undefined>((resolve, reject) => {
       const tx = conn.transaction(PREVIEW_STORE, mode);
       const req = op(tx.objectStore(PREVIEW_STORE));
-      tx.oncomplete = () => resolve(req?.result as T | undefined);
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
+      tx.addEventListener('complete', () => resolve(req?.result as T | undefined));
+      tx.addEventListener('error', () => reject(tx.error));
+      tx.addEventListener('abort', () => reject(tx.error));
     });
   } catch {
     return undefined;
@@ -95,6 +95,7 @@ export function announceSnapshot(): void {
   try {
     const channel = new BroadcastChannel(PREVIEW_CHANNEL);
     const message: PreviewChannelMessage = { source: EDITLET_SOURCE, type: 'snapshot' };
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- BroadcastChannel is same-origin; it has no target origin
     channel.postMessage(message);
     channel.close();
   } catch {

@@ -17,6 +17,7 @@ const text = new TextDecoder().decode(await source.readFile('cms/content/home.md
 // expected sha = the one readFile served, so a foreign edit since then is a conflict, not an overwrite
 const { issues, commit } = await source.commit([{ path: 'cms/content/home.md', content: edited(text) }], 'Edit home');
 const diff = await source.compare(); // diff.files (CMS) and diff.otherFiles (everything else the merge brings in)
+const other = await source.compareFiles('editlet/spring'); // just the paths another branch changes: one REST call
 const result = await source.publish({ headOid: diff.headOid });
 ```
 
@@ -65,10 +66,10 @@ The GitHub App behind the token needs these repository permissions:
 | File | Role |
 |---|---|
 | `source.ts` | `createGitHubSource`: snapshot, reads, commit |
-| `repo.ts` | Branches, pull requests, compare, publish, deployments |
+| `repo.ts` | Branches, pull requests, compare (`compare`, `compareFiles`), publish, deployments |
 | `codeowners.ts` | `readCodeowners`, `parseCodeowners`, `ownersOf`: `CODEOWNERS` as GitHub matches it |
 | `client.ts` | HTTP client: auth, rate limits, `GitHubError` |
-| `cache.ts` | Dexie cache of blobs and pending edits, memory fallback |
+| `cache.ts` | Dexie cache of blobs and pending edits (`putMany`, `removeIf`, `scopes()`, `persistent`), memory fallback |
 | `deploy.ts`, `base64.ts` | Deploy hook call, base64 helper |
 | `smoke.ts` | Manual check against a real repository (not run in CI) |
 

@@ -1,4 +1,4 @@
-import type { AnchorHTMLAttributes, ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ComponentType, ReactNode } from 'react';
 
 import type { Field } from '../../../core/schema';
 import type { SelectTarget } from '../select/useApplySelect';
@@ -34,6 +34,14 @@ export interface FieldContext {
    * removes it. Plain text inputs need nothing: their value is read from the form.
    */
   selectTarget?(name: string, target: SelectTarget | null): void;
+  /**
+   * The entry sheet (`screens/EntrySheet.tsx`): *Edit <title>* in a reference's picker opens the chosen entry on top of
+   * it. Unset inside an entry sheet (one entry on top, never two) and inside objects and blocks (their pickers keep
+   * *Open <title> ›*).
+   */
+  EntrySheet?: ComponentType<{ entryRef: string; open: boolean; onOpenChange(open: boolean): void }>;
+  /** The ref of the entry whose fields these are (`collection/slug`): *Edit* is not offered for the entry itself. */
+  selfRef?: string;
   /** The mode a body opens in, instead of the one saved in `localStorage` (/design: *Edit · Body · Source*). */
   markdownMode?: 'rich' | 'source';
 }

@@ -26,6 +26,8 @@ function EditletLoaderInner({ adminUrl = DEFAULT_ADMIN_URL }: EditletLoaderProps
       onRefresh: () => router.refresh(),
       // null state so the Next.js App Router does not treat the entry as its own and re-sync
       replaceUrl: (url) => history.replaceState(null, '', url),
+      // Open on the page: a client navigation keeps the root layout, so the editor (outside React) stays mounted.
+      onOpen: (url) => router.push(url),
     });
     loader.sync();
     // oxlint-disable-next-line react/exhaustive-effect-dependencies

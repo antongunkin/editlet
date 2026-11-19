@@ -14,6 +14,22 @@ How source fields become Editlet fields. The Editlet field types and their YAML 
 - Collection keys: camelCase, singular is the convention (`post`, `author`), but keeping the source name (`blog`) is
   fine. A Decap "file" collection or a Tina/Keystatic singleton becomes `"singleton": true` with `index.md`.
 
+## Labels and page addresses
+
+Editlet's `label` is the **singular** (*New post*), `pluralLabel` the list heading; `url` is the page's path with
+`{slug}` as the only placeholder.
+
+| Source | Editlet |
+|---|---|
+| Decap `label_singular` + `label` | `label` ← `label_singular`, `pluralLabel` ← `label` |
+| Decap `label` only (usually plural: *Posts*) | `pluralLabel` ← it, and a singular `label` you write (*Post*); say so |
+| Decap `preview_path: "blog/{{slug}}"` using only `{{slug}}` | `"url": "/blog/{slug}"` (add the leading `/`) |
+| Decap `preview_path` with `{{fields.x}}`, `{{year}}` or other placeholders | No `url`; list it as a loss |
+| Keystatic `label` | `label`; add `pluralLabel` for a collection (not a singleton) |
+| Keystatic `previewUrl: "/api/preview/start?branch={branch}&to=/posts/{slug}"` | The `to=` path → `"url": "/posts/{slug}"` |
+| Tina `ui.router` returning `` `/posts/${document._sys.filename}` `` | `"url": "/posts/{slug}"` when it only uses the file name |
+| No preview path in the source | Read the site's routes ([setup § page addresses](../../editlet-setup/references/next.md#page-addresses-and-plural-labels)), or leave `url` out |
+
 ## Types
 
 | Source | Editlet | Notes |
@@ -70,4 +86,5 @@ that lack it.
 - slug changes;
 - entries without a value for a field that was required in the source;
 - multiple rich-text fields reduced to one `markdown` field;
+- preview paths that use more than the slug (no `url` for that collection);
 - i18n folders (`en/`, `de/`): one collection per locale, or out of scope; ask.

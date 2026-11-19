@@ -1,8 +1,9 @@
 import { Dialog } from '@base-ui/react/dialog';
-import { useContext, type ReactElement, type ReactNode } from 'react';
+import { useContext, type ReactElement, type ReactNode, type RefObject } from 'react';
 
 import { Card } from './card';
 import { Grabber } from './chrome';
+import { returnToUnlessModal } from './focus';
 import { SheetPortal } from './sheet';
 
 import { Button } from '../primitives/button';
@@ -17,6 +18,11 @@ export type ActionSheetProps = {
   title: string;
   /** `ActionRow`s. Each one's `onClick` does its action and closes the sheet (`onOpenChange(false)`). */
   children: ReactNode;
+  /**
+   * The ⋯ button's ref, where the focus goes when the sheet closes without a modal having taken it (`returnToUnlessModal`).
+   * Without it the browser's own return to the trigger applies.
+   */
+  finalFocus?: RefObject<HTMLElement | null>;
 };
 
 /**
@@ -24,7 +30,15 @@ export type ActionSheetProps = {
  * the screen, with the handle, a muted title, the actions in a card and Cancel. Escape, Cancel and a tap on the scrim
  * close it; focus returns to the trigger.
  */
-export function ActionSheet({ open, defaultOpen, onOpenChange, trigger, title, children }: ActionSheetProps) {
+export function ActionSheet({
+  open,
+  defaultOpen,
+  onOpenChange,
+  trigger,
+  title,
+  children,
+  finalFocus,
+}: ActionSheetProps) {
   const container = useContext(SheetPortal) ?? undefined;
   return (
     <Dialog.Root
@@ -36,6 +50,7 @@ export function ActionSheet({ open, defaultOpen, onOpenChange, trigger, title, c
       <Dialog.Portal container={container}>
         <Dialog.Backdrop className="sheet-scrim fixed inset-0 z-50 bg-overlay" />
         <Dialog.Popup
+          finalFocus={finalFocus ? returnToUnlessModal(finalFocus) : undefined}
           data-slot="action-sheet"
           className="sheet-motion fixed inset-x-0 bottom-0 z-50 flex max-h-full flex-col overflow-y-auto rounded-t-3xl bg-background px-2 pb-5 text-foreground shadow-modal outline-none"
         >

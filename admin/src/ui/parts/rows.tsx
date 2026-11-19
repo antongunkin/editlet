@@ -399,7 +399,7 @@ export function BlockRow({ title, sub, kind, position, total, onMove, onOpen, cl
         onPointerMove={onPointerMove}
         onPointerUp={end}
         onPointerCancel={end}
-        className="group/grip inline-flex size-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-full border-0 bg-transparent p-0 text-foreground outline-none focus-visible:inset-ring-2 focus-visible:inset-ring-ring"
+        className="group/grip inline-flex size-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-full border-0 bg-transparent p-0 text-foreground outline-none focused:inset-ring-2 focused:inset-ring-ring"
       >
         <IconTile name="grip" />
       </button>

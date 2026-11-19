@@ -8,13 +8,14 @@ import { fieldPreviews, type DataBody } from './snapshot';
 import { decodeUtf8, parseEntryFile } from '../../../core/entryFile';
 import { parseEntryPath } from '../../../core/paths';
 import type { Schema } from '../../../core/schema';
-import type { GitHubSource } from '../../../github';
+import type { BranchDiff, GitHubSource } from '../../../github';
 import { clearSnapshot, setPreviewFlag } from '../../../loader/preview/db';
 import type { PreviewValue } from '../../../loader/protocol';
-import { useFiles, useSchema } from '../data/queries';
+import { useSchema } from '../data/queries';
 import { mimeType } from '../data/useAssetUrl';
 import { useAuth } from '../github/auth';
 import { useWorkspace } from '../github/workspace';
+import { useBranchDiff } from '../status/branchDiff';
 import { useBridge } from '../useRoute';
 
 type BranchEntries = Record<string, Record<string, PreviewValue>>;
@@ -30,12 +31,11 @@ function parseBlob(bytes: Uint8Array, path: string): DataBody | null {
 }
 
 /**
- * Preview values for every entry file `source`'s branch changes against the base branch: `from` = the merge-base
- * side, `to` = the branch head. Removed entries and files that do not parse are skipped. Images are read from the
- * branch.
+ * Preview values for every entry file `diff` (`source`'s branch against the base branch) changes: `from` = the
+ * merge-base side, `to` = the branch head. Removed entries and files that do not parse are skipped. Images are read
+ * from the branch.
  */
-export async function branchPreviews(source: GitHubSource, schema: Schema): Promise<BranchEntries> {
-  const diff = await source.compare();
+export async function branchPreviews(source: GitHubSource, schema: Schema, diff: BranchDiff): Promise<BranchEntries> {
   const readImage = async (path: string): Promise<Blob | null> => {
     try {
       const bytes = await source.readFile(path);
@@ -93,24 +93,17 @@ export function GitHubPreviewSync({
   const { session, getToken } = useAuth();
   const { setBranchPreview, setRefreshSite, setNotice } = usePreview();
   const { send } = useBridge();
-  const files = useFiles();
   const schema = useSchema().data?.schema;
   const branch = workspace?.active ?? null;
   const source = workspace?.source;
   const live = workspace !== null && !workspace.onBase && session !== null;
 
-  /** The head the file list was read at: a save (or a commit elsewhere, once listed) gives a new one. */
-  const head = useQuery({
-    queryKey: ['preview', branch, 'head', files.dataUpdatedAt],
-    queryFn: () => source!.head(),
-    enabled: live && files.data !== undefined,
-    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === branch ? prev : undefined),
-  });
-  const headOid = head.data;
+  // The head the file list was read at and its diff: the shared branch status (one compare per save).
+  const { diff, headOid, current } = useBranchDiff();
   const preview = useQuery({
     queryKey: ['preview', branch, headOid],
-    queryFn: () => branchPreviews(source!, schema!),
-    enabled: live && headOid !== undefined && schema !== undefined,
+    queryFn: () => branchPreviews(source!, schema!, diff!),
+    enabled: live && current && schema !== undefined,
     staleTime: Infinity,
     placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === branch ? prev : undefined),
   });

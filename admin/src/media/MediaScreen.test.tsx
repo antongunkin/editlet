@@ -310,4 +310,81 @@ describe('MediaScreen: drops, failures and several uses', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(commit).not.toHaveBeenCalled();
   });
+
+  it('returns the focus to ⋯ when the delete dialog closes, and when the screen’s ⋯ sheet does', async () => {
+    await openMedia();
+    await waitFor(() => expect(card(OLD).getAttribute('aria-label')).toContain('Unused'));
+    // The screen's own ⋯ (Select images): Escape puts the focus back on it, tapped without focus or not.
+    const gridMore = within(main()).getByRole('button', { name: 'More actions' });
+    fireEvent.click(gridMore);
+    fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(gridMore));
+
+    await openImage(OLD, 'old.png');
+    const imageMore = within(main()).getByRole('button', { name: 'More actions' });
+    const actions = await more();
+    await waitFor(() => expect(actions.getByRole('button', { name: /^Delete…/ })).toHaveProperty('disabled', false));
+    fireEvent.click(actions.getByRole('button', { name: /^Delete…/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(imageMore));
+  });
+
+  describe('the missing alt queue', () => {
+    const BLANK = {
+      'cms/content/post/blank.md': '---\ntitle: Blank\nfeaturedImage:\n  src: blank/x.png\n  alt: ""\n---\n',
+      'cms/content/post/blank/x.png': new Uint8Array([7]),
+    };
+
+    it('swaps Upload for Add alt text on the Missing alt chip while some image lacks alt text', async () => {
+      await openMedia(BLANK);
+      await within(main()).findByRole('button', { name: /^Missing alt\s*1$/ });
+      expect(within(main()).getByRole('button', { name: 'Upload' })).toBeDefined();
+      fireEvent.click(chip(/^Missing alt\s*1$/));
+      const add = within(main()).getByRole('button', { name: 'Add alt text to 1 image' });
+      expect(add.textContent).toBe('Add alt text');
+      expect(within(main()).queryByRole('button', { name: 'Upload' })).toBeNull();
+      fireEvent.click(chip(/^All\s*/));
+      expect(within(main()).getByRole('button', { name: 'Upload' })).toBeDefined();
+    });
+
+    it('keeps Upload on the Missing alt chip when no image lacks alt text', async () => {
+      await openMedia();
+      fireEvent.click(chip(/^Missing alt\s*0$/));
+      expect(within(main()).getByRole('button', { name: 'Upload' })).toBeDefined();
+      expect(within(main()).queryByRole('button', { name: /^Add alt text/ })).toBeNull();
+    });
+
+    it('is a row of ⋯, off while no image lacks alt text', async () => {
+      await openMedia();
+      const actions = await more();
+      expect(actions.getByRole('button', { name: 'Add missing alt text' })).toHaveProperty('disabled', true);
+      fireEvent.click(actions.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(document.querySelector('[data-slot="action-sheet"]')).toBeNull());
+    });
+
+    it('opens the queue from ⋯, and Open image ends it on the image’s own page', async () => {
+      await openMedia(BLANK);
+      await within(main()).findByRole('button', { name: /^Missing alt\s*1$/ });
+      const actions = await more();
+      fireEvent.click(actions.getByRole('button', { name: 'Add missing alt text' }));
+      const queue = within(await screen.findByRole('dialog', { name: 'Missing alt' }));
+      expect(queue.getByText('1 of 1')).toBeDefined();
+      fireEvent.click(queue.getByRole('button', { name: 'Open image' }));
+      expect(await within(main()).findByRole('heading', { level: 1, name: 'x.png' })).toBeDefined();
+      expect(within(main()).getByLabelText('Alt text in blank, Featured image')).toBeDefined();
+    });
+
+    it('says so when the search leaves no image without alt text', async () => {
+      await openMedia(BLANK);
+      await within(main()).findByRole('button', { name: /^Missing alt\s*1$/ });
+      fireEvent.click(chip(/^Missing alt\s*1$/));
+      search('cover');
+      fireEvent.click(within(main()).getByRole('button', { name: 'Add alt text to 0 images' }));
+      expect(await within(main()).findByText('No image without alt text matches the search.')).toBeDefined();
+      expect(screen.queryByRole('dialog', { name: 'Missing alt' })).toBeNull();
+    });
+  });
 });

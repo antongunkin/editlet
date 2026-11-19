@@ -30,8 +30,9 @@ mountEditletLoader(); // admin at /editlet/, page reload after a save
 |---|---|
 | Opening and closing: `?editlet` routes, the dialog, Escape, the safety close button | [docs/loader/open-close.md](../../../docs/loader/open-close.md) |
 | URL sync, Back/Forward, client-side navigation in Next.js and Astro | [docs/loader/url-sync.md](../../../docs/loader/url-sync.md) |
-| The floating window: drag, resize (the sides the pulled edge moves light up: `data-editlet-edge`), bottom sheet on narrow screens with its edge gradient, collapse to a pill (its shadow on the dialog), themes (`window.js` and the admin chrome) | [docs/loader/window.md](../../../docs/loader/window.md) |
+| The floating window: drag, resize (the sides the pulled edge moves light up: `data-editlet-edge`), bottom sheet on narrow screens with its edge gradient, collapse to a pill (its shadow on the dialog), themes (`window.js` and the admin chrome; the admin tells window.js its theme so the sheet's handle follows Dark) | [docs/loader/window.md](../../../docs/loader/window.md) |
 | The safe area and the on-screen keyboard measured on the page and sent to the admin (`viewport`), for its bottom bar | [docs/loader/window.md#safe-area-and-keyboard](../../../docs/loader/window.md#safe-area-and-keyboard) |
+| Opening an entry's page (`open`), the page's address (`page`), the highlight after a client-side navigation | [docs/loader/open-page.md](../../../docs/loader/open-page.md) |
 | Highlighting entries on the page, refresh after save | [docs/loader/highlight.md](../../../docs/loader/highlight.md) |
 | Select to edit: Edit button next to a selection on the page, Alt+Shift+E (`window.js`) | [docs/loader/select.md](../../../docs/loader/select.md) |
 | Live preview of unsaved edits on the page (`preview.js`, injected for editors only) | [docs/loader/preview.md](../../../docs/loader/preview.md) |
@@ -46,6 +47,7 @@ mountEditletLoader(); // admin at /editlet/, page reload after a save
 | `param` | `'editlet'` (`EDITLET_PARAM`) | The query parameter of the site's pages that opens the editor. The admin's own URL keeps `editlet`; see [open-close](../../../docs/loader/open-close.md#another-parameter-name). |
 | `onRefresh` | `location.reload()` | Runs when the admin reports a save. Next.js passes `() => router.refresh()`. |
 | `replaceUrl` | `(u) => history.replaceState(history.state, '', u)` | Writes the page URL. Next.js App Router passes `(u) => history.replaceState(null, '', u)`; see [url-sync](../../../docs/loader/url-sync.md). |
+| `onOpen` | `(u) => location.assign(u)` | Goes to another page of the site when the admin asks (`open`), with an absolute same-origin URL that keeps the editor's parameter. Next.js passes `(u) => router.push(u)`; see [open-page](../../../docs/loader/open-page.md). |
 
 `mountEditletLoader()` is idempotent: a second call returns the same instance. `sync()` re-reads the URL, `close()` closes
 the editor and removes `?editlet`, and `destroy()` removes everything (useful for tests and HMR).

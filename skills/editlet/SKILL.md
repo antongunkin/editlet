@@ -75,7 +75,8 @@ An issue line reads `file: field.path — message`. Fix the file and run `valida
    [schema changes](references/schema-changes.md).
 4. **Validate.** Run `validate.mjs`, fix every issue, then run it again until it passes. After a schema change also
    run `types.mjs`.
-5. **Show.** If a dev server is running, open the matching `?editlet=…` screen ([preview](references/preview.md)).
+5. **Show.** If a dev server is running, open the matching `?editlet=…` screen on the entry's page: the collection's
+   `url` with the slug in it ([preview](references/preview.md)).
 6. **Publish** only when the human wants the change live: use an `editlet/<name>` branch (names from `style.mjs`), a PR, the branch preview, and
    wait for approval before the merge ([publishing](references/publishing.md)). Without that request, stop after
    step 5 and say how to publish.

@@ -9,6 +9,8 @@ export const HANDLE_ATTR = 'data-editlet-handle';
  * sides that move (`top`, `right`, `bottom-left`…), or `all` when the admin did not say which edge.
  */
 export const EDGE_ATTR = 'data-editlet-edge';
+/** On the dialog: the admin's theme (`light` or `dark`), sent over the channel; the handle's Dark colour reads it. */
+export const THEME_ATTR = 'data-editlet-theme';
 const SIDES = { n: 'top', e: 'right', s: 'bottom', w: 'left' };
 /** `ne` → `top-right`: the compass name spelled out, the vertical side first. */
 export const edgeName = (e: Edge | 'all') =>
@@ -20,7 +22,8 @@ export type Pull = (dy: number, phase: 'start' | 'move' | 'end') => void;
 /**
  * A 64×24 hit area centred on the sheet's top edge (half of it outside, for the finger), and in it a 40×4 white tab
  * hanging from the edge, inside the window (rounded only at the bottom, a soft shadow below). Hovered or pulled, the tab
- * takes the admin's accent (violet-500, `--editlet-ring`). On the sheet the dialog stops clipping (the iframe rounds its
+ * takes the admin's accent (violet-500, `--editlet-ring`). In Dark (`data-editlet-theme=dark` on the dialog) the tab is the
+ * design's grabber grey, not white. On the sheet the dialog stops clipping (the iframe rounds its
  * own corners) so the hit area can stick out.
  * On the sheet, a 60px gradient (the design's `Gradient/sheet edge`) runs from 30px above the sheet's top edge to 30px
  * inside it, so the page darkens softly towards the sheet. It hides with the handle, while the window is the pill.
@@ -44,6 +47,8 @@ const CSS =
   `dialog[data-editlet]:not(:has(>[${HANDLE_ATTR}][hidden]))::before{content:'';position:absolute;z-index:-1;inset:-30px 0 auto;height:60px;pointer-events:none;background:linear-gradient(#1c191700,#1c19173d)}` +
   `[${HANDLE_ATTR}]:not([hidden]){display:block;position:absolute;top:-12px;left:50%;z-index:1;width:64px;height:24px;translate:-50% 0;cursor:ns-resize;touch-action:none}` +
   `[${HANDLE_ATTR}]::before{content:'';position:absolute;inset:12px 12px 8px;border-radius:0 0 4px 4px;background:#fff;box-shadow:0 1px 2px #0003;transition:background-color .15s}` +
+  // Dark: the design's grabber on the black sheet instead of white; hovered or pulled it stays the accent.
+  `dialog[${THEME_ATTR}=dark] [${HANDLE_ATTR}]:not(:hover,[data-active])::before{background:#a3a3a3}` +
   `[${HANDLE_ATTR}]:is(:hover,[data-active])::before{background:${V}}` +
   '}';
 

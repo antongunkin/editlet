@@ -159,6 +159,7 @@ export function CollectionSheet({
   sub,
   rows,
   marks,
+  page,
   references,
   referencedBy,
   onOpenOther,
@@ -173,6 +174,8 @@ export function CollectionSheet({
   sub: string;
   rows: FieldRow[];
   marks?: Map<string, FieldMark>;
+  /** The collection's `url` pattern (`/posts/{slug}`); `null`: none (*No page address*); `undefined`: no row. */
+  page?: string | null;
   /** The collections this one points at, one row per reference field and target. */
   references?: ReferencedBy[];
   referencedBy: ReferencedBy[];
@@ -194,6 +197,18 @@ export function CollectionSheet({
             <Row lead="zap" title={askLabel} sub="Add, rename or remove a field" onClick={onAsk} />
           </li>
         </Card>
+        {page === undefined ? null : (
+          <Card as="ul" aria-label={`${title} page`}>
+            <li className="flex flex-col gap-1 px-4 py-3">
+              <span className="text-base font-medium">Page</span>
+              {page === null ? (
+                <span className="text-sm text-muted-foreground">No page address</span>
+              ) : (
+                <code className="font-mono text-sm break-all text-muted-foreground select-text">{page}</code>
+              )}
+            </li>
+          </Card>
+        )}
         {references && references.length > 0 ? (
           <div>
             <SectionTitle>References</SectionTitle>

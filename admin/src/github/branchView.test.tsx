@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BranchesSheet, NewBranchSheet } from './BranchesSheet';
-import { BranchUnavailable, ChangesSheet, OtherFilesSheet } from './BranchView';
+import { BranchUnavailable, BranchView, ChangesSheet, OtherFilesSheet } from './BranchView';
 import { PreviewStep } from './DeployStatus';
 
 import type { DeploymentInfo } from '../../../github';
@@ -152,5 +152,28 @@ describe('Branches and New branch', () => {
     expect(screen.getByRole('alert').textContent).toContain('already exists');
     fireEvent.submit(input);
     expect(onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('BranchView scroll', () => {
+  const view = (title: string, saved: string) => (
+    <BranchView branch="editlet/a" title={title} steps={<li>{saved}</li>} cta={<button type="button">Go</button>} />
+  );
+
+  it('shows a new state from the top, and keeps the offset while the state is the same', () => {
+    const { rerender } = render(view('Review changes', 'Saved'));
+    // The screen's scroller: the box that holds the big title (jsdom has no layout, `scrollTop` is a plain number).
+    const scroller = screen
+      .getByRole('heading', { level: 1 })
+      .closest<HTMLElement>('[data-editlet="branch-scroller"]')!;
+    scroller.scrollTop = 90;
+
+    // The same state, other content: the editor's place is kept.
+    rerender(view('Review changes', 'Saved, preview building'));
+    expect(scroller.scrollTop).toBe(90);
+
+    // Create pull request: the title changes, the screen opens at the top.
+    rerender(view('Pull request #1', 'Saved'));
+    expect(scroller.scrollTop).toBe(0);
   });
 });

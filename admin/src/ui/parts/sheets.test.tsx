@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ActionSheet } from './action-sheet';
 import { Confirm, type ConfirmProps } from './confirm';
+import { returnToUnlessModal } from './focus';
 import { ActionRow } from './rows';
 import { Sheet } from './sheet';
 
@@ -186,5 +187,87 @@ describe('ActionSheet', () => {
     expect(within(sheet).getByRole('button', { name: 'Duplicate' })).toBeDefined();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+});
+
+// A modal opened from a ⋯ row returns the focus to ⋯ by name (`finalFocus`), not by what had the focus before: Safari
+// does not focus a tapped button, so "back to what had the focus" finds nothing there.
+describe('finalFocus', () => {
+  /** A page with a ⋯ button that never had the focus, and the modal open on it (as a tap on Safari leaves it). */
+  function Page({ kind }: { kind: 'sheet' | 'action' | 'confirm' }) {
+    const more = useRef<HTMLButtonElement>(null);
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button ref={more} type="button" onClick={() => setOpen(true)}>
+          More
+        </button>
+        <button type="button">Elsewhere</button>
+        {kind === 'sheet' ? (
+          <Sheet open={open} onOpenChange={setOpen} title="Details" finalFocus={more}>
+            <p>Body</p>
+          </Sheet>
+        ) : kind === 'action' ? (
+          <ActionSheet open={open} onOpenChange={setOpen} title="Entry" finalFocus={more}>
+            <ActionRow icon="copy" onClick={() => setOpen(false)}>
+              Do it
+            </ActionRow>
+          </ActionSheet>
+        ) : (
+          <Confirm
+            open={open}
+            onOpenChange={setOpen}
+            title="Delete?"
+            description="Gone."
+            confirmLabel="Delete"
+            onConfirm={() => {}}
+            finalFocus={more}
+          />
+        )}
+      </>
+    );
+  }
+
+  it.each([
+    ['sheet', 'dialog', 'Details'],
+    ['action', 'dialog', 'Entry'],
+    ['confirm', 'alertdialog', 'Delete?'],
+  ] as const)('%s: Escape puts the focus on the named element', async (kind, role, name) => {
+    render(<Page kind={kind} />);
+    // Opened without a focus on ⋯ (the click does not focus it in jsdom), and focus is somewhere else when it closes.
+    // (The page behind a modal is inert and hidden from the queries: take both buttons first.)
+    const more = screen.getByRole('button', { name: 'More' });
+    const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+    fireEvent.click(more);
+    const dialog = await screen.findByRole(role, { name });
+    elsewhere.focus();
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole(role, { name })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(more));
+  });
+
+  it('the ⋯ sheet’s focus return leaves the focus alone when another modal already has it', () => {
+    const target = document.createElement('button');
+    document.body.append(target);
+    const ref = { current: target };
+    const back = returnToUnlessModal(ref) as () => unknown;
+
+    // Focus still inside the action sheet (Escape, Cancel): ⋯.
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div role="dialog" data-slot="action-sheet"><button id="in-sheet"></button></div>',
+    );
+    document.getElementById('in-sheet')!.focus();
+    expect(back()).toBe(target);
+
+    // Focus in the modal a row opened (Details, a confirm): nothing moves.
+    document.body.insertAdjacentHTML('beforeend', '<div role="alertdialog"><button id="in-other"></button></div>');
+    document.getElementById('in-other')!.focus();
+    expect(back()).toBe(false);
+
+    // Focus nowhere in particular: ⋯, or the default when the ref is empty.
+    (document.activeElement as HTMLElement).blur();
+    expect(back()).toBe(target);
+    expect((returnToUnlessModal({ current: null }) as () => unknown)()).toBe(true);
   });
 });

@@ -1,7 +1,9 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fixtureFiles, HOME_LOADED, renderApp } from '../test/render';
+import { createMemorySource } from '../../../core/source';
+import { fixtureFiles, HOME_LOADED, renderApp, setField } from '../test/render';
+import { resetThemeChoice } from '../window/settings';
 
 // The search sheet (docs/admin/search.md): the header's button, the shortcut, matching and opening an entry.
 
@@ -19,7 +21,11 @@ function files(extraPosts = 0) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   window.history.replaceState(null, '', '/');
+  window.localStorage.clear();
+  resetThemeChoice();
+  delete document.documentElement.dataset.editletTheme;
 });
 
 async function home(extraPosts = 0) {
@@ -30,7 +36,10 @@ async function home(extraPosts = 0) {
 async function openSearch() {
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   const sheet = await screen.findByRole('dialog', { name: 'Search' });
-  return { sheet, field: within(sheet).getByRole('textbox', { name: 'Search entries' }) as HTMLInputElement };
+  return {
+    sheet,
+    field: within(sheet).getByRole('textbox', { name: 'Search entries and actions' }) as HTMLInputElement,
+  };
 }
 
 const type = (field: HTMLElement, value: string) => fireEvent.change(field, { target: { value } });
@@ -44,7 +53,7 @@ describe('Search', () => {
     await home();
     const { sheet, field } = await openSearch();
     await waitFor(() => expect(document.activeElement).toBe(field));
-    expect(within(sheet).getByText(/Type a title or an address\. 4 entries\./)).toBeDefined();
+    expect(within(sheet).getByText(/Type a title, an address or an action\. 4 entries\./)).toBeDefined();
   });
 
   it('lists the entries of every collection that match a title word or the address, the top result first', async () => {
@@ -52,9 +61,15 @@ describe('Search', () => {
     const { sheet, field } = await openSearch();
     type(field, 'tir');
     const list = await within(sheet).findByRole('list', { name: 'Entries' });
-    const rows = within(list).getAllByRole('link');
     // The title starts with it, then a word of a title; the address of the third is only a substring.
-    expect(rows.map((r) => r.textContent)).toEqual(['Tires for a rigid bikePost · Draft', 'Jane TireAuthor']);
+    await waitFor(() =>
+      expect(
+        within(list)
+          .getAllByRole('link')
+          .map((r) => r.textContent),
+      ).toEqual(['Tires for a rigid bikePost · Draft', 'Jane TireAuthor · 1 post']),
+    );
+    const rows = within(list).getAllByRole('link');
     expect(rows[0]!.hasAttribute('data-selected')).toBe(true);
     type(field, 'jane');
     await waitFor(() => expect(within(list).getAllByRole('link')).toHaveLength(1));
@@ -66,7 +81,7 @@ describe('Search', () => {
     type(field, 'home');
     expect((await within(sheet).findByRole('list', { name: 'Entries' })).textContent).toContain('Home page');
     type(field, 'zzz');
-    expect(await within(sheet).findByText('No entry matches “zzz”.')).toBeDefined();
+    expect(await within(sheet).findByText('Nothing matches “zzz”.')).toBeDefined();
   });
 
   it('Enter opens the top result and closes the search; a result link opens its entry', async () => {
@@ -84,7 +99,7 @@ describe('Search', () => {
     await screen.findByRole('heading', { name: 'Tires for a rigid bike' });
     shortcut();
     const sheet = await screen.findByRole('dialog', { name: 'Search' });
-    const field = within(sheet).getByRole('textbox', { name: 'Search entries' });
+    const field = within(sheet).getByRole('textbox', { name: 'Search entries and actions' });
     type(field, 'tires');
     await within(sheet).findByRole('list', { name: 'Entries' });
     fireEvent.keyDown(field, { key: 'Enter' });
@@ -122,7 +137,7 @@ describe('the shortcut', () => {
     expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull();
     shortcut();
     const sheet = await screen.findByRole('dialog', { name: 'Search' });
-    const field = within(sheet).getByRole('textbox', { name: 'Search entries' });
+    const field = within(sheet).getByRole('textbox', { name: 'Search entries and actions' });
     field.blur();
     shortcut({ key: 'k', ctrlKey: true });
     expect(document.activeElement).toBe(field);
@@ -152,5 +167,270 @@ describe('the shortcut', () => {
     await screen.findByRole('dialog', { name: 'Title' });
     shortcut();
     expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull();
+  });
+});
+
+describe('Actions', () => {
+  const actionsList = (sheet: HTMLElement) => within(sheet).findByRole('list', { name: 'Actions' });
+  const names = (list: HTMLElement) =>
+    within(list)
+      .getAllByRole('button')
+      .map((b) => b.textContent);
+
+  it('typed new: New post; Enter opens the New dialog over the screen and the search closes', async () => {
+    await home();
+    const { sheet, field } = await openSearch();
+    type(field, 'new');
+    const list = await actionsList(sheet);
+    expect(names(list)).toEqual(['New postPost', 'New authorAuthor']);
+    expect(within(list).getAllByRole('button')[0]!.hasAttribute('data-selected')).toBe(true);
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(await screen.findByRole('dialog', { name: 'New post' })).toBeDefined();
+    expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull();
+  });
+
+  it('closing that dialog gives the focus back to what had it before the search', async () => {
+    await home();
+    const button = screen.getByRole('button', { name: 'Search' });
+    button.focus();
+    const { sheet, field } = await openSearch();
+    type(field, 'new post');
+    await actionsList(sheet);
+    fireEvent.keyDown(field, { key: 'Enter' });
+    const dialog = await screen.findByRole('dialog', { name: 'New post' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New post' })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Search' })));
+  });
+
+  it('typed dark: only Actions; Enter switches the theme and the search stays, the rows follow', async () => {
+    await home();
+    const { sheet, field } = await openSearch();
+    type(field, 'dark');
+    const list = await actionsList(sheet);
+    expect(within(sheet).queryByRole('list', { name: 'Entries' })).toBeNull();
+    expect(names(list)).toEqual(['Use dark appearance']);
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(document.documentElement.dataset.editletTheme).toBe('dark');
+    expect(screen.getByRole('dialog', { name: 'Search' })).toBeDefined();
+    type(field, 'appearance');
+    await waitFor(() =>
+      expect(names(within(sheet).getByRole('list', { name: 'Actions' }))).toEqual([
+        'Use light appearance',
+        'Use system appearance',
+      ]),
+    );
+  });
+
+  it('says both counts and orders the groups by the top result', async () => {
+    renderApp({ files: { ...files(), 'cms/content/post/media-kit.md': '---\ntitle: Media kit\n---\n' } });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet, field } = await openSearch();
+    type(field, 'media');
+    await actionsList(sheet);
+    await within(sheet).findByRole('list', { name: 'Entries' });
+    // *Media* is an action word (rank 0); *Media kit* only starts with it.
+    const headings = within(sheet)
+      .getAllByRole('heading', { level: 2 })
+      .map((h) => h.textContent);
+    // The first is the sheet's own name (visually hidden).
+    expect(headings).toEqual(['Search', 'Actions', 'Entries']);
+    expect(sheet.querySelector('output')!.textContent).toBe('1 entry, 1 action');
+  });
+
+  it('↓ walks from the field through both groups, ↑ back; Home and End jump', async () => {
+    renderApp({ files: { ...files(), 'cms/content/post/media-kit.md': '---\ntitle: Media kit\n---\n' } });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet, field } = await openSearch();
+    type(field, 'media');
+    await within(sheet).findByRole('list', { name: 'Entries' });
+    const action = within(await actionsList(sheet)).getByRole('button', { name: /^Media/ });
+    const entry = within(within(sheet).getByRole('list', { name: 'Entries' })).getByRole('link');
+    fireEvent.keyDown(field, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(action);
+    fireEvent.keyDown(action, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(entry);
+    fireEvent.keyDown(entry, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(entry);
+    fireEvent.keyDown(entry, { key: 'Home' });
+    expect(document.activeElement).toBe(action);
+    fireEvent.keyDown(action, { key: 'End' });
+    expect(document.activeElement).toBe(entry);
+    fireEvent.keyDown(entry, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(action);
+    fireEvent.keyDown(action, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('Go to opens the place', async () => {
+    await home();
+    const { sheet, field } = await openSearch();
+    type(field, 'go media');
+    fireEvent.click(within(await actionsList(sheet)).getByRole('button', { name: /^Media/ }));
+    expect(await screen.findByRole('heading', { name: 'Media' })).toBeDefined();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull());
+  });
+
+  it('the empty field on Home lists no actions in dev mode, just the line', async () => {
+    await home();
+    const { sheet } = await openSearch();
+    expect(within(sheet).queryByRole('list', { name: 'Actions' })).toBeNull();
+  });
+});
+
+describe('Duplicate from the search', () => {
+  async function onPost() {
+    renderApp({ files: files(), route: 'post/hello-world' });
+    await screen.findByRole('heading', { level: 1, name: 'Hello world' });
+    shortcut();
+    const sheet = await screen.findByRole('dialog', { name: 'Search' });
+    return { sheet, field: within(sheet).getByRole('textbox', { name: 'Search entries and actions' }) };
+  }
+
+  it('the empty field over an entry: Duplicate this entry, then New post; Duplicate opens the copy', async () => {
+    const { sheet } = await onPost();
+    const list = await within(sheet).findByRole('list', { name: 'Actions' });
+    await waitFor(() =>
+      expect(
+        within(list)
+          .getAllByRole('button')
+          .map((b) => b.textContent),
+      ).toEqual(['Duplicate this entryHello world', 'New postPost']),
+    );
+    fireEvent.click(within(list).getByRole('button', { name: /^Duplicate this entry/ }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Hello world (copy)' })).toBeDefined();
+    expect(window.location.href).toContain('post/hello-world-copy');
+    expect(await screen.findByText('Duplicated')).toBeDefined();
+  });
+
+  it('is off with Save first while the entry has unsaved edits: Enter and a click do nothing', async () => {
+    renderApp({ files: files(), route: 'post/hello-world' });
+    await screen.findByRole('heading', { level: 1, name: 'Hello world' });
+    await setField('Title', 'Hello there');
+    shortcut();
+    const sheet = await screen.findByRole('dialog', { name: 'Search' });
+    const field = within(sheet).getByRole('textbox', { name: 'Search entries and actions' });
+    type(field, 'duplicate');
+    const row = within(await within(sheet).findByRole('list', { name: 'Actions' })).getByRole('button', {
+      name: /^Duplicate this entry/,
+    });
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.textContent).toBe('Duplicate this entrySave first');
+    expect(row.hasAttribute('data-selected')).toBe(false);
+    fireEvent.keyDown(field, { key: 'Enter' });
+    fireEvent.click(row);
+    expect(window.location.href).not.toContain('hello-world-copy');
+    expect(screen.getByRole('dialog', { name: 'Search' })).toBeDefined();
+  });
+
+  it('is not offered on a singleton', async () => {
+    renderApp({ files: files(), route: 'homePage' });
+    await screen.findByRole('button', { name: /^Title/ });
+    shortcut();
+    const sheet = await screen.findByRole('dialog', { name: 'Search' });
+    type(within(sheet).getByRole('textbox', { name: 'Search entries and actions' }), 'duplicate');
+    expect(await within(sheet).findByText('Nothing matches “duplicate”.')).toBeDefined();
+  });
+});
+
+describe('counts on rows', () => {
+  it('says how many entries point at an entry, nothing at zero', async () => {
+    renderApp({
+      files: { ...files(), 'cms/content/post/second.md': '---\ntitle: Second\nauthor: author/jane\n---\n' },
+    });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet, field } = await openSearch();
+    type(field, 'jane');
+    const list = await within(sheet).findByRole('list', { name: 'Entries' });
+    await waitFor(() => expect(within(list).getByRole('link').textContent).toBe('Jane TireAuthor · 2 posts'));
+    // Posts can be pointed at by nothing: no count.
+    type(field, 'second');
+    await waitFor(() => expect(within(list).getByRole('link').textContent).toBe('SecondPost'));
+  });
+
+  it('names the referring collection when its labels have a plural: Tag · 4 posts', async () => {
+    const out = files();
+    const schema = JSON.parse(out['cms/schema.json'] as string);
+    schema.collections.post.pluralLabel = 'Posts';
+    out['cms/schema.json'] = JSON.stringify(schema, null, 2);
+    out['cms/content/post/second.md'] = '---\ntitle: Second\nauthor: author/jane\n---\n';
+    renderApp({ files: out });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet, field } = await openSearch();
+    type(field, 'jane');
+    const list = await within(sheet).findByRole('list', { name: 'Entries' });
+    await waitFor(() => expect(within(list).getByRole('link').textContent).toBe('Jane TireAuthor · 2 posts'));
+  });
+
+  it('a failed file counts nothing and does not hide the counts of the others', async () => {
+    const source = createMemorySource(files());
+    const read = source.readFile.bind(source);
+    vi.spyOn(source, 'readFile').mockImplementation(async (path) => {
+      if (path.endsWith('post/tires.md')) throw new Error('Network request failed');
+      return read(path);
+    });
+    renderApp({ source });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet, field } = await openSearch();
+    type(field, 'jane');
+    const list = await within(sheet).findByRole('list', { name: 'Entries' });
+    // One post failed to load; the other still counts, and the count is not stuck waiting for the failed one.
+    await waitFor(() => expect(within(list).getByRole('link').textContent).toBe('Jane TireAuthor · 1 post'));
+  });
+
+  it('shows no count while a file of a referring collection is still loading', async () => {
+    const source = createMemorySource(files());
+    const read = source.readFile.bind(source);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.spyOn(source, 'readFile').mockImplementation(async (path) => {
+      if (path.endsWith('post/tires.md')) await held;
+      return read(path);
+    });
+    renderApp({ source });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet, field } = await openSearch();
+    type(field, 'jane');
+    const list = await within(sheet).findByRole('list', { name: 'Entries' });
+    await waitFor(() => expect(within(list).getByRole('link').textContent).toBe('Jane TireAuthor'));
+    release();
+    await waitFor(() => expect(within(list).getByRole('link').textContent).toBe('Jane TireAuthor · 1 post'));
+  });
+});
+
+describe('the loading line', () => {
+  it('counts the titles up while they load, then gives the hint back', async () => {
+    const source = createMemorySource(files());
+    const read = source.readFile.bind(source);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.spyOn(source, 'readFile').mockImplementation(async (path) => {
+      if (path.endsWith('post/tires.md')) await held;
+      return read(path);
+    });
+    renderApp({ source });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet } = await openSearch();
+    expect(await within(sheet).findByText('Loading titles: 3 of 4.', { selector: 'p' })).toBeDefined();
+    expect(sheet.querySelector('output')!.textContent).toBe('Loading titles: 3 of 4.');
+    release();
+    expect(await within(sheet).findByText(/^Type a title, an address or an action\. 4 entries\./)).toBeDefined();
+  });
+
+  it('says some titles did not load when a read fails; the row keeps its address', async () => {
+    const source = createMemorySource(files());
+    const read = source.readFile.bind(source);
+    vi.spyOn(source, 'readFile').mockImplementation(async (path) => {
+      if (path.endsWith('post/tires.md')) throw new Error('Network request failed');
+      return read(path);
+    });
+    renderApp({ source });
+    await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
+    const { sheet, field } = await openSearch();
+    expect(await within(sheet).findByText('Some titles did not load.', { selector: 'p' })).toBeDefined();
+    type(field, 'tires');
+    const list = await within(sheet).findByRole('list', { name: 'Entries' });
+    expect(within(list).getByRole('link').textContent).toBe('tiresPost');
+    expect(sheet.querySelector('output')!.textContent).toBe('1 entry. Some titles did not load.');
   });
 });

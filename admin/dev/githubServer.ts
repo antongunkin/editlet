@@ -3,14 +3,14 @@
 // `githubHost.ts` runs it from the command line; the Playwright suite (admin/e2e/) starts one per test on a free port.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { ADMIN_PREFIX, buildDemoSite, CONTENT_TYPES, listen, send, serveAdmin } from './serve';
+import { ADMIN_PREFIX, buildDemoSite, CONTENT_TYPES, listen, pageEntries, send, serveAdmin } from './serve';
 
 import { AUTH_MESSAGE_SOURCE, type AuthMessage } from '../../auth/protocol';
 import { DEV_API_BASE } from '../../core/devApi';
 import { decodeUtf8, parseEntryFile } from '../../core/entryFile';
 import { EditletError } from '../../core/issues';
 import { isHiddenContentPath, parseEntryPath } from '../../core/paths';
-import { parseSchemaText } from '../../core/schema';
+import { parseSchemaText, type Schema } from '../../core/schema';
 import type { Entry } from '../../core/validate';
 import type { FileInput } from '../../github/test/fakeGitHub';
 import { DEFAULT_SCHEMA_PATH } from '../../node/fs';
@@ -99,10 +99,10 @@ function fakeAuthPage(): string {
 `;
 }
 
-/** Entries of the fake's current `main` (unreadable files are left out). */
-function mainEntries(fake: AdminFakeGitHub): Entry[] {
+/** The schema and entries of the fake's current `main` (unreadable files are left out); `null` without a schema. */
+function mainProject(fake: AdminFakeGitHub): { schema: Schema; entries: Entry[] } | null {
   const head = fake.state.commits.get(fake.state.refs.get(BASE_BRANCH) ?? '');
-  if (!head) return [];
+  if (!head) return null;
   const text = (path: string): string | null => {
     const sha = head.files.get(path);
     const bytes = sha === undefined ? undefined : fake.state.blobs.get(sha);
@@ -111,7 +111,7 @@ function mainEntries(fake: AdminFakeGitHub): Entry[] {
     return 'text' in decoded ? decoded.text : null;
   };
   const schemaText = text(DEFAULT_SCHEMA_PATH);
-  if (schemaText === null) return [];
+  if (schemaText === null) return null;
   try {
     const schema = parseSchemaText(schemaText, DEFAULT_SCHEMA_PATH);
     const entries: Entry[] = [];
@@ -126,9 +126,9 @@ function mainEntries(fake: AdminFakeGitHub): Entry[] {
         if (!(error instanceof EditletError)) throw error;
       }
     }
-    return entries;
+    return { schema, entries };
   } catch (error) {
-    if (error instanceof EditletError) return [];
+    if (error instanceof EditletError) return null;
     throw error;
   }
 }
@@ -226,7 +226,7 @@ export async function startGitHubHost(opts: GitHubHostOptions = {}): Promise<Git
       return;
     }
     if (pathname === '/') {
-      send(res, 200, site.page(mainEntries(fake)), CONTENT_TYPES['.html']);
+      send(res, 200, site.page(mainProject(fake)?.entries ?? []), CONTENT_TYPES['.html']);
       return;
     }
     if (pathname === '/site.js') {
@@ -241,6 +241,13 @@ export async function startGitHubHost(opts: GitHubHostOptions = {}): Promise<Git
     }
     if (pathname.startsWith(ADMIN_PREFIX)) {
       await serveAdmin(pathname, res, injectFetchRewrite);
+      return;
+    }
+    // An entry's own page on `main` (`/posts/<slug>` on the fixture): only its card. Any other path stays a plain 404.
+    const project = mainProject(fake);
+    const shown = project ? pageEntries(project.schema, project.entries, pathname) : [];
+    if (shown.length > 0) {
+      send(res, 200, site.page(shown), CONTENT_TYPES['.html']);
       return;
     }
     send(res, 404, 'Not found');

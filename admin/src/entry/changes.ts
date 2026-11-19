@@ -1,5 +1,7 @@
+import { findImageRefs } from '../../../core/assets';
 import type { Issue } from '../../../core/issues';
 import { relativeAssetSrc, slugify } from '../../../core/paths';
+import type { Collection, Schema } from '../../../core/schema';
 
 /**
  * The top-level fields with a required value still missing, from a validation's issues: a required field inside an
@@ -48,3 +50,20 @@ export function uniqueAssetPath(existing: Set<string>, dir: string, fileName: st
 
 /** Inverse of `resolveAssetPath` (core `relativeAssetSrc`): the `src` for `assetPath` relative to the entry file. */
 export const relativeSrc = relativeAssetSrc;
+
+/** Repo paths that the entry's image fields and body images point at (`findImageRefs`). */
+export function referencedAssets(
+  schema: Schema,
+  collection: Collection,
+  entryPath: string,
+  data: Record<string, unknown>,
+  body: string,
+): Set<string> {
+  return new Set(findImageRefs(schema, collection, entryPath, data, body).flatMap((u) => (u.path ? [u.path] : [])));
+}
+
+/** A save refused because the file is newer than the form's: the newer file is read and the CTA compares. */
+export const COMPARE_MESSAGES = new Set([
+  'File changed since it was read',
+  'Changed on GitHub since it was read; reload and review',
+]);

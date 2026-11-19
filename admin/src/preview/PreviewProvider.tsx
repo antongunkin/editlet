@@ -14,6 +14,11 @@ export interface Preview {
   /** The open form's changes for entry `ref` (`<collection>/<slug>`); `null` or `{}` drops them. */
   setFormPreview(ref: string, fields: EntryPreviews | null): void;
   /**
+   * The unsaved entries of the changes buffer (`<collection>/<slug>` → fields), every entry in the buffer, not only
+   * the open one. Between the branch layer and the open forms; `null` or `{}` drops it.
+   */
+  setBufferPreview(entries: Record<string, EntryPreviews> | null): void;
+  /**
    * The active branch and what it changes against the base branch. `entries: null` on the base branch (or signed
    * out): the snapshot then holds the form changes only.
    */
@@ -31,6 +36,7 @@ const noop = () => {};
 /** Outside a provider (screen tests that render a screen alone): nothing is written. */
 const NO_PREVIEW: Ctx = {
   setFormPreview: noop,
+  setBufferPreview: noop,
   setBranchPreview: noop,
   setRefreshSite: noop,
   setNotice: noop,
@@ -44,9 +50,10 @@ const NoticeContext = createContext<string | null>(null);
 export const PREVIEW_DEBOUNCE_MS = 100;
 
 /**
- * Keeps one preview snapshot in IndexedDB for the site page: the branch layer (`setBranchPreview`) merged with the
- * open forms (`setFormPreview`), rewritten 100 ms after the last change (and once after mount) and announced on the
- * preview channel. Before the admin sends `close`, the forms are dropped and the snapshot written at once.
+ * Keeps one preview snapshot in IndexedDB for the site page: the branch layer (`setBranchPreview`), the changes buffer
+ * (`setBufferPreview`) and the open forms (`setFormPreview`), each over the one before, rewritten 100 ms after the last change (and once after mount) and announced on the
+ * preview channel. Before the admin sends `close`, the form and buffer layers are dropped and the
+ * snapshot written at once (the site without the admin shows saved content only; the next open writes them again).
  * `flag`: also set the preview flag (GitHub mode) while a non-base branch is active. Needs `BridgeProvider` above.
  */
 export function PreviewProvider({
@@ -61,6 +68,7 @@ export function PreviewProvider({
   const state = useRef({
     branch: null as string | null,
     branchEntries: null as Record<string, EntryPreviews> | null,
+    buffer: {} as Record<string, EntryPreviews>,
     form: {} as Record<string, EntryPreviews>,
   });
   const options = useRef({ flag, sessionMinutes });
@@ -72,9 +80,9 @@ export function PreviewProvider({
   const [notice, setNotice] = useState<string | null>(null);
 
   const flush = useCallback(async () => {
-    const { branch, branchEntries, form } = state.current;
+    const { branch, branchEntries, buffer, form } = state.current;
     const { flag: setFlag, sessionMinutes: minutes } = options.current;
-    const entries = mergePreviews(branchEntries ?? {}, form);
+    const entries = mergePreviews(mergePreviews(branchEntries ?? {}, buffer), form);
     const label = branch ?? 'local';
     if (branchEntries !== null) {
       // A non-base branch: always a snapshot, even with no changes, so the pill says which branch the page shows.
@@ -110,17 +118,19 @@ export function PreviewProvider({
   }, [schedule]);
 
   // Before the admin sends `close` (the loader removes the iframe at once): drop the open forms and write now.
-  const { setBeforeClose } = useBridge();
-  useEffect(() => {
-    setBeforeClose(() => {
-      if (Object.keys(state.current.form).length === 0) return null;
-      clearTimeout(timer.current);
-      state.current.form = {};
-      queue.current = queue.current.then(flush, flush);
-      return queue.current;
-    });
-    return () => setBeforeClose(null);
-  }, [setBeforeClose, flush]);
+  const { addBeforeClose } = useBridge();
+  useEffect(
+    () =>
+      addBeforeClose(() => {
+        if (Object.keys(state.current.form).length === 0 && Object.keys(state.current.buffer).length === 0) return null;
+        clearTimeout(timer.current);
+        state.current.form = {};
+        state.current.buffer = {};
+        queue.current = queue.current.then(flush, flush);
+        return queue.current;
+      }),
+    [addBeforeClose, flush],
+  );
 
   const setFormPreview = useCallback(
     (ref: string, fields: EntryPreviews | null) => {
@@ -133,6 +143,16 @@ export function PreviewProvider({
       } else {
         state.current.form = { ...form, [ref]: fields };
       }
+      schedule();
+    },
+    [schedule],
+  );
+
+  const setBufferPreview = useCallback(
+    (entries: Record<string, EntryPreviews> | null) => {
+      const next = entries ?? {};
+      if (Object.keys(next).length === 0 && Object.keys(state.current.buffer).length === 0) return;
+      state.current.buffer = next;
       schedule();
     },
     [schedule],
@@ -153,8 +173,8 @@ export function PreviewProvider({
   }, []);
 
   const value = useMemo(
-    (): Ctx => ({ setFormPreview, setBranchPreview, setRefreshSite, setNotice, refreshRef }),
-    [setFormPreview, setBranchPreview, setRefreshSite],
+    (): Ctx => ({ setFormPreview, setBufferPreview, setBranchPreview, setRefreshSite, setNotice, refreshRef }),
+    [setFormPreview, setBufferPreview, setBranchPreview, setRefreshSite],
   );
   return (
     <PreviewContext.Provider value={value}>
@@ -164,10 +184,10 @@ export function PreviewProvider({
 }
 
 export function usePreview(): Preview {
-  const { setFormPreview, setBranchPreview, setRefreshSite, setNotice } = useContext(PreviewContext);
+  const { setFormPreview, setBufferPreview, setBranchPreview, setRefreshSite, setNotice } = useContext(PreviewContext);
   return useMemo(
-    () => ({ setFormPreview, setBranchPreview, setRefreshSite, setNotice }),
-    [setFormPreview, setBranchPreview, setRefreshSite, setNotice],
+    () => ({ setFormPreview, setBufferPreview, setBranchPreview, setRefreshSite, setNotice }),
+    [setFormPreview, setBufferPreview, setBranchPreview, setRefreshSite, setNotice],
   );
 }
 

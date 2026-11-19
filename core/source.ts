@@ -61,6 +61,11 @@ export interface ContentSource {
   readonly kind: 'local' | 'github';
   listFiles(): Promise<FileRef[]>;
   readFile(path: string): Promise<Uint8Array>;
+  /**
+   * Optional: several files at once (a source that can batch, GitHub). Resolves with every path, or rejects as
+   * `readFile` would for any of them (a missing path: `EditletError`). Callers fall back to `readFile` without it.
+   */
+  readFiles?(paths: string[]): Promise<Map<string, Uint8Array>>;
   /** Atomic: a non-empty `issues` means nothing was written. */
   commit(changes: FileChange[], message: string): Promise<{ issues: Issue[] }>;
   /**
@@ -83,10 +88,34 @@ export function versionLimit(limit: number | undefined): number {
   return Math.min(limit, MAX_FILE_VERSIONS);
 }
 
+export interface MemorySourceOptions {
+  /** Adds `readFiles` (as the GitHub source has it); without it the source reads one file at a time, as the local one. */
+  batch?: boolean;
+}
+
+/** One `File not found` issue per path, as the local and GitHub sources report a missing file. */
+function notFound(paths: string[]): EditletError {
+  return new EditletError(paths.map((p) => ({ file: p, path: '', message: `File not found: ${p}` })));
+}
+
+/** A `ContentSource` that has `readFiles`. */
+export type BatchingContentSource = ContentSource & Required<Pick<ContentSource, 'readFiles'>>;
+
 /** In-memory `ContentSource` (test double for the local and github sources). */
 export function createMemorySource(
   files: Record<string, string | Uint8Array>,
+  schemaPath: string | undefined,
+  options: MemorySourceOptions & { batch: true },
+): BatchingContentSource;
+export function createMemorySource(
+  files: Record<string, string | Uint8Array>,
+  schemaPath?: string,
+  options?: MemorySourceOptions,
+): ContentSource;
+export function createMemorySource(
+  files: Record<string, string | Uint8Array>,
   schemaPath = 'cms/schema.json',
+  options: MemorySourceOptions = {},
 ): ContentSource {
   const encoder = new TextEncoder();
   const toBytes = (content: string | Uint8Array) =>
@@ -94,7 +123,7 @@ export function createMemorySource(
   const store = new Map<string, Uint8Array>();
   for (const [path, content] of Object.entries(files)) store.set(path, toBytes(content));
 
-  return {
+  const source: ContentSource = {
     kind: 'local',
     async listFiles() {
       const refs = await Promise.all([...store].map(async ([path, bytes]) => ({ path, sha: await gitBlobSha(bytes) })));
@@ -102,7 +131,7 @@ export function createMemorySource(
     },
     async readFile(path) {
       const bytes = store.get(path);
-      if (!bytes) throw new EditletError([{ file: path, path: '', message: `File not found: ${path}` }]);
+      if (!bytes) throw notFound([path]);
       return bytes.slice();
     },
     async commit(changes, message) {
@@ -133,4 +162,12 @@ export function createMemorySource(
       return { issues: [] };
     },
   };
+  if (options.batch) {
+    source.readFiles = async (paths) => {
+      const missing = [...new Set(paths.filter((p) => !store.has(p)))];
+      if (missing.length > 0) throw notFound(missing);
+      return new Map(paths.map((p) => [p, store.get(p)!.slice()]));
+    };
+  }
+  return source;
 }

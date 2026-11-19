@@ -19,6 +19,8 @@ export { Chip, chipVariants } from './primitives/chip';
 export type { ChipProps } from './primitives/chip';
 export { Avatar } from './primitives/avatar';
 export type { AvatarProps } from './primitives/avatar';
+export { Progress } from './primitives/progress';
+export type { ProgressProps } from './primitives/progress';
 export { Badge, badgeVariants } from './primitives/badge';
 export type { BadgeProps, BadgeTone } from './primitives/badge';
 export { IconTile } from './primitives/icon-tile';

@@ -12,6 +12,8 @@ or incompatible schema breaks them at once. Always run a dry run first.
   "collections": {
     "post": {
       "label": "Post",
+      "pluralLabel": "Posts",
+      "url": "/posts/{slug}",
       "titleField": "title",
       "slugFrom": "title",
       "fields": {
@@ -43,6 +45,14 @@ or incompatible schema breaks them at once. Always run a dry run first.
 - Nested fields (in `object` and `blocks`) take every type, `object` and `blocks` too, with the same rules. A nested
   `markdown` is a Markdown string; `draft` is an ordinary key there. `object` and `blocks` take no `default`.
 - At most one `markdown` field per collection (top level). `titleField` and `slugFrom` must name a field of the collection.
+- `label` is the name of one entry (*Post*). `pluralLabel` (optional, not blank, at most 100 characters) is the name
+  for many (*Posts*), for the editor's headings; a singleton takes none. Without it the editor shows `label`.
+- `url` (optional) is the path of the collection's page on the site, from its root: `/posts/{slug}` (one page per
+  entry; `{slug}` is the only placeholder, at most once) or a fixed path where every entry is shown (`/`). A singleton's
+  `url` has no `{slug}`. It starts with `/`, is plain ASCII without spaces, `?`, `#`, `\`, `%`, `"`, `<`, `>`, `` ` ``,
+  `//` or `.`/`..` segments, at most 200 characters, and not under `/editlet/` or `/__editlet`. Write the slug as
+  `{slug}`, never as the route file's `[slug]` or `:slug`: `app/posts/[slug]/page.tsx` → `"url": "/posts/{slug}"`. Keep the site's trailing `/`. Leave it
+  out when the collection has no page, or its route depends on a field (`/{category}/{slug}`) or a language prefix.
 - `groups` (optional, per collection) splits the editor's entry into tabs: `"groups": { "content": { "label": "Content" },
   "media": { "label": "Media" } }`, in tab order. A top-level field joins one with `"group": "media"`; a field without
   `group` is in the first group. `group` must name a key of `groups` and is not allowed on nested fields. Groups change
@@ -81,7 +91,8 @@ dev server is running, offer to open `?editlet=schema`.
    candidate.
 
 **New collection:** add it to the candidate with `label`, `fields`, and usually `titleField` (the field the editor
-shows as the entry title) and `slugFrom` (the field slugs are made from). Create the folder `<contentDir>/<key>/` when
+shows as the entry title) and `slugFrom` (the field slugs are made from). Give a collection with many entries a
+`pluralLabel`, and a `url` when the human's site has (or will have) a page for it: read the route that renders it. Create the folder `<contentDir>/<key>/` when
 you add the first entry. Git does not track empty folders. Add a reference field elsewhere with `collections: ["<key>"]` if entries
 should link to it.
 

@@ -7,6 +7,7 @@ import {
   DEFAULT_FILE_VERSIONS,
   MAX_FILE_VERSIONS,
   versionLimit,
+  type BatchingContentSource,
   type ContentSource,
 } from './source';
 
@@ -63,6 +64,30 @@ describe('createMemorySource', () => {
     expect(error).toBeInstanceOf(EditletError);
     expect((error as EditletError).issues[0].message).toContain('not found');
     expect((error as EditletError).issues[0].path).toBe('');
+  });
+
+  it('has no readFiles unless asked for one', () => {
+    expect(make().readFiles).toBeUndefined();
+    expect(createMemorySource({}, 'cms/schema.json', { batch: true }).readFiles).toBeTypeOf('function');
+  });
+
+  it('reads a batch in input order, as copies, with batch: true', async () => {
+    const source = createMemorySource({ 'b.txt': 'B', 'a.txt': 'A', 'c.txt': 'C' }, 'cms/schema.json', { batch: true });
+    expectTypeOf(source).toEqualTypeOf<BatchingContentSource>();
+    const read = await source.readFiles(['c.txt', 'a.txt', 'c.txt']);
+    expect([...read.keys()]).toEqual(['c.txt', 'a.txt']);
+    expect(new TextDecoder().decode(read.get('a.txt'))).toBe('A');
+    read.get('a.txt')![0] = 0;
+    expect(new TextDecoder().decode(await source.readFile('a.txt'))).toBe('A');
+    expect((await source.readFiles([])).size).toBe(0);
+  });
+
+  it('rejects a batch with an EditletError listing every missing path once', async () => {
+    const source = createMemorySource({ 'a.txt': 'A' }, 'cms/schema.json', { batch: true });
+    const error = await source.readFiles(['x.md', 'a.txt', 'y.md', 'x.md']).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EditletError);
+    expect((error as EditletError).issues.map((i) => i.file)).toEqual(['x.md', 'y.md']);
+    expect((error as EditletError).issues[0].message).toBe('File not found: x.md');
   });
 
   it('applies a valid commit and changes the sha after an edit', async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { EditletError } from './issues';
-import { fieldGroups, loadSchema, markdownFieldKey } from './schema';
+import { collectionNames, fieldGroups, loadSchema, markdownFieldKey } from './schema';
 
 function fixture(): any {
   return {
@@ -302,5 +302,69 @@ describe('field groups', () => {
     expect(fieldGroups(loadSchema(fixture()).collections.post)).toEqual([
       { key: '', label: '', fields: ['title', 'body', 'tags', 'author'] },
     ]);
+  });
+});
+
+describe('pluralLabel and url', () => {
+  const withPost = (keys: object) => {
+    const fx = fixture();
+    Object.assign(fx.collections.post, keys);
+    return fx;
+  };
+  const withHome = (keys: object) => {
+    const fx = fixture();
+    Object.assign(fx.collections.homePage, keys);
+    return fx;
+  };
+
+  it('loads a schema without the keys unchanged', () => {
+    const post = loadSchema(fixture()).collections.post;
+    expect(post.pluralLabel).toBeUndefined();
+    expect(post.url).toBeUndefined();
+  });
+
+  it('keeps both keys as written', () => {
+    const schema = loadSchema(withPost({ pluralLabel: ' Posts ', url: '/posts/{slug}/' }));
+    expect(schema.collections.post).toMatchObject({ pluralLabel: ' Posts ', url: '/posts/{slug}/' });
+    expect(loadSchema(withHome({ url: '/' })).collections.homePage.url).toBe('/');
+  });
+
+  it('rejects a blank or too long pluralLabel, and one on a singleton', () => {
+    expect(issuesOf(withPost({ pluralLabel: '  ' }))).toEqual([
+      { path: 'collections.post.pluralLabel', message: 'pluralLabel must not be empty' },
+    ]);
+    expect(issuesOf(withPost({ pluralLabel: '' }))[0]).toMatchObject({ path: 'collections.post.pluralLabel' });
+    expect(issuesOf(withPost({ pluralLabel: 'x'.repeat(101) }))[0]).toMatchObject({
+      path: 'collections.post.pluralLabel',
+      message: expect.stringContaining('Too big'),
+    });
+    expect(issuesOf(withHome({ pluralLabel: 'Homes' }))).toEqual([
+      { path: 'collections.homePage.pluralLabel', message: 'pluralLabel is only for collections with many entries' },
+    ]);
+  });
+
+  it('rejects a bad url with the rule at the collection path', () => {
+    expect(issuesOf(withPost({ url: 'posts/{slug}' }))).toEqual([
+      { path: 'collections.post.url', message: `url must be a path from the site's root, for example "/posts/{slug}"` },
+    ]);
+    expect(issuesOf(withPost({ url: '/posts/{title}' }))[0]).toEqual({
+      path: 'collections.post.url',
+      message: 'unknown placeholder "{title}" (use {slug})',
+    });
+    expect(issuesOf(withHome({ url: '/{slug}' }))[0]).toEqual({
+      path: 'collections.homePage.url',
+      message: 'a singleton has one page: url cannot use {slug}',
+    });
+    expect(issuesOf(withPost({ url: 3 }))[0]?.path).toBe('collections.post.url');
+  });
+});
+
+describe('collectionNames', () => {
+  it('gives the plural for many and the label for one, the label for both without a plural', () => {
+    const fx = fixture();
+    fx.collections.post.pluralLabel = 'Posts';
+    const schema = loadSchema(fx);
+    expect(collectionNames(schema.collections.post)).toEqual({ one: 'Post', many: 'Posts' });
+    expect(collectionNames(schema.collections.author)).toEqual({ one: 'Author', many: 'Author' });
   });
 });

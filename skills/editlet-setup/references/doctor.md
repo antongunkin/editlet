@@ -19,6 +19,7 @@ Fix every `fail`, explain every `warn`, run it again. For a fix that changes som
 | `project.framework` | No Next or Astro config, or versions outside `next >=16` + `react >=19` / `astro ^6 \|\| ^7` | Upgrade the framework, or stop: Editlet does not support it |
 | `project.skills` | Skill links or the guard hook are missing, point elsewhere, or the guard cannot load | `node node_modules/editlet/skills/editlet/scripts/link.mjs --hooks`; `guard broken` after a fresh clone means `npm install` first |
 | `content.valid` | The schema or an entry fails validation | Follow the `editlet` skill: fix the files, run `validate.mjs` |
+| `content.urls` | `ok`: which collections have a page address (`url`) and which have none. `warn`: no collection has one, but the site has a dynamic route (`app/**/[slug]/page.*`, `src/app/**/[slug]/page.*`, `src/pages/**/[slug].astro`) | Add `url` to the collections that have pages ([next § page addresses](next.md#page-addresses-and-plural-labels)); a collection without a page needs none |
 
 ## Next.js
 
@@ -56,6 +57,7 @@ Fix every `fail`, explain every `warn`, run it again. For a fix that changes som
 | `site.admin` | `/editlet/index.html` is not served | Next: `withEditlet` and `/public/editlet/` in the build; Astro: the integration; check the host does not rewrite `/editlet/*` |
 | `site.dev-api` | **`/__editlet/files` answers 200 on the live site: anyone can write files.** | Take the deploy down or block the path now; the site must run `next start` / a static build, never `next dev` / `astro dev` |
 | `site.coop` | The page sends COOP `same-origin` | [production § 6](production.md#6-headers) |
+| `site.entry-url` | The first collection whose `url` has `{slug}`: its first entry by file name that is not a draft, fetched on the live site. `ok` for a redirect that only adds or drops the trailing `/`; `warn`: any other non-2xx (the answer, a redirect's target); `manual`: the collection has only drafts. No such collection: no line | Compare the pattern with the site's route and its trailing `/`; fix `url` (a redirect to the same path with or without `/` is only `ok` with a note: write the slash the site uses) |
 | `site.preview` | `manual`: draft preview is on | Open `?editlet` on an Editlet branch (`editlet/*`, or `git.branchPrefix`) and check the page shows branch content |
 | `auth.url` | `config.json` has no `authUrl` | As `admin.auth-url` |
 | `auth.health` | `<authUrl>/health` does not answer 204: the handler is not deployed at that URL | Deploy the handler; check the path (`/api/editlet/oauth`) |
@@ -86,4 +88,5 @@ Fix every `fail`, explain every `warn`, run it again. For a fix that changes som
 | "The sign-in popup closes / fails" | `auth.origin`, `site.coop`, the GitHub App callback URL; `state_mismatch` on `http://localhost` in Safari |
 | "Save fails: changed on GitHub" | A conflict, not a setup problem: reload in the editor |
 | "No preview on the branch screen" | `github.deployments` |
+| "Open on the page gives a 404" | `site.entry-url`; the collection's `url` against its route |
 | "Draft preview shows the old page" | `next.preview-route`, the two env names, `{ ref }` on every read ([preview § 4](preview.md#4-pages-read-the-preview-ref)) |

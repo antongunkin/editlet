@@ -1,9 +1,16 @@
 import { act, render, screen } from '@testing-library/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createFakeWindow, ORIGIN } from './test/fakeWindow';
-import { BEFORE_CLOSE_TIMEOUT_MS, BridgeProvider, useBridge, useRoute, type BeforeClose } from './useRoute';
+import {
+  BEFORE_CLOSE_TIMEOUT_MS,
+  BridgeProvider,
+  useBridge,
+  usePagePath,
+  useRoute,
+  type BeforeClose,
+} from './useRoute';
 
 import { adminMessage } from '../../loader/protocol';
 
@@ -16,21 +23,23 @@ let exit: Promise<void> | null = null;
 
 function Probe() {
   const { route, raw, navigate } = useRoute();
-  const { status, setGuard, close, canLeave, setBeforeClose } = useBridge();
+  const { status, setGuard, close, canLeave, addBeforeClose } = useBridge();
+  const page = usePagePath();
   const [leave, setLeave] = useState('');
   useEffect(() => {
     setGuard(guard);
-    setBeforeClose(beforeClose);
+    const remove = beforeClose ? addBeforeClose(beforeClose) : undefined;
     return () => {
       setGuard(null);
-      setBeforeClose(null);
+      remove?.();
     };
-  }, [setGuard, setBeforeClose]);
+  }, [setGuard, addBeforeClose]);
   return (
     <div>
       <span data-testid="raw">{raw}</span>
       <span data-testid="kind">{route.kind}</span>
       <span data-testid="status">{status}</span>
+      <span data-testid="page">{page ?? 'none'}</span>
       <button onClick={() => navigate({ kind: 'collection', collection: 'post' })}>to-post</button>
       <button onClick={() => navigate('post/hello-world')}>to-entry</button>
       <button onClick={() => close()}>close</button>
@@ -96,11 +105,12 @@ describe('BridgeProvider without a parent page', () => {
   });
 });
 
-function mount() {
+function mount(extra?: ReactNode) {
   const fake = createFakeWindow({ href: `${ORIGIN}/editlet/?editlet=post` });
   render(
     <BridgeProvider win={fake.win}>
       <Probe />
+      {extra}
     </BridgeProvider>,
   );
   return fake;
@@ -128,6 +138,16 @@ describe('BridgeProvider embedded', () => {
       adminMessage({ type: 'navigate', route: 'post/hello-world' }),
       ORIGIN,
     );
+  });
+
+  it("keeps the page's pathname from init and follows page messages", () => {
+    const { fromSite } = mount();
+    expect(screen.getByTestId('page').textContent).toBe('none');
+    act(() => fromSite({ type: 'init', route: 'post/tires', site }));
+    expect(screen.getByTestId('page').textContent).toBe('/blog/');
+    act(() => fromSite({ type: 'page', href: `${ORIGIN}/posts/tires?x=1#top` }));
+    expect(screen.getByTestId('page').textContent).toBe('/posts/tires');
+    expect(screen.getByTestId('raw').textContent).toBe('post/tires');
   });
 
   it('applies a site navigate when the guard allows', () => {
@@ -242,6 +262,31 @@ describe('BridgeProvider embedded', () => {
     allow = true;
     act(() => screen.getByText('close-with-exit').click());
     await act(async () => {});
+    expect(parent.postMessage).not.toHaveBeenCalledWith(close, ORIGIN);
+    await act(async () => release());
+    expect(parent.postMessage).toHaveBeenLastCalledWith(close, ORIGIN);
+  });
+
+  it('awaits every beforeClose hook, and a removed hook is not run', async () => {
+    const ran: string[] = [];
+    let release!: () => void;
+    beforeClose = () => new Promise<void>((r) => (release = () => (ran.push('probe'), r())));
+    function Extra() {
+      const { addBeforeClose } = useBridge();
+      useEffect(() => {
+        const removeA = addBeforeClose(() => (ran.push('a'), null));
+        const removeB = addBeforeClose(() => (ran.push('b'), null));
+        removeB();
+        return removeA;
+      }, [addBeforeClose]);
+      return null;
+    }
+    const { parent, fromSite } = mount(<Extra />);
+    act(() => fromSite({ type: 'init', route: 'post', site }));
+    const close = adminMessage({ type: 'close' });
+    act(() => fromSite({ type: 'close-request' }));
+    await act(async () => {});
+    expect(ran).toEqual(['a']);
     expect(parent.postMessage).not.toHaveBeenCalledWith(close, ORIGIN);
     await act(async () => release());
     expect(parent.postMessage).toHaveBeenLastCalledWith(close, ORIGIN);

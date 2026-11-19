@@ -221,3 +221,138 @@ describe('popstate', () => {
     expect(post.mock.calls[0]![0]).toMatchObject({ type: 'init', route: 'schema' });
   });
 });
+
+describe('open', () => {
+  const openOn = (param?: string) => {
+    const onOpen = vi.fn();
+    go(`/page?${param ?? 'editlet'}=post/a`);
+    mount({ onOpen, ...(param ? { param } : {}) });
+    admin({ type: 'ready' });
+    return onOpen;
+  };
+
+  it('goes to the path with the editor parameter and the current route', () => {
+    const onOpen = openOn('cms');
+    admin({ type: 'open', path: '/posts/a' });
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(`${location.origin}/posts/a?cms=post/a`);
+  });
+
+  it("keeps the path's own query and hash", () => {
+    const onOpen = openOn();
+    admin({ type: 'open', path: '/posts/a?x=1#top' });
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(`${location.origin}/posts/a?x=1&editlet=post/a#top`);
+  });
+
+  it.each([
+    '//evil.test/x',
+    '/\\evil.test/x',
+    '/\t/evil.test/x',
+    '/\n/evil.test',
+    '/\r\\evil.test',
+    ' //evil.test',
+    'https://evil.test/',
+    'javascript:alert(1)',
+    'posts/a',
+    '',
+  ])('ignores %j', (path) => {
+    const onOpen = openOn();
+    admin({ type: 'open', path });
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('assigns the location by default', () => {
+    const assign = vi.fn();
+    const real = window.location;
+    vi.stubGlobal('location', new Proxy({}, { get: (_, k) => (k === 'assign' ? assign : Reflect.get(real, k)) }));
+    open();
+    admin({ type: 'ready' });
+    admin({ type: 'open', path: '/posts/a' });
+    expect(assign).toHaveBeenCalledExactlyOnceWith(`${real.origin}/posts/a?editlet=post/a`);
+  });
+});
+
+describe('page', () => {
+  it('posts the new address once after a client-side navigation', () => {
+    open();
+    admin({ type: 'ready' });
+    const post = spy();
+    history.pushState(null, '', '/posts/a?editlet=post/a');
+    handle!.sync();
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      siteMessage({ type: 'page', href: `${location.origin}/posts/a` }),
+      location.origin,
+    );
+    handle!.sync();
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it('posts only navigate on a route change', () => {
+    open();
+    admin({ type: 'ready' });
+    const post = spy();
+    go('/page?editlet=schema');
+    handle!.sync();
+    expect(post).toHaveBeenCalledExactlyOnceWith(siteMessage({ type: 'navigate', route: 'schema' }), location.origin);
+  });
+
+  it('posts nothing before ready; init carries the address', () => {
+    open();
+    const post = spy();
+    go('/other?editlet=post/a');
+    handle!.sync();
+    expect(post).not.toHaveBeenCalled();
+    admin({ type: 'ready' });
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      siteMessage({
+        type: 'init',
+        route: 'post/a',
+        site: { origin: location.origin, href: `${location.origin}/other` },
+      }),
+      location.origin,
+    );
+    handle!.sync();
+    expect(post).toHaveBeenCalledOnce();
+  });
+});
+
+describe('highlight after a client-side navigation', () => {
+  it('is applied again on a new pathname', () => {
+    dom();
+    open();
+    admin({ type: 'highlight', entry: 'post/a' });
+    expect(scroll).toHaveBeenCalledOnce();
+    document.body.querySelectorAll('[data-editlet-entry]').forEach((n) => n.remove());
+    dom();
+    history.pushState(null, '', '/posts/a?editlet=post/a');
+    handle!.sync();
+    expect(lit()).toEqual(['a1', 'a2']);
+    expect(scroll).toHaveBeenCalledTimes(2);
+  });
+
+  it("is not applied again after the loader's own URL write or a same-page popstate", () => {
+    dom();
+    open();
+    admin({ type: 'ready' });
+    admin({ type: 'highlight', entry: 'post/a' });
+    admin({ type: 'navigate', route: 'post/b' });
+    handle!.sync();
+    go('/page?editlet=post/a');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(scroll).toHaveBeenCalledOnce();
+  });
+
+  it('is forgotten after highlight null and after close', () => {
+    dom();
+    open();
+    admin({ type: 'highlight', entry: 'post/a' });
+    admin({ type: 'highlight', entry: null });
+    history.pushState(null, '', '/posts/a?editlet=post/a');
+    handle!.sync();
+    expect(lit()).toEqual([]);
+    admin({ type: 'highlight', entry: 'post/a' });
+    admin({ type: 'close' });
+    go('/elsewhere?editlet=post/a');
+    handle!.sync();
+    expect(lit()).toEqual([]);
+  });
+});

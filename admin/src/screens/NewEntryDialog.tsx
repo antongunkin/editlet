@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 
 import { NewEntryView } from './NewEntryView';
 
 import { isValidSlug, slugify } from '../../../core/paths';
+import { collectionNames } from '../../../core/schema';
 import { entryRefs, useFiles, type SchemaData } from '../data/queries';
 import { pendingNewEntries } from '../entry/pending';
 import { useRoute } from '../useRoute';
@@ -12,16 +13,24 @@ export type NewEntryDialogProps = {
   schema: SchemaData;
   open: boolean;
   onOpenChange(open: boolean): void;
+  /** Where the focus returns on close (opened from Search: what had it before Search). */
+  finalFocus?: RefObject<HTMLElement | null>;
 };
 
 /**
  * A collection's label as a noun in a sentence (*New post*, *A tag with this address*): the first letter lower-cased
  * unless the label has a capital after it (*FAQ*, *Home Page*), which a label of names keeps. The schema's `label` is
- * taken as the singular name of one entry (*Post*); a plural label reads *New posts*.
+ * the singular name of one entry (*Post*); the list heading reads `pluralLabel` (`collectionNames(def).many`).
  */
 export function entryNoun(label: string): string {
   const rest = label.slice(1);
   return rest === rest.toLowerCase() ? label.slice(0, 1).toLowerCase() + rest : label;
+}
+
+/** The text around `{slug}` in the collection's `url` (`/posts/{slug}/` → `/posts/` and `/`), or none. */
+export function slugAround(url: string | undefined): { before: string; after: string } | undefined {
+  const at = url?.indexOf('{slug}') ?? -1;
+  return url && at >= 0 ? { before: url.slice(0, at), after: url.slice(at + '{slug}'.length) } : undefined;
 }
 
 /** The field the name input fills: `slugFrom`, else `titleField`. */
@@ -34,13 +43,14 @@ function titleKey(schema: SchemaData, collection: string): string | undefined {
  * *New post*: asks for the name first, the address (the slug) follows it until it is edited, then opens the blank entry,
  * unsaved. Nothing is written here; the entry's Save creates the file. The view is NewEntryView.tsx.
  */
-export function NewEntryDialog({ collection, schema, open, onOpenChange }: NewEntryDialogProps) {
+export function NewEntryDialog({ collection, schema, open, onOpenChange, finalFocus }: NewEntryDialogProps) {
   const { navigate } = useRoute();
   const files = useFiles();
   const focus = useRef<HTMLInputElement>(null);
   const def = schema.schema.collections[collection];
   const label = def?.label ?? collection;
   const noun = entryNoun(label);
+  const plural = def ? collectionNames(def).many : collection;
   const key = titleKey(schema, collection);
   const [name, setName] = useState('');
   const [typed, setTyped] = useState<string | null>(null);
@@ -90,12 +100,13 @@ export function NewEntryDialog({ collection, schema, open, onOpenChange }: NewEn
       open={open}
       onOpenChange={onOpenChange}
       title={`New ${noun}`}
-      sub={label}
+      sub={plural}
       nameLabel={key === undefined ? undefined : (def?.fields[key]?.label ?? 'Title')}
       name={name}
       onName={setName}
       address={address}
       onAddress={setTyped}
+      around={slugAround(def?.url)}
       editing={editing}
       onEdit={() => setEditing(true)}
       problem={problem}
@@ -103,6 +114,7 @@ export function NewEntryDialog({ collection, schema, open, onOpenChange }: NewEn
       canCreate={canCreate}
       onCreate={create}
       focusRef={focus}
+      finalFocus={finalFocus}
     />
   );
 }

@@ -71,8 +71,9 @@ describe('Revert this change', () => {
     fireEvent.click(await findCta('Save 1 change'));
     const diff = await openEntryDiff('Hello there');
     fireEvent.click(diff.getByRole('button', { name: 'Revert this change: Title' }));
+    // The last revert empties the buffer (written at once while the tray is open) and the tray closes.
+    await waitFor(() => expect(rowText('Title')).toContain('Hello world'));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Your changes' })).toBeNull());
-    expect(rowText('Title')).toContain('Hello world');
     await waitFor(() => expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull());
   });
 

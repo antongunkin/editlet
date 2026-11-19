@@ -1,8 +1,10 @@
 import { adminMessage, isSiteToAdminMessage, type AdminToSiteMessage, type MessageBody } from '../../loader/protocol';
 
 export type BridgeHandlers = {
-  /** The site's `init` (also re-sent when the site answers a later `ready`). */
-  onInit(route: string): void;
+  /** The site's `init` (also re-sent when the site answers a later `ready`), with the page's href (no editor parameter). */
+  onInit(route: string, href: string): void;
+  /** The page's href changed (a client navigation; no editor parameter). Optional: older callers ignore it. */
+  onPage?(href: string): void;
   /** The site's page URL changed while the admin is open. */
   onNavigate(route: string): void;
   /** Escape on the site page: answer with `close` when it is safe. */
@@ -35,9 +37,10 @@ export function createBridge(win: Window, handlers: BridgeHandlers): Bridge {
       pinned = e.origin;
     } else if (e.origin !== pinned) return;
     const m = e.data;
-    if (m.type === 'init') handlers.onInit(m.route);
+    if (m.type === 'init') handlers.onInit(m.route, m.site.href);
     else if (m.type === 'navigate') handlers.onNavigate(m.route);
-    else handlers.onCloseRequest();
+    else if (m.type === 'page') handlers.onPage?.(m.href);
+    else if (m.type === 'close-request') handlers.onCloseRequest();
   };
 
   if (embedded) {

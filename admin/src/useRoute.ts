@@ -42,12 +42,14 @@ export type CloseOptions = { exit?: BeforeClose };
 type BridgeContextValue = {
   status: BridgeStatus;
   raw: string;
+  /** The host page's href without the editor parameter (`init.site.href`, then `page`); `null` before `init`. */
+  pageHref: string | null;
   navigate(r: Route | string): void;
   send(body: MessageBody<AdminToSiteMessage>): void;
   close(options?: CloseOptions): void;
   setGuard(fn: NavigationGuard | null): void;
   canLeave(): boolean;
-  setBeforeClose(fn: BeforeClose | null): void;
+  addBeforeClose(fn: BeforeClose): () => void;
 };
 
 /** Asks the current guard; no guard means allowed. */
@@ -71,17 +73,18 @@ export function BridgeProvider({ children, win = window }: { children?: ReactNod
   const embedded = win.parent !== win;
   const [raw, setRaw] = useState(() => readEditletRoute(win.location.href) ?? '');
   const [status, setStatus] = useState<BridgeStatus>(embedded ? 'pending' : 'standalone');
+  const [pageHref, setPageHref] = useState<string | null>(null);
   const rawRef = useRef(raw);
   const guardRef = useRef<NavigationGuard | null>(null);
   const bridgeRef = useRef<Bridge | null>(null);
-  const beforeCloseRef = useRef<BeforeClose | null>(null);
+  const beforeCloseRef = useRef<Set<BeforeClose>>(new Set());
 
   /**
-   * `close`, after the `beforeClose` hook and the caller's `exit` (an animation), which run side by side
+   * `close`, after the `beforeClose` hooks and the caller's `exit` (an animation), which run side by side
    * (synchronously when neither has anything to wait for).
    */
   const sendClose = useCallback((exit?: BeforeClose) => {
-    const pending = [beforeCloseRef.current?.() ?? null, exit?.() ?? null].filter((p) => p !== null);
+    const pending = [...[...beforeCloseRef.current].map((fn) => fn()), exit?.() ?? null].filter((p) => p !== null);
     if (pending.length === 0) return bridgeRef.current?.send({ type: 'close' });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, BEFORE_CLOSE_TIMEOUT_MS)));
@@ -112,7 +115,8 @@ export function BridgeProvider({ children, win = window }: { children?: ReactNod
       replace(route);
     };
     const bridge = createBridge(win, {
-      onInit(route) {
+      onInit(route, href) {
+        setPageHref(href);
         // A repeated `init` (the site answered a later `ready`) is a site navigate.
         if (initialized) return siteNavigate(route);
         initialized = true;
@@ -120,6 +124,7 @@ export function BridgeProvider({ children, win = window }: { children?: ReactNod
         setStatus('connected');
       },
       onNavigate: siteNavigate,
+      onPage: setPageHref,
       onCloseRequest() {
         if (allows(guardRef)) sendClose();
       },
@@ -168,13 +173,18 @@ export function BridgeProvider({ children, win = window }: { children?: ReactNod
 
   const canLeave = useCallback(() => allows(guardRef), []);
 
-  const setBeforeClose = useCallback((fn: BeforeClose | null) => {
-    beforeCloseRef.current = fn;
+  const addBeforeClose = useCallback((fn: BeforeClose) => {
+    // A fresh wrapper per call: the same function added twice is two hooks, each removed by its own cleanup.
+    const hook: BeforeClose = () => fn();
+    beforeCloseRef.current.add(hook);
+    return () => {
+      beforeCloseRef.current.delete(hook);
+    };
   }, []);
 
   const value = useMemo<BridgeContextValue>(
-    () => ({ status, raw, navigate, send, close, setGuard, canLeave, setBeforeClose }),
-    [status, raw, navigate, send, close, setGuard, canLeave, setBeforeClose],
+    () => ({ status, raw, pageHref, navigate, send, close, setGuard, canLeave, addBeforeClose }),
+    [status, raw, pageHref, navigate, send, close, setGuard, canLeave, addBeforeClose],
   );
   return createElement(BridgeContext.Provider, { value }, children);
 }
@@ -191,8 +201,8 @@ export function useRoute(): { route: Route; raw: string; navigate(r: Route | str
  * is a no-op, without asking, before `init`); once allowed it runs `exit` (an animation) and waits for it like
  * `beforeClose`. `setGuard` installs the guard consulted for site `navigate`, a
  * repeated `init`, `close-request`, `close()` and in-app `navigate`. `canLeave()` asks it for
- * any other way of leaving the screen (e.g. a branch switch); `true` when there is no guard. `setBeforeClose` installs
- * the hook that runs before every `close` the admin sends (see `BeforeClose`).
+ * any other way of leaving the screen (e.g. a branch switch); `true` when there is no guard. `addBeforeClose` adds a
+ * hook that runs before every `close` the admin sends (see `BeforeClose`; every hook is awaited) and returns its removal.
  */
 export function useBridge(): {
   status: BridgeStatus;
@@ -200,8 +210,17 @@ export function useBridge(): {
   close(options?: CloseOptions): void;
   setGuard(fn: NavigationGuard | null): void;
   canLeave(): boolean;
-  setBeforeClose(fn: BeforeClose | null): void;
+  addBeforeClose(fn: BeforeClose): () => void;
 } {
-  const { status, send, close, setGuard, canLeave, setBeforeClose } = useBridgeContext();
-  return { status, send, close, setGuard, canLeave, setBeforeClose };
+  const { status, send, close, setGuard, canLeave, addBeforeClose } = useBridgeContext();
+  return { status, send, close, setGuard, canLeave, addBeforeClose };
+}
+
+/**
+ * The host page's pathname (`/posts/tires`), from `init.site.href` and the site's `page` messages; `null` before
+ * `init` or without a parent page.
+ */
+export function usePagePath(): string | null {
+  const { pageHref } = useBridgeContext();
+  return useMemo(() => (pageHref && URL.canParse(pageHref) ? new URL(pageHref).pathname : null), [pageHref]);
 }

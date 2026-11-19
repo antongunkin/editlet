@@ -106,14 +106,25 @@ const term = 'm-0 text-sm font-medium text-tray-muted-foreground';
 const detail = 'm-0 flex flex-wrap items-center gap-2 text-base';
 // A 44 px tall target (the row grows to it), its ring outside the text.
 const external =
-  'inline-flex min-h-11 items-center rounded-md text-foreground underline underline-offset-2 outline-none focused:outline-2 focused:outline-offset-2 focused:outline-ring';
+  'inline-flex min-h-11 items-center rounded-md text-foreground underline underline-offset-2 outline-none focused:outline-2 focused:outline-solid focused:outline-offset-2 focused:outline-ring';
 
-/** The entry's details (⋯ → Details): its file, who changed and created it, its commits with a link to the history. */
-export function EntryDetails({ history }: { history: EntryHistory }) {
+/**
+ * The entry's details (⋯ → Details): its page (`page`, from the collection's `url`), its file, who changed and created
+ * it, its commits with a link to the history.
+ */
+export function EntryDetails({ history, page }: { history: EntryHistory; page?: string | null }) {
   const { path, version, updated, created, commits, pr, historyUrl } = history;
   return (
     <dl className="m-0 flex flex-col gap-1 px-4 pb-4" aria-label="Details">
-      <dt className={term}>File</dt>
+      {page ? (
+        <>
+          <dt className={term}>Page</dt>
+          <dd className={detail}>
+            <code className="font-mono text-sm break-all select-text">{page}</code>
+          </dd>
+        </>
+      ) : null}
+      <dt className={cn(term, page && 'mt-3')}>File</dt>
       <dd className={detail}>
         <code className="font-mono text-sm break-all">{path}</code>
       </dd>

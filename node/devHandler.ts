@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, sep } from 'node:path';
@@ -7,6 +8,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 
 import { DEFAULT_SCHEMA_PATH, listFiles, loadProjectSchema } from './fs';
+import { parsePorcelainZ, porcelainEntries } from './gitStatus';
 
 import {
   DEV_API_BASE,
@@ -358,14 +360,31 @@ export function createDevHandler(opts: {
     return new Response(null, { status: 204 });
   }
 
-  /** The checkout's branch and the number of uncommitted files under `contentDir`; empty when git is not usable. */
+  /** A stable id of this project for client storage keys: a hash of the resolved root, never the path itself. */
+  let projectId: Promise<string> | undefined;
+  function project(): Promise<string> {
+    projectId ??= realpath(root)
+      .catch(() => root)
+      .then((resolved) => createHash('sha256').update(resolved).digest('hex'));
+    return projectId;
+  }
+
+  /** The checkout's branch and the uncommitted files under `contentDir` (count and list); empty when git is not usable. */
   async function gitRoute(): Promise<Response> {
-    let body: DevGitResponse = { branch: null, changes: 0 };
+    let body: DevGitResponse = { branch: null, changes: 0, files: [], project: await project() };
     try {
-      const branch = (await git(['branch', '--show-current'])).trim();
       const { schema } = await currentSchema();
-      const status = await git(['status', '--porcelain', '-uall', '--', schema?.contentDir ?? '.']);
-      body = { branch: branch === '' ? null : branch, changes: status.split('\n').filter(Boolean).length };
+      const [branch, status, prefix] = await Promise.all([
+        git(['branch', '--show-current']),
+        git(['status', '--porcelain=v1', '-z', '-uall', '--', schema?.contentDir ?? '.']),
+        git(['rev-parse', '--show-prefix']),
+      ]);
+      body = {
+        ...body,
+        branch: branch.trim() === '' ? null : branch.trim(),
+        changes: porcelainEntries(status).length,
+        files: parsePorcelainZ(status, prefix.replace(/\n$/, '')),
+      };
     } catch {
       // not a git checkout, or no git binary
     }

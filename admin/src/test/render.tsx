@@ -16,7 +16,9 @@ export const HOME_LOADED = /^All content\s*\d+ entr/;
 /** From Home: open *All content*, then the collection with this label. */
 export async function openCollection(scope: ReturnType<typeof within>, label: string) {
   fireEvent.click(await scope.findByRole('link', { name: HOME_LOADED }));
-  fireEvent.click(await scope.findByRole('link', { name: new RegExp(`^${escape(label)}\\s*(\\d+ entr|Single page)`) }));
+  fireEvent.click(
+    await scope.findByRole('link', { name: new RegExp(`^${escape(label)}s?\\s*(\\d+ entr|Single page)`) }),
+  );
 }
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -17,6 +17,8 @@ export interface CompareSheetProps {
   onPick(key: string, pick: ConflictPick): void;
   /** Where the other save is: *On GitHub* (GitHub mode) or *On disk* (dev mode). */
   where: 'github' | 'disk';
+  /** Who saved the other version and when (*Mo, 10m ago*), when known: it follows the side's name on its card. */
+  by?: string;
   onApply(): void;
 }
 
@@ -60,8 +62,9 @@ function Version({ value, side, text, other }: { value: ConflictPick; side: stri
   );
 }
 
-export function CompareSheet({ open, onOpenChange, fields, picks, onPick, where, onApply }: CompareSheetProps) {
-  const other = where === 'github' ? 'On GitHub' : 'On disk';
+export function CompareSheet({ open, onOpenChange, fields, picks, onPick, where, by, onApply }: CompareSheetProps) {
+  const side = where === 'github' ? 'On GitHub' : 'On disk';
+  const other = by ? `${side} · ${by}` : side;
   const place = where === 'github' ? 'on GitHub' : 'on disk';
   return (
     <Sheet

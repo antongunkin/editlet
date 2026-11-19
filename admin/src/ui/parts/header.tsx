@@ -54,16 +54,25 @@ export function BigTitle({
   as: Title = 'h2',
   title,
   meta,
+  titleProps,
   className,
   ...props
-}: Omit<ComponentProps<'div'>, 'title'> & { as?: 'h1' | 'h2'; title: ReactNode; meta?: ReactNode }) {
+}: Omit<ComponentProps<'div'>, 'title'> & {
+  as?: 'h1' | 'h2';
+  title: ReactNode;
+  meta?: ReactNode;
+  /** Props of the heading itself: a `ref` and `tabIndex={-1}` let a screen put the focus on its title. */
+  titleProps?: ComponentProps<'h1'>;
+}) {
   return (
     <div
       data-slot="big-title"
       className={cn('flex flex-col gap-2 px-4 pt-2 pb-4 text-2xl font-semibold text-foreground', className)}
       {...props}
     >
-      <Title className="m-0 text-2xl font-semibold">{title}</Title>
+      <Title {...titleProps} className="m-0 text-2xl font-semibold outline-none">
+        {title}
+      </Title>
       {meta ? (
         <div className="flex items-center gap-2 text-sm font-normal text-tray-muted-foreground">{meta}</div>
       ) : null}

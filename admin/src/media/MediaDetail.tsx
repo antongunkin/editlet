@@ -14,6 +14,7 @@ import { canOpenInWindow, mimeType, useAssetBlob, useObjectUrl } from '../data/u
 import { RouteLink } from '../RouteLink';
 import { Icon, IconButton } from '../ui';
 import { ActionSheet } from '../ui/parts/action-sheet';
+import type { FinalFocus } from '../ui/parts/focus';
 import { Header } from '../ui/parts/header';
 import { ActionRow } from '../ui/parts/rows';
 import { Button } from '../ui/primitives/button';
@@ -41,9 +42,10 @@ export function MediaDetail({
   chrome: ScreenChrome;
   banners: ReactNode;
   onClose(): void;
-  onDelete(paths: string[]): void;
+  /** `finalFocus`: the ⋯ the delete was started from, where its confirm returns the focus. */
+  onDelete(paths: string[], finalFocus?: FinalFocus): void;
   /** Upload files into a folder (the open image's). */
-  onUpload(files: File[], folder: string): void;
+  onUpload(files: File[], folder: string, finalFocus?: FinalFocus): void;
 }) {
   const blob = useAssetBlob(image.path);
   const url = useObjectUrl(blob);
@@ -53,6 +55,7 @@ export function MediaDetail({
   const [moreOpen, setMoreOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const more = useRef<HTMLButtonElement>(null);
   const altOf = (i: number) => alts[i] ?? image.uses[i]!.alt;
   const changed = image.uses.map((u, i) => ({ use: u, alt: altOf(i) })).filter(({ use, alt }) => alt !== use.alt);
   const used = isUsed(image);
@@ -78,6 +81,7 @@ export function MediaDetail({
         message: `Replace ${image.name}`,
         subject: filesSubject(schema, 'update', [image.path]),
         build: () => [changes],
+        finalFocus: more,
       });
     } catch (e) {
       setReplaceError(e instanceof Error ? e.message : String(e));
@@ -100,6 +104,7 @@ export function MediaDetail({
           actions={
             <>
               <IconButton
+                ref={more}
                 label="More actions"
                 aria-haspopup="dialog"
                 icon={<Icon name="more" size={20} />}
@@ -196,10 +201,10 @@ export function MediaDetail({
             onChange={(e) => {
               const list = Array.from(e.target.files ?? []);
               e.target.value = '';
-              if (list.length > 0) onUpload(list, image.folder);
+              if (list.length > 0) onUpload(list, image.folder, more);
             }}
           />
-          <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title={image.name}>
+          <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title={image.name} finalFocus={more}>
             <ActionRow
               icon="upload"
               disabled={commit.busy}
@@ -238,7 +243,7 @@ export function MediaDetail({
               note={used ? 'Used by an entry' : undefined}
               onClick={() => {
                 setMoreOpen(false);
-                onDelete([image.path]);
+                onDelete([image.path], more);
               }}
             >
               Delete…

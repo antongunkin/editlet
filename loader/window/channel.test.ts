@@ -15,6 +15,8 @@ describe('isAdminToWindowMessage', () => {
   it.each([
     msg({ type: 'hello' }),
     msg({ type: 'expand' }),
+    msg({ type: 'theme', theme: 'light' }),
+    msg({ type: 'theme', theme: 'dark' }),
     msg({ type: 'collapse', w: 120, h: 40.5 }),
     msg({ type: 'collapse', w: 120, h: 56, shadow: '0 0 0 1px #0001' }),
     msg({ type: 'edge', hover: false }),
@@ -31,6 +33,9 @@ describe('isAdminToWindowMessage', () => {
     { type: 'hello' },
     { source: 'editlet', type: 'hello' },
     msg({ type: 'close' }),
+    msg({ type: 'theme' }),
+    msg({ type: 'theme', theme: 'sand' }),
+    msg({ type: 'theme', theme: 'system' }),
     msg({ type: 'collapse', w: 0, h: 40 }),
     msg({ type: 'collapse', w: 10, h: Infinity }),
     msg({ type: 'collapse', w: '10', h: 10 }),

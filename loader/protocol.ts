@@ -31,18 +31,30 @@ export type CloseMessage = Envelope<'close'>;
 export type RefreshMessage = Envelope<'refresh'>;
 export type HighlightMessage = Envelope<'highlight'> & { entry: string | null };
 export type LayoutMessage = Envelope<'layout'> & { layout: AdminLayout };
+/**
+ * Go to a page of the site (an entry's page): `path` from the site's root (one leading `/`), same origin only. The
+ * loader keeps the editor open on its current route there. Additive: an older loader ignores it.
+ */
+export type OpenMessage = Envelope<'open'> & { path: string };
 export type AdminToSiteMessage =
   | ReadyMessage
   | AdminNavigateMessage
   | CloseMessage
   | RefreshMessage
   | HighlightMessage
-  | LayoutMessage;
+  | LayoutMessage
+  | OpenMessage;
 
 export type InitMessage = Envelope<'init'> & { route: string; site: { origin: string; href: string } };
 export type SiteNavigateMessage = Envelope<'navigate'> & { route: string };
 export type CloseRequestMessage = Envelope<'close-request'>;
-export type SiteToAdminMessage = InitMessage | SiteNavigateMessage | CloseRequestMessage;
+/**
+ * The page under the editor has a new address (`href` without the editor's parameter, as `init.site.href`), after a
+ * client-side navigation. Additive: the protocol version stays 1. An admin built before wave 7 took any site message
+ * but `init` and `navigate` for `close-request`, so loader and admin must be the same package version.
+ */
+export type PageMessage = Envelope<'page'> & { href: string };
+export type SiteToAdminMessage = InitMessage | SiteNavigateMessage | CloseRequestMessage | PageMessage;
 
 export type MessageBody<M> = M extends unknown ? Omit<M, 'source' | 'v'> : never;
 
@@ -74,6 +86,8 @@ export function isAdminToSiteMessage(data: unknown): data is AdminToSiteMessage 
       return d.entry === null || typeof d.entry === 'string';
     case 'layout':
       return d.layout === 'full' || d.layout === 'side';
+    case 'open':
+      return typeof d.path === 'string';
     default:
       return false;
   }
@@ -97,6 +111,8 @@ export function isSiteToAdminMessage(data: unknown): data is SiteToAdminMessage 
       return typeof d.route === 'string';
     case 'close-request':
       return true;
+    case 'page':
+      return typeof d.href === 'string';
     default:
       return false;
   }

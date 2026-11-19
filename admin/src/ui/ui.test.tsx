@@ -58,6 +58,18 @@ describe('StatusBadge', () => {
     rerender(<StatusBadge draft={false} />);
     expect(screen.queryByText('Draft')).toBeNull();
   });
+
+  it('a file status wins over Draft and Published, in its tone', () => {
+    const { rerender, container } = render(<StatusBadge draft status="changed" showPublished />);
+    expect(container.textContent).toBe('Changed');
+    expect(container.querySelector('[data-slot="badge"]')?.className).toContain('unsaved');
+    rerender(<StatusBadge status="review" />);
+    expect(container.textContent).toBe('In review');
+    rerender(<StatusBadge status="unsaved" />);
+    expect(container.textContent).toBe('Unsaved');
+    rerender(<StatusBadge draft status={null} />);
+    expect(container.textContent).toBe('Draft');
+  });
 });
 
 function renderSwitcher(onKeyDown = vi.fn(), disabled = false) {

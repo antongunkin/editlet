@@ -23,6 +23,12 @@ export interface ReviewEntry {
   /** *Post · Title, Excerpt*: the collection and the changed fields. */
   sub: string;
   rows: FieldDiffRow[];
+  /** *Revert this change* under the fields; `false` for a new entry (nothing to go back to). Default: `onRevert`'s. */
+  revertable?: boolean;
+  /** Why this entry blocks the save (*Changed elsewhere*, *The address is taken now*, *2 problems*): a badge on its row. */
+  note?: string;
+  /** The tone of `note` (default `danger`; *Changed elsewhere* is `unsaved`, the warning amber). */
+  tone?: 'danger' | 'unsaved';
 }
 
 export type ReviewDialogProps = {
@@ -58,6 +64,17 @@ export type ReviewDialogProps = {
   onRevert?: (entryKey: string, row: FieldDiffRow) => void;
   /** The *Note* row (GitHub mode): the commit's optional body, edited in its own sheet. */
   commitNote?: { value: string; onChange(value: string): void };
+  /** Under the diffs of an entry (and inline at 600 px): **Open entry**, which the caller answers by going there. */
+  onOpenEntry?: (entryKey: string) => void;
+  /** Under the diffs of an entry: **Discard changes to this entry**. */
+  onDiscardEntry?: (entryKey: string) => void;
+  /** The sheet header's ⋯ (*Discard all changes*): a node the caller draws, placed in the title row. */
+  headerMenu?: ReactNode;
+  /**
+   * The CTA does not save (*Resolve 1 conflict*, *Fix 1 entry*): it calls `onConfirm` at once, with no *Save to* on the
+   * base branch.
+   */
+  blocked?: boolean;
 };
 
 /** /design opens a second level once the first has risen (`sheet-motion`'s `modal-in`). */
@@ -116,6 +133,10 @@ export function ReviewDialog({
   initialOpen,
   onRevert,
   commitNote,
+  onOpenEntry,
+  onDiscardEntry,
+  headerMenu,
+  blocked = false,
 }: ReviewDialogProps) {
   const [opened, setOpened] = useState<string | null>(null);
   // A level opens after the one under it: opened together, the outer sheet's focus trap would mark the inner one inert.
@@ -136,14 +157,33 @@ export function ReviewDialog({
   const diffOf = entries.find((e) => e.key === opened);
   // The diff that is open lost its last change (every field reverted): back to the list.
   if (opened !== null && opened !== 'save-to' && opened !== 'note' && diffOf === undefined) setOpened(null);
-  const revert = (key: string) => (onRevert ? (row: FieldDiffRow) => !busy && onRevert(key, row) : undefined);
+  const revert = (key: string) => {
+    const entry = entries.find((e) => e.key === key);
+    return onRevert && entry?.revertable !== false ? (row: FieldDiffRow) => !busy && onRevert(key, row) : undefined;
+  };
+  /** Under an entry's diffs: Open entry, Discard changes to this entry. */
+  const entryActions = (key: string) =>
+    onOpenEntry || onDiscardEntry ? (
+      <div className="flex flex-wrap gap-2 pt-1">
+        {onOpenEntry ? (
+          <Button variant="secondary" disabled={busy} onClick={() => onOpenEntry(key)}>
+            Open entry
+          </Button>
+        ) : null}
+        {onDiscardEntry ? (
+          <Button variant="ghost" className="text-destructive" disabled={busy} onClick={() => onDiscardEntry(key)}>
+            Discard changes to this entry
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
   // The note's first line as the commit will have it (`withTrailer` drops a forged trailer line).
   const firstLine = commitNote?.value
     .split(/\r\n|\r|\n/)
     .map((l) => l.trim())
     .find((l) => l !== '' && !/^editlet-source:/i.test(l));
 
-  const save = () => (newBranch ? setOpened('save-to') : onConfirm());
+  const save = () => (newBranch && !blocked ? setOpened('save-to') : onConfirm());
 
   return (
     <Sheet
@@ -153,6 +193,7 @@ export function ReviewDialog({
         onOpenChange(next);
       }}
       title="Your changes"
+      lead={headerMenu}
       // While it saves every control is locked: the content is only to read, and keeps a tab stop to scroll it.
       readOnly={inline || busy}
       bar={
@@ -162,9 +203,9 @@ export function ReviewDialog({
               variant="primary"
               size="lg"
               full
-              loading={busy && !newBranch}
+              loading={busy && (!newBranch || blocked)}
               busyLabel="Saving…"
-              disabled={busy || (!newBranch && confirmDisabled)}
+              disabled={busy || ((!newBranch || blocked) && confirmDisabled)}
               onClick={save}
             >
               {confirmLabel}
@@ -178,7 +219,11 @@ export function ReviewDialog({
         {entries.length > 0 ? (
           <Card as="ul" aria-label="Changed entries">
             {entries.map((entry) => {
-              const count = <Badge tone="unsaved">{entry.rows.length}</Badge>;
+              const count = entry.note ? (
+                <Badge tone={entry.tone ?? 'danger'}>{entry.note}</Badge>
+              ) : (
+                <Badge tone="unsaved">{entry.rows.length}</Badge>
+              );
               return (
                 <li key={entry.key}>
                   {inline ? (
@@ -186,6 +231,7 @@ export function ReviewDialog({
                       <InfoRow lead="file" title={entry.title} sub={entry.sub} trail={count} />
                       <div className="pr-3 pb-3 pl-16">
                         <FieldDiffList rows={entry.rows} onRevert={revert(entry.key)} revertDisabled={busy} />
+                        {entryActions(entry.key)}
                       </div>
                     </>
                   ) : (
@@ -251,7 +297,12 @@ export function ReviewDialog({
           readOnly
         >
           <div className="px-4 pt-1 pb-8">
-            {diffOf ? <FieldDiffList rows={diffOf.rows} onRevert={revert(diffOf.key)} revertDisabled={busy} /> : null}
+            {diffOf ? (
+              <div className="flex flex-col gap-4">
+                <FieldDiffList rows={diffOf.rows} onRevert={revert(diffOf.key)} revertDisabled={busy} />
+                {entryActions(diffOf.key)}
+              </div>
+            ) : null}
           </div>
         </Sheet>
       )}

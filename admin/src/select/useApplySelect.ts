@@ -69,6 +69,8 @@ export function useApplySelect(
    * field-group tab back: opening the body to search it chose the body's tab).
    */
   snapshot: () => () => void = () => () => {},
+  /** A modal over the entry (an entry on top of a picker) is open: the request is answered with a notice, not applied. */
+  paused: () => boolean = () => false,
 ): { notice: SelectNotice | null; dismiss(): void } {
   const { request, finish } = useSelectRequest();
   const [notice, setNotice] = useState<SelectNotice | null>(null);
@@ -82,9 +84,17 @@ export function useApplySelect(
   openKeyRef.current = openKey;
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   useEffect(() => {
     if (!request || request.entry !== ref) return;
+    if (pausedRef.current()) {
+      // A selection would close the picker and unmount the entry on top, dropping its edits.
+      finish(request.id);
+      setNotice({ found: false, text: 'Close the open modal first' });
+      return;
+    }
     const run = { cancelled: false };
     const found = (key: string) => {
       const label = collection.fields[key]?.label ?? 'Body';

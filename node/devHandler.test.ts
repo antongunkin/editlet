@@ -13,6 +13,8 @@ import {
   type DevCommitRequest,
   type DevErrorResponse,
   type DevFilesResponse,
+  type DevGitFile,
+  type DevGitResponse,
   type DevVersionsResponse,
 } from '../core/devApi';
 import { gitBlobSha } from '../core/sha';
@@ -527,29 +529,135 @@ describe('createDevHandler', () => {
 
   describe('GET git', () => {
     const gitUrl = `${ORIGIN}${DEV_API_BASE}/git`;
+    const C = 'cms/content';
+    const readGit = async (handler: (req: Request) => Promise<Response>) =>
+      (await (await handler(new Request(gitUrl))).json()) as DevGitResponse;
+    const repo = (cwd: string) => {
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd })
+          .toString()
+          .trim();
+      git('init', '-b', 'feature');
+      git('add', '.');
+      git('commit', '-m', 'init');
+      return git;
+    };
+    const sorted = (files: DevGitFile[]) => files.toSorted((a, b) => a.path.localeCompare(b.path));
 
-    it('answers no branch outside a git checkout', async () => {
-      const { handler } = await setup();
+    it('answers no branch and no files outside a git checkout, with a project id', async () => {
+      const { root, handler } = await setup();
       const res = await handler(new Request(gitUrl));
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ branch: null, changes: 0 });
+      const body = (await res.json()) as DevGitResponse;
+      expect(body).toEqual({ branch: null, changes: 0, files: [], project: expect.stringMatching(/^[0-9a-f]{64}$/) });
+      expect(body.project).not.toContain(root);
+    });
+
+    it('hashes the given root when it cannot be resolved', async () => {
+      const handler = createDevHandler({ root: join(await tempDir(), 'missing') });
+      expect((await readGit(handler)).project).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it('reports the branch and the uncommitted files under contentDir', async () => {
       const { root, handler, put } = await setup();
-      const git = (...args: string[]) =>
-        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: root });
-      git('init', '-b', 'feature');
-      git('add', '.');
-      git('commit', '-m', 'init');
-      const clean = await handler(new Request(gitUrl));
-      expect(await clean.json()).toEqual({ branch: 'feature', changes: 0 });
+      repo(root);
+      expect(await readGit(handler)).toMatchObject({ branch: 'feature', changes: 0, files: [] });
 
       const listing = (await (await handler(new Request(`${ORIGIN}${DEV_API_BASE}/files`))).json()) as DevFilesResponse;
       const entry = listing.files.find((f) => f.path.endsWith('.md'))!;
       const current = await readFile(join(root, entry.path), 'utf8');
       expect((await put(entry.path, `${current}\n`)).status).toBe(204);
-      expect(await (await handler(new Request(gitUrl))).json()).toEqual({ branch: 'feature', changes: 1 });
+      expect(await readGit(handler)).toMatchObject({
+        branch: 'feature',
+        changes: 1,
+        files: [{ path: entry.path, status: 'modified' }],
+      });
+    });
+
+    it('lists each kind of change by path, a rename as one change and two files', async () => {
+      const { root, handler } = await setup();
+      const git = repo(root);
+      await writeFile(join(root, C, 'author/jane.md'), '---\nname: Jane D\n---\n');
+      await writeFile(join(root, C, 'author/new one.md'), '---\nname: New\n---\n');
+      await writeFile(join(root, C, 'author/staged.md'), '---\nname: S\n---\n');
+      git('add', `${C}/author/staged.md`);
+      await writeFile(join(root, C, 'author/ad.md'), '---\nname: AD\n---\n');
+      git('add', `${C}/author/ad.md`);
+      await rm(join(root, C, 'author/ad.md'));
+      await writeFile(join(root, C, 'author/"quoted".md'), '---\nname: Q\n---\n');
+      await rm(join(root, C, 'homePage/index.md'));
+      git('mv', `${C}/post/hello-world.md`, `${C}/post/hello.md`);
+      await writeFile(join(root, 'outside.md'), 'not content');
+
+      const body = await readGit(handler);
+      expect(sorted(body.files)).toEqual(
+        sorted([
+          { path: `${C}/author/jane.md`, status: 'modified' },
+          { path: `${C}/author/new one.md`, status: 'added' },
+          { path: `${C}/author/staged.md`, status: 'added' },
+          { path: `${C}/author/"quoted".md`, status: 'added' },
+          { path: `${C}/homePage/index.md`, status: 'removed' },
+          { path: `${C}/post/hello.md`, status: 'added' },
+          { path: `${C}/post/hello-world.md`, status: 'removed' },
+        ]),
+      );
+      // Porcelain entries, as before: jane, new one, staged, ad (AD), quoted, index, the rename.
+      expect(body.changes).toBe(7);
+    });
+
+    it('reads a staged delete as removed', async () => {
+      const { root, handler } = await setup();
+      const git = repo(root);
+      git('rm', '-q', `${C}/author/jane.md`);
+      expect((await readGit(handler)).files).toEqual([{ path: `${C}/author/jane.md`, status: 'removed' }]);
+    });
+
+    it('reads a merge conflict as modified', async () => {
+      const { root, handler } = await setup();
+      const git = repo(root);
+      const jane = `${C}/author/jane.md`;
+      git('checkout', '-q', '-b', 'other');
+      await writeFile(join(root, jane), '---\nname: Other\n---\n');
+      git('commit', '-qam', 'other');
+      git('checkout', '-q', 'feature');
+      await writeFile(join(root, jane), '---\nname: Feature\n---\n');
+      git('commit', '-qam', 'feature');
+      expect(() => git('merge', '-q', 'other')).toThrow();
+      expect((await readGit(handler)).files).toEqual([{ path: jane, status: 'modified' }]);
+    });
+
+    it('still lists the files on a detached HEAD', async () => {
+      const { root, handler } = await setup();
+      const git = repo(root);
+      git('checkout', '-q', '--detach');
+      await writeFile(join(root, C, 'author/jane.md'), '---\nname: Detached\n---\n');
+      expect(await readGit(handler)).toMatchObject({
+        branch: null,
+        changes: 1,
+        files: [{ path: `${C}/author/jane.md`, status: 'modified' }],
+      });
+    });
+
+    it('gives paths relative to the project when it is a folder inside the repository', async () => {
+      const outer = await tempDir();
+      await cp(site, join(outer, 'site'), { recursive: true });
+      repo(outer);
+      await writeFile(join(outer, 'site', C, 'author/jane.md'), '---\nname: Sub\n---\n');
+      await writeFile(join(outer, 'elsewhere.md'), 'x');
+      const handler = createDevHandler({ root: join(outer, 'site') });
+      expect(await readGit(handler)).toMatchObject({
+        changes: 1,
+        files: [{ path: `${C}/author/jane.md`, status: 'modified' }],
+      });
+    });
+
+    it('keeps the project id stable across calls and handlers, and different per project', async () => {
+      const { root, handler } = await setup();
+      const first = (await readGit(handler)).project;
+      expect((await readGit(handler)).project).toBe(first);
+      expect((await readGit(createDevHandler({ root }))).project).toBe(first);
+      const other = await setup();
+      expect((await readGit(other.handler)).project).not.toBe(first);
     });
 
     it('is GET only', async () => {
@@ -560,6 +668,15 @@ describe('createDevHandler', () => {
 
   describe('POST commit', () => {
     const bob = '---\nname: Bob\n---\n';
+
+    it('answers 500 with the issues for a file other than the schema while the schema is broken', async () => {
+      const { root, commit } = await setup();
+      await writeFile(join(root, 'cms/schema.json'), '{ broken');
+      await expectError(
+        await commit({ message: 'x', changes: [{ path: 'cms/content/author/bob.md', content: bob }] }),
+        500,
+      );
+    });
 
     it('applies a batch of writes and deletes', async () => {
       const { root, commit } = await setup();

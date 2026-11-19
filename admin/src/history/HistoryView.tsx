@@ -4,6 +4,7 @@ import { FieldDiffList } from '../diff/FieldDiff';
 import type { FieldDiffRow } from '../entry/diff';
 import { BottomBar } from '../ui/parts/bottom-bar';
 import { Card } from '../ui/parts/card';
+import type { FinalFocus } from '../ui/parts/focus';
 import { RowChevron, RowText, rowVariants } from '../ui/parts/rows';
 import { Sheet } from '../ui/parts/sheet';
 import { Avatar } from '../ui/primitives/avatar';
@@ -40,7 +41,10 @@ export interface HistorySheetProps {
   error?: ReactNode;
   /** After the list: *Older versions on GitHub ↗*. */
   footer?: ReactNode;
-  onOpenVersion(key: string): void;
+  /** A version's row was pressed; `row` is that row's button, which the version sheet returns the focus to. */
+  onOpenVersion(key: string, row?: HTMLElement): void;
+  /** Where the focus goes when History closes (the ⋯ it was opened from). */
+  finalFocus?: FinalFocus;
   /** The version sheet (`VersionSheet`), one level up. */
   children?: ReactNode;
 }
@@ -68,7 +72,7 @@ function Lead({ item }: { item: HistoryItem }) {
 }
 
 /** One version: a button that opens its diff, or a plain row for the current one and a deletion. */
-function VersionRow({ item, onOpen }: { item: HistoryItem; onOpen(key: string): void }) {
+function VersionRow({ item, onOpen }: { item: HistoryItem; onOpen(key: string, row: HTMLElement): void }) {
   const still = item.current || item.deleted;
   const body = (
     <>
@@ -84,7 +88,7 @@ function VersionRow({ item, onOpen }: { item: HistoryItem; onOpen(key: string): 
       data-slot="row"
       aria-haspopup="dialog"
       className={rowVariants({ size: 72, pressable: true })}
-      onClick={() => onOpen(item.key)}
+      onClick={(e) => onOpen(item.key, e.currentTarget)}
     >
       {body}
     </button>
@@ -100,10 +104,11 @@ export function HistorySheet({
   error,
   footer,
   onOpenVersion,
+  finalFocus,
   children,
 }: HistorySheetProps) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} title="History" sub={entryTitle}>
+    <Sheet open={open} onOpenChange={onOpenChange} title="History" sub={entryTitle} finalFocus={finalFocus}>
       <div className="flex flex-col gap-4 px-4 pt-1 pb-8">
         {error ? (
           error
@@ -158,6 +163,8 @@ export interface VersionSheetProps {
   /** The entry has unsaved edits: Restore replaces them. */
   replacesEdits?: boolean;
   onRestore(): void;
+  /** Where the focus goes when it closes: the row that opened it, or nothing after Restore (History closes too). */
+  finalFocus?: FinalFocus;
 }
 
 /** *History · version*: one version against the entry now, and *Restore this version*. */
@@ -170,6 +177,7 @@ export function VersionSheet({
   error,
   replacesEdits,
   onRestore,
+  finalFocus,
 }: VersionSheetProps) {
   const restorable = !error && rows !== undefined && rows.length > 0;
   return (
@@ -179,6 +187,7 @@ export function VersionSheet({
       title={title}
       sub={sub}
       readOnly
+      finalFocus={finalFocus}
       bar={
         restorable ? (
           <BottomBar>

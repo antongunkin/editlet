@@ -13,12 +13,15 @@ export const WINDOW_SOURCE = 'editlet-window' as const;
  * lights up. `edge` (additive, optional; the compass name of the hovered zone, as in `drag`'s `kind`) says which sides
  * move, so only those light up; without it every side lights. `collapse` → window.js: shrink the dialog to a pill of `w`×`h` px at the bottom centre, drawn with the pill's
  * `shadow` (its computed `box-shadow`: the iframe clips anything drawn outside it, so the dialog carries the shadow);
- * `expand`: back to the window.
+ * `expand`: back to the window. `theme` (additive): the theme the admin is drawn in, sent on every change and after
+ * `hello`; window.js sets `data-editlet-theme` on the dialog, so the sheet's grab handle (drawn on the page, outside the
+ * iframe) follows it. An older window.js drops the message (`isAdminToWindowMessage` rejects unknown types).
  */
 export type AdminToWindowMessage =
   | { source: typeof WINDOW_SOURCE; type: 'hello' }
   | { source: typeof WINDOW_SOURCE; type: 'collapse'; w: number; h: number; shadow?: string }
   | { source: typeof WINDOW_SOURCE; type: 'expand' }
+  | { source: typeof WINDOW_SOURCE; type: 'theme'; theme: 'light' | 'dark' }
   | { source: typeof WINDOW_SOURCE; type: 'edge'; hover: boolean; edge?: Edge }
   | {
       source: typeof WINDOW_SOURCE;
@@ -75,6 +78,8 @@ export function isAdminToWindowMessage(data: unknown): data is AdminToWindowMess
     case 'hello':
     case 'expand':
       return true;
+    case 'theme':
+      return data.theme === 'light' || data.theme === 'dark';
     case 'collapse':
       return isSize(data.w) && isSize(data.h) && (data.shadow === undefined || typeof data.shadow === 'string');
     case 'edge':

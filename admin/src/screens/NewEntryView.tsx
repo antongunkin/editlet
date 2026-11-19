@@ -24,6 +24,11 @@ export interface NewEntryViewProps {
   onName(name: string): void;
   /** The address (the file's slug): what the name makes of it, or what was typed. */
   address: string;
+  /**
+   * The page's path around the slug when the collection's `url` has `{slug}` (`/posts/` and `/`): shown muted on both
+   * sides of the slug, which stays the only part to edit. None: the address is the slug alone.
+   */
+  around?: { before: string; after: string };
   onAddress(address: string): void;
   /** The address is a field (the user pressed *Edit*, or there is no name to derive it from). */
   editing: boolean;
@@ -36,6 +41,8 @@ export interface NewEntryViewProps {
   onCreate(): void;
   /** Takes the focus when the modal opens (the name, or the address when there is no name). */
   focusRef?: RefObject<HTMLInputElement | null>;
+  /** Where the focus returns on close (`Sheet`'s `finalFocus`): Search's *New post* gives what had it before Search. */
+  finalFocus?: RefObject<HTMLElement | null>;
 }
 
 export function NewEntryView({
@@ -48,6 +55,7 @@ export function NewEntryView({
   onName,
   address,
   onAddress,
+  around,
   editing,
   onEdit,
   problem,
@@ -55,6 +63,7 @@ export function NewEntryView({
   canCreate,
   onCreate,
   focusRef,
+  finalFocus,
 }: NewEntryViewProps) {
   const formId = useId();
   const showAddressField = editing || nameLabel === undefined;
@@ -78,6 +87,7 @@ export function NewEntryView({
       title={title}
       sub={sub}
       initialFocus={focusRef}
+      finalFocus={finalFocus}
       bar={
         <BottomBar>
           <Button variant="primary" size="lg" full type="submit" form={formId} disabled={!canCreate}>
@@ -107,18 +117,22 @@ export function NewEntryView({
           />
         )}
         {showAddressField ? (
-          <Input
-            ref={addressRef}
-            aria-label="Address"
-            className="font-mono"
-            value={address}
-            onChange={(e) => onAddress(e.target.value)}
-            spellCheck={false}
-            autoCapitalize="none"
-            autoComplete="off"
-            aria-invalid={problem ? true : undefined}
-            aria-describedby={problem ? problemId : undefined}
-          />
+          <div className="flex items-center gap-1 font-mono text-sm text-tray-muted-foreground">
+            {around?.before ? <span aria-hidden="true">{around.before}</span> : null}
+            <Input
+              ref={addressRef}
+              aria-label="Address"
+              className="min-w-0 flex-1 font-mono"
+              value={address}
+              onChange={(e) => onAddress(e.target.value)}
+              spellCheck={false}
+              autoCapitalize="none"
+              autoComplete="off"
+              aria-invalid={problem ? true : undefined}
+              aria-describedby={problem ? problemId : undefined}
+            />
+            {around?.after ? <span aria-hidden="true">{around.after}</span> : null}
+          </div>
         ) : problem ? null : (
           <p className="m-0 flex min-h-11 items-center gap-2 px-1 text-sm text-tray-muted-foreground">
             <span>Address</span>
@@ -126,7 +140,11 @@ export function NewEntryView({
               <span>follows the name</span>
             ) : (
               <>
-                <code className="font-mono font-medium text-foreground">{address}</code>
+                <code className="min-w-0 font-mono wrap-anywhere">
+                  {around?.before ? <span>{around.before}</span> : null}
+                  <span className="font-medium text-foreground">{address}</span>
+                  {around?.after ? <span>{around.after}</span> : null}
+                </code>
                 {edit}
               </>
             )}

@@ -2,6 +2,7 @@ import { AlertDialog } from '@base-ui/react/alert-dialog';
 import { useContext, useRef, type ReactNode, type RefObject } from 'react';
 
 import { Grabber } from './chrome';
+import type { FinalFocus } from './focus';
 import { SheetPortal } from './sheet';
 
 import { Button } from '../primitives/button';
@@ -22,6 +23,8 @@ export type ConfirmProps = {
   children?: ReactNode;
   /** Where the focus goes on open: Cancel by default; a field among `children` when the confirm asks for a value (Rename). */
   initialFocus?: RefObject<HTMLElement | null>;
+  /** Where the focus goes when it closes (the ⋯ button of the row it was opened from: `ui/parts/focus.ts`). */
+  finalFocus?: FinalFocus;
 };
 
 /**
@@ -41,6 +44,7 @@ export function Confirm({
   confirmDisabled,
   children,
   initialFocus,
+  finalFocus,
 }: ConfirmProps) {
   const container = useContext(SheetPortal) ?? undefined;
   const cancel = useRef<HTMLButtonElement>(null);
@@ -50,6 +54,7 @@ export function Confirm({
         <AlertDialog.Backdrop className="sheet-scrim fixed inset-0 z-50 bg-overlay" />
         <AlertDialog.Popup
           initialFocus={initialFocus ?? cancel}
+          finalFocus={finalFocus}
           data-slot="confirm"
           className="sheet-motion fixed inset-x-0 bottom-0 z-50 flex max-h-full flex-col gap-3 overflow-y-auto rounded-t-3xl bg-card px-4 pb-5 text-card-foreground shadow-modal outline-none"
         >

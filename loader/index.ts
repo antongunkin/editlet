@@ -34,6 +34,11 @@ export interface EditletLoaderOptions {
    * pass `(url) => history.replaceState(null, '', url)` so the router syncs.
    */
   replaceUrl?: (url: string) => void;
+  /**
+   * Goes to another page of the site when the admin asks (`open`): `url` is absolute, same origin, with the editor's
+   * parameter. Default `location.assign(url)`. The Next adapter passes `router.push`, so the editor stays mounted.
+   */
+  onOpen?: (url: string) => void;
 }
 
 export interface EditletLoader {
@@ -72,6 +77,12 @@ export function mountEditletLoader(options: EditletLoaderOptions = {}): EditletL
     route: '',
     ready: false,
   };
+  /** The page href (without the parameter) the admin last got, in `init` or `page`. */
+  let href = '';
+  /** The last highlighted entry and the pathname it was applied on, re-applied after a client-side navigation. */
+  let lit: string | null = null;
+  let litPath = '';
+  const pageHref = () => withEditletRoute(location.href, null, param);
 
   const post = (body: MessageBody<SiteToAdminMessage>) =>
     s.iframe?.contentWindow?.postMessage(siteMessage(body), adminUrl.origin);
@@ -81,6 +92,7 @@ export function mountEditletLoader(options: EditletLoaderOptions = {}): EditletL
     if (!d) return;
     s.dialog = s.iframe = null;
     s.ready = false;
+    lit = null;
     d.close();
     d.remove();
     clearHighlights();
@@ -140,6 +152,22 @@ export function mountEditletLoader(options: EditletLoaderOptions = {}): EditletL
     if (s.dialog && route !== s.route && s.ready) post({ type: 'navigate', route });
     s.route = route;
     if (!s.dialog) open();
+    if (s.ready && pageHref() !== href) post({ type: 'page', href: (href = pageHref()) });
+    if (lit !== null && location.pathname !== litPath) highlight(lit);
+  };
+
+  const highlight = (entry: string | null) => {
+    clearHighlights();
+    lit = entry;
+    litPath = location.pathname;
+    if (entry === null) return;
+    let first: Element | undefined;
+    document.querySelectorAll(`[${ENTRY_ATTR}]`).forEach((el) => {
+      if (el.getAttribute(ENTRY_ATTR) !== entry) return;
+      el.setAttribute(HIGHLIGHT_ATTR, '');
+      first ??= el;
+    });
+    first?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
 
   const close = () => {
@@ -154,11 +182,7 @@ export function mountEditletLoader(options: EditletLoaderOptions = {}): EditletL
       case 'ready':
         s.ready = true;
         s.dialog!.querySelector('button')?.remove();
-        post({
-          type: 'init',
-          route: s.route,
-          site: { origin: location.origin, href: withEditletRoute(location.href, null, param) },
-        });
+        post({ type: 'init', route: s.route, site: { origin: location.origin, href: (href = pageHref()) } });
         break;
       case 'navigate':
         s.route = m.route;
@@ -170,16 +194,16 @@ export function mountEditletLoader(options: EditletLoaderOptions = {}): EditletL
       case 'refresh':
         (options.onRefresh ?? (() => location.reload()))();
         break;
-      case 'highlight': {
-        clearHighlights();
-        if (m.entry === null) break;
-        let first: Element | undefined;
-        document.querySelectorAll(`[${ENTRY_ATTR}]`).forEach((el) => {
-          if (el.getAttribute(ENTRY_ATTR) !== m.entry) return;
-          el.setAttribute(HIGHLIGHT_ATTR, '');
-          first ??= el;
-        });
-        first?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      case 'highlight':
+        highlight(m.entry);
+        break;
+      case 'open': {
+        // Exactly one leading `/` and no tab or line break (the URL parser drops those, so `/\t/x` would be `//x`):
+        // a path on this origin, never another site or a `javascript:` URL.
+        if (!/^\/(?![/\\])[^\t\n\r]*$/.test(m.path)) break;
+        (options.onOpen ?? ((u: string) => location.assign(u)))(
+          withEditletRoute(new URL(m.path, location.origin), s.route, param),
+        );
         break;
       }
     }

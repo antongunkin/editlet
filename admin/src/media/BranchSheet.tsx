@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from 'react';
 
 import { BottomBar } from '../ui/parts/bottom-bar';
+import type { FinalFocus } from '../ui/parts/focus';
 import { Sheet } from '../ui/parts/sheet';
 import { Button } from '../ui/primitives/button';
 
@@ -16,6 +17,8 @@ export interface BranchSheetProps {
   /** The CTA's label: *Commit on branch*. */
   label: string;
   onSubmit(): void;
+  /** Where the focus goes when it closes (the ⋯ the change was started from). */
+  finalFocus?: FinalFocus;
   /** The new-branch field. */
   children: ReactNode;
 }
@@ -32,6 +35,7 @@ export function BranchSheet({
   disabled,
   label,
   onSubmit,
+  finalFocus,
   children,
 }: BranchSheetProps) {
   const formId = useId();
@@ -40,6 +44,7 @@ export function BranchSheet({
       open={open}
       onOpenChange={onOpenChange}
       title={title}
+      finalFocus={finalFocus}
       sub="The change is committed to a new branch."
       bar={
         <BottomBar>

@@ -7,6 +7,8 @@ each field is written in the file.
 
 - Path: `<contentDir>/<collection>/<slug>.md`, and `contentDir` is usually `cms/content`. A singleton collection
   (`"singleton": true`) has exactly one file: `<contentDir>/<collection>/index.md`.
+- Page: when the collection has `url`, the entry is shown at that path with `{slug}` replaced (`/posts/{slug}` →
+  `/posts/<slug>`); a `url` without `{slug}` is one page for every entry. Renaming a slug changes that page's address.
 - Slug: lowercase letters and digits, single hyphens: `^[a-z0-9]+(?:-[a-z0-9]+)*$`. If the collection has `slugFrom`,
   make the slug from that field: lowercase it, turn each run of other characters into `-`, and trim the `-` at both
   ends. Transliterate non-Latin titles.

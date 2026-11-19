@@ -153,7 +153,7 @@
     white-space: pre;
     overflow-x: auto;
 
-    &:focus-visible {
+    &:focus-visible:not(:where([data-editlet-modality='pointer'] *)) {
       outline: 2px solid var(--color-ring);
     }
   }

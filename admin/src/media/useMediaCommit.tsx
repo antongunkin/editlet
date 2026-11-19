@@ -15,6 +15,7 @@ import { useSource } from '../source/context';
 import type { SourceChange } from '../source/local';
 import { Confirm } from '../ui';
 import { FieldInSheet } from '../ui/Field';
+import type { FinalFocus } from '../ui/parts/focus';
 
 export type MediaCommitPlan = {
   /** What the dialog calls the change (its title when there is no `confirm`). */
@@ -28,7 +29,15 @@ export type MediaCommitPlan = {
   build(): Promise<SourceChange[][]> | SourceChange[][];
   /** Ask first: always for a delete. GitHub mode on the base branch always asks (for the new branch name). */
   confirm?: { title: string; description: ReactNode; label: string; destructive?: boolean };
+  /**
+   * `false`: do not refresh the site after this commit. On Astro and on any site without `onRefresh` the loader's
+   * refresh is `location.reload()`, which reloads the page and the admin's iframe with it: a series of commits (the alt queue) refreshes
+   * once, when it ends.
+   */
+  refresh?: false;
   onDone?(): void;
+  /** Where the focus goes when its dialog closes: the ⋯ the change was started from (`ui/parts/focus.ts`). */
+  finalFocus?: FinalFocus;
 };
 
 export type MediaCommit = {
@@ -84,7 +93,7 @@ export function useMediaCommit(): MediaCommit {
       setAsking(null);
       refreshPullRequest(target, schema);
       plan.onDone?.();
-      void refreshSite();
+      if (plan.refresh !== false) void refreshSite();
     } catch (e) {
       if (isBranchTaken(e)) {
         void client.invalidateQueries({ queryKey: BRANCHES_KEY });
@@ -124,6 +133,7 @@ export function useMediaCommit(): MediaCommit {
       confirmLabel={confirm.label + branchNote}
       pending={busy}
       confirmDisabled={needsName}
+      finalFocus={plan?.finalFocus}
       onConfirm={() => asking && void execute(asking)}
     >
       <NewBranchField {...newBranch} />
@@ -136,6 +146,7 @@ export function useMediaCommit(): MediaCommit {
       busy={busy}
       disabled={needsName}
       label={`Commit${branchNote}`}
+      finalFocus={plan?.finalFocus}
       onSubmit={() => asking && void execute(asking)}
     >
       <FieldInSheet.Provider value>

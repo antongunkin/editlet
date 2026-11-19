@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import { Grabber } from './chrome';
+import type { FinalFocus } from './focus';
 
 import { cn } from '../cn';
 import { Icon } from '../primitives/icon';
@@ -29,8 +30,11 @@ export const SheetPortal = createContext<HTMLElement | null>(null);
 /** How deep the current sheet is: -1 outside any sheet, 0 in the first, 1 in a sheet opened from it… */
 const SheetLevel = createContext(-1);
 
-/** The top offset of each level: 64 px, then 20 px lower per level (design: MODAL_TOP and `over`). */
-const LEVEL_TOP = ['pt-16', 'pt-21', 'pt-26'] as const;
+/**
+ * The top offset of each level: 64 px, then 20 px lower per level (design: MODAL_TOP and `over`), four of them (64, 84,
+ * 104, 124): a picker, the entry edited on top of it, its field, an object inside it. Deeper levels sit at 124 px.
+ */
+const LEVEL_TOP = ['pt-16', 'pt-21', 'pt-26', 'pt-31'] as const;
 
 /** The modal title's type (`final.modal_header`: 18 px semibold), for a `Drawer.Title` or a plain heading. */
 export const modalTitle = 'm-0 truncate text-lg font-semibold text-foreground';
@@ -59,16 +63,22 @@ export type ModalHeaderProps = Omit<ComponentProps<'div'>, 'title'> & {
   sub?: ReactNode;
   /** The close button, in the right-hand balance. */
   close?: ReactNode;
+  /** A control in the left-hand balance (*Your changes* ⋯); an empty 44 px balance without it. */
+  lead?: ReactNode;
 };
 
 /**
  * A modal's title row (`ModalHeader`): the title and a line under it, centred between two 44 px balances. A modal is the
  * tray, so the line is `tray-muted-foreground` (the design's `muted-foreground` is under 4.5 : 1 on the tray).
  */
-export function ModalHeader({ title, sub, close, className, ...props }: ModalHeaderProps) {
+export function ModalHeader({ title, sub, close, lead, className, ...props }: ModalHeaderProps) {
   return (
     <div data-slot="modal-header" className={cn('flex h-14 shrink-0 items-center gap-1 px-2', className)} {...props}>
-      <span aria-hidden="true" className="size-11 shrink-0" />
+      {lead ? (
+        <span className="flex size-11 shrink-0 items-center justify-center">{lead}</span>
+      ) : (
+        <span aria-hidden="true" className="size-11 shrink-0" />
+      )}
       <div className="flex min-w-0 flex-1 flex-col items-center">
         {title}
         {sub ? <p className="m-0 max-w-full truncate text-xs text-tray-muted-foreground">{sub}</p> : null}
@@ -92,6 +102,8 @@ export type SheetProps = {
    * hidden; the caller draws the way out (a back button), since the header has no ×.
    */
   header?: ReactNode;
+  /** A control in the title row's left-hand balance (*Your changes* ⋯). */
+  lead?: ReactNode;
   children?: ReactNode;
   /** The bottom bar's content (BottomBar, wave 3.2): stays under the scrolling content. */
   bar?: ReactNode;
@@ -112,6 +124,13 @@ export type SheetProps = {
    * sheet that edits a field leaves it, so the keyboard does not rise uninvited.
    */
   initialFocus?: RefObject<HTMLElement | null>;
+  /**
+   * Where the focus goes when it closes (a sheet opened from a ⋯ row returns to ⋯: `ui/parts/focus.ts`; Search's *New
+   * post* returns to where the focus was before the search opened).
+   */
+  finalFocus?: FinalFocus;
+  /** Its open or close animation has finished (Search opens an action's dialog once the search is gone). */
+  onOpenChangeComplete?: (open: boolean) => void;
   className?: string;
 };
 
@@ -129,12 +148,15 @@ export function Sheet({
   title,
   sub,
   header,
+  lead,
   children,
   bar,
   full,
   closable = true,
   readOnly,
   initialFocus,
+  finalFocus,
+  onOpenChangeComplete,
   className,
 }: SheetProps) {
   const level = Math.min(useContext(SheetLevel) + 1, LEVEL_TOP.length - 1);
@@ -145,6 +167,7 @@ export function Sheet({
       open={open}
       defaultOpen={defaultOpen}
       onOpenChange={onOpenChange ? (next) => onOpenChange(next) : undefined}
+      onOpenChangeComplete={onOpenChangeComplete}
       swipeDirection="down"
       disablePointerDismissal={!closable}
     >
@@ -158,6 +181,7 @@ export function Sheet({
           <Drawer.Popup
             ref={popup}
             initialFocus={initialFocus ?? popup}
+            finalFocus={finalFocus}
             className={cn(
               'sheet-motion flex h-full flex-col overflow-hidden bg-background text-foreground shadow-modal outline-none',
               full ? 'rounded-none' : 'rounded-t-3xl',
@@ -187,6 +211,7 @@ export function Sheet({
                 <ModalHeader
                   title={<Drawer.Title className={modalTitle}>{title}</Drawer.Title>}
                   sub={sub}
+                  lead={lead}
                   close={
                     closable ? (
                       <Drawer.Close

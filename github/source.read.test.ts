@@ -1,14 +1,15 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { createMemoryCache } from './cache.ts';
 import { createGitHubClient, GitHubError } from './client.ts';
-import { createGitHubSource, type GitHubSourceOptions } from './source.ts';
+import { createGitHubSource, type GitHubSource, type GitHubSourceOptions } from './source.ts';
 import { createFakeGitHub, type FileInput } from './test/fakeGitHub.ts';
 
 import { AuthError } from '../auth/client.ts';
 import { EditletError } from '../core/issues.ts';
 import { gitBlobSha } from '../core/sha.ts';
+import type { ContentSource } from '../core/source.ts';
 
 const SCHEMA = JSON.stringify({
   contentDir: 'cms/content',
@@ -87,6 +88,15 @@ describe('createGitHubSource (read side)', () => {
     expect(await cache.pending('o/r#main').get('a.md')).toMatchObject({ content: 'x' });
   });
 
+  it('implements the optional ContentSource.readFiles, so a caller can batch through the contract', async () => {
+    expectTypeOf<GitHubSource>().toExtend<ContentSource>();
+    expectTypeOf<GitHubSource['readFiles']>().toExtend<NonNullable<ContentSource['readFiles']>>();
+    const { source } = setup();
+    const contract: ContentSource = source;
+    const read = await contract.readFiles!(['cms/content/post/hello.md']);
+    expect(new TextDecoder().decode(read.get('cms/content/post/hello.md'))).toBe(HELLO);
+  });
+
   it('requires exactly one of token or client', () => {
     const { client } = setup();
     const base = { owner: 'o', repo: 'r', branch: 'main', cache: createMemoryCache() };
@@ -127,6 +137,26 @@ describe('createGitHubSource (read side)', () => {
     expect(files.size).toBe(120);
     expect(blobOps(fake.calls.slice(from))).toBe(3);
     expect(rawGets(fake.calls)).toHaveLength(0);
+  });
+
+  it('caches each graphql chunk as it lands: a failed chunk leaves the others cached', async () => {
+    const many: Record<string, FileInput> = { 'cms/schema.json': SCHEMA };
+    for (let i = 0; i < 120; i++) many[`cms/content/author/a${i}.md`] = `---\nname: A${i}\n---\n`;
+    const fake = createFakeGitHub({ branches: { main: many } });
+    let blobQueries = 0;
+    const failing: typeof fetch = async (input, init) => {
+      if (typeof init?.body === 'string' && init.body.includes('query Blobs') && ++blobQueries === 2)
+        return new Response(JSON.stringify({ errors: [{ message: 'Something went wrong' }] }), { status: 200 });
+      return fake.fetch(input, init);
+    };
+    const cache = createMemoryCache();
+    const client = createGitHubClient({ token: 'tok', fetch: failing });
+    const source = createGitHubSource({ owner: 'o', repo: 'r', branch: 'main', client, cache });
+    const listed = (await source.listFiles()).filter((f) => f.path !== 'cms/schema.json');
+    const error = await rejection(source.readFiles(listed.map((f) => f.path)));
+    expect(error).toMatchObject({ code: 'graphql_error' });
+    // The two other chunks land (they were in flight when the second failed) and stay cached by sha.
+    await vi.waitFor(async () => expect((await cache.getBlobs(listed.map((f) => f.sha))).size).toBe(70));
   });
 
   it('second read is served from cache', async () => {

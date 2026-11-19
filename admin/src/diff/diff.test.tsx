@@ -2,10 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { CompareSheet } from './CompareSheet';
 import { DiffHunk } from './DiffHunk';
 import { FieldDiff, InfoRow } from './FieldDiff';
 import { reviewEntries, reviewSummary, ReviewDialog } from './ReviewDialog';
 
+import type { ConflictField } from '../entry/conflict';
 import type { FieldDiffRow } from '../entry/diff';
 
 const row = (over: Partial<FieldDiffRow> = {}): FieldDiffRow => ({
@@ -184,5 +186,44 @@ describe('Escape closes only the top level', () => {
     fireEvent.keyDown(saveTo, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Save to' })).toBeNull());
     expect(screen.getByRole('dialog', { name: 'Your changes' })).toBeDefined();
+  });
+});
+
+describe('CompareSheet', () => {
+  const field: ConflictField = {
+    key: 'title',
+    label: 'Title',
+    type: 'string',
+    theirs: 'Theirs',
+    yours: 'Mine',
+    yoursChanged: true,
+  };
+  const sheet = (by?: string, where: 'github' | 'disk' = 'github') => (
+    <CompareSheet
+      open
+      onOpenChange={() => {}}
+      fields={[field]}
+      picks={{}}
+      onPick={() => {}}
+      where={where}
+      by={by}
+      onApply={() => {}}
+    />
+  );
+
+  it('puts who and when after the other side’s name, in the card and in the radio’s name', () => {
+    render(sheet('Mo, 10m ago'));
+    const title = within(screen.getByRole('radiogroup', { name: 'Title' }));
+    const theirs = title.getByRole('radio', { name: 'On GitHub · Mo, 10m ago: Theirs' });
+    expect(within(theirs).getByText('On GitHub · Mo, 10m ago')).toBeDefined();
+    expect(title.getByRole('radio', { name: 'Yours: Mine' })).toBeDefined();
+  });
+
+  it('keeps the plain name without it, on GitHub and on disk', () => {
+    const { unmount } = render(sheet());
+    expect(screen.getByRole('radio', { name: 'On GitHub: Theirs' })).toBeDefined();
+    unmount();
+    render(sheet(undefined, 'disk'));
+    expect(screen.getByRole('radio', { name: 'On disk: Theirs' })).toBeDefined();
   });
 });

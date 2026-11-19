@@ -75,6 +75,65 @@ describe.each(makers)('%s cache', (_name, make) => {
     expect(await q.list()).toEqual([]);
     expect((await c.getBlobs(['a'])).size).toBe(0);
   });
+
+  it('pending keeps base and v, and copies bytes both ways', async () => {
+    const q = make().pending('s');
+    const bytes = new Uint8Array([1, 2]);
+    await q.put({ path: 'e', content: 'new', sha: 'h', base: 'old', v: 1 });
+    await q.put({ path: 'n', content: 'first', sha: null, base: null });
+    await q.put({ path: 'i', content: bytes, sha: null });
+    bytes[0] = 9;
+    expect(await q.get('e')).toMatchObject({ content: 'new', sha: 'h', base: 'old', v: 1 });
+    expect((await q.get('n'))!.base).toBeNull();
+    const image = (await q.get('i'))!;
+    expect('base' in image).toBe(false);
+    expect('v' in image).toBe(false);
+    expect([...(image.content as Uint8Array)]).toEqual([1, 2]);
+    (image.content as Uint8Array)[1] = 9;
+    expect([...((await q.get('i'))!.content as Uint8Array)]).toEqual([1, 2]);
+  });
+
+  it('putMany writes every row; updatedAt is strictly increasing', async () => {
+    const q = make().pending('s');
+    await q.putMany([
+      { path: 'a', content: 'a', sha: null },
+      { path: 'b', content: new Uint8Array([1]), sha: null },
+    ]);
+    const [a, b] = await q.list();
+    expect([a!.path, b!.path]).toEqual(['a', 'b']);
+    expect(b!.updatedAt).toBeGreaterThan(a!.updatedAt);
+  });
+
+  it('removeIf keeps a newer row and removes one that is not newer', async () => {
+    const q = make().pending('s');
+    await q.put({ path: 'a', content: '1', sha: null });
+    const first = (await q.get('a'))!.updatedAt;
+    await q.put({ path: 'a', content: '2', sha: null });
+    await q.removeIf('a', first);
+    expect((await q.get('a'))?.content).toBe('2');
+    await q.removeIf('a', (await q.get('a'))!.updatedAt);
+    expect(await q.get('a')).toBeUndefined();
+    await q.removeIf('missing', Date.now());
+  });
+
+  it('scopes lists the scopes with rows', async () => {
+    const c = make();
+    expect(await c.scopes()).toEqual([]);
+    await c.pending('o/r#b').put({ path: 'x', content: 'x', sha: null });
+    await c.pending('local:p#main').put({ path: 'y', content: 'y', sha: null });
+    await c.pending('o/r#empty').put({ path: 'z', content: 'z', sha: null });
+    await c.pending('o/r#empty').remove(['z']);
+    expect((await c.scopes()).toSorted()).toEqual(['local:p#main', 'o/r#b']);
+  });
+});
+
+describe('persistent', () => {
+  it('is true for IndexedDB and false for memory', () => {
+    const c = openGitHubCache({ indexedDB: new IDBFactory(), IDBKeyRange });
+    opened.push(c);
+    expect(c.persistent).toBe(true);
+    expect(createMemoryCache().persistent).toBe(false);
+  });
 });
 
 describe('dexie specifics', () => {
@@ -92,6 +151,7 @@ describe('dexie specifics', () => {
     delete (globalThis as { indexedDB?: unknown }).indexedDB;
     try {
       const c = openGitHubCache();
+      expect(c.persistent).toBe(false);
       await c.putBlobs([{ sha: 'a', bytes: new Uint8Array([1]) }]);
       expect((await c.getBlobs(['a'])).size).toBe(1);
     } finally {

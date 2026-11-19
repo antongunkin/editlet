@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { ContentModelView } from './ContentModelView';
 import {
@@ -56,6 +56,7 @@ export function ContentModel({ schema: data }: { schema: SchemaData }) {
   const [ask, setAsk] = useState<Ask | null>(null);
   const [askOpen, setAskOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const more = useRef<HTMLButtonElement>(null);
 
   const schemaIssues: Issue[] | null = refreshError
     ? refreshError instanceof EditletError
@@ -85,7 +86,7 @@ export function ContentModel({ schema: data }: { schema: SchemaData }) {
 
   const copyPrompt = (p: ChatPrompt) =>
     void copy(p.text, p.id).then((ok) => {
-      if (!ok) toastManager.add({ title: 'Copy failed' });
+      if (!ok) toastManager.add({ title: 'Copy failed', type: 'error' });
     });
 
   const current = shown !== null && Object.hasOwn(schema.collections, shown) ? schema.collections[shown]! : null;
@@ -104,6 +105,7 @@ export function ContentModel({ schema: data }: { schema: SchemaData }) {
             onClick={() => void invalidateFiles(client)}
           />
           <IconButton
+            ref={more}
             label="More actions"
             aria-haspopup="dialog"
             icon={<Icon name="more" size={20} />}
@@ -169,6 +171,7 @@ export function ContentModel({ schema: data }: { schema: SchemaData }) {
           sub={`${shown} · ${schema.contentDir}/${shown}/${mark && time ? ` · Updated ${time}` : ''}`}
           rows={fieldRows(current)}
           marks={changes?.fields.get(shown)}
+          page={current.url ?? null}
           references={outgoing(edges, shown).map((e) => ({
             from: e.to,
             label: label(e.to),
@@ -214,13 +217,13 @@ export function ContentModel({ schema: data }: { schema: SchemaData }) {
       {ask?.kind === 'model' ? (
         <AskSheet open={askOpen} onOpenChange={setAskOpen} prompts={prompts} copied={copied} onCopy={copyPrompt} />
       ) : null}
-      <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title="Content model">
+      <ActionSheet open={moreOpen} onOpenChange={setMoreOpen} title="Content model" finalFocus={more}>
         <ActionRow
           icon="copy"
           onClick={() => {
             setMoreOpen(false);
             void copy(JSON.stringify(schema, null, 2), 'schema').then((ok) =>
-              toastManager.add({ title: ok ? 'Schema copied' : 'Copy failed' }),
+              toastManager.add(ok ? { title: 'Schema copied', type: 'copy' } : { title: 'Copy failed', type: 'error' }),
             );
           }}
         >
