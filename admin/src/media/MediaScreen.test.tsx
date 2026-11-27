@@ -22,6 +22,8 @@ async function openMedia(extra?: Record<string, string | Uint8Array>) {
   renderApp({ route: 'media', source });
   await within(main()).findByRole('heading', { name: 'Media' });
   await within(main()).findByTitle(COVER);
+  // The usage index is read from the entry summaries: an unused tile says *Checking…* until it has them all.
+  await waitFor(() => expect(within(main()).queryByRole('button', { name: /Checking…/ })).toBeNull());
   return { source, commit };
 }
 

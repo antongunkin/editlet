@@ -31,7 +31,8 @@ export interface SearchViewProps {
   entryCount: number;
   /**
    * The titles' reads: while `loaded < total` the line under an empty field is *Loading titles: 340 of 2,000.*; with a
-   * failed one, *Some titles did not load.* (both also in the status line).
+   * failed one, *Some titles did not load.* (both also in the status line). Typed, with no entry matching, the first
+   * shows while the reads run: an entry may yet match.
    */
   loading?: { loaded: number; total: number; failed: number };
   /** How many entries match the query. */
@@ -154,12 +155,19 @@ export function SearchView({
         </Card>
       </Fragment>
     ) : null;
-  const progress =
-    loading && loading.loaded < loading.total
-      ? `Loading titles: ${count(loading.loaded)} of ${count(loading.total)}.`
-      : loading && loading.failed > 0
-        ? 'Some titles did not load.'
-        : null;
+  const pending = loading !== undefined && loading.loaded < loading.total;
+  const progress = pending
+    ? `Loading titles: ${count(loading.loaded)} of ${count(loading.total)}.`
+    : loading && loading.failed > 0
+      ? 'Some titles did not load.'
+      : null;
+  // A title still on its way may match: the progress stands where *Nothing matches* would be (the picker's rule).
+  const waiting =
+    typed && matches === 0 && pending ? (
+      <p key="waiting" className="m-0 px-1 text-sm text-tray-muted-foreground">
+        {progress}
+      </p>
+    ) : null;
   const found = [
     matches > 0 ? plural(matches, 'entry', 'entries') : null,
     actionCount > 0 ? plural(actionCount, 'action', 'actions') : null,
@@ -222,10 +230,11 @@ export function SearchView({
       <div ref={lists} className="flex flex-col gap-2 px-4 pt-1 pb-8" onKeyDown={rowKeys}>
         {/* What a screen reader hears while the focus stays in the field. */}
         <output className="sr-only">
-          {/* Typed, only a failure joins the counts: the climbing progress would be said again at every step. */}
+          {/* Typed, only a failure joins the counts: the climbing progress would be said again at every step. With nothing
+              found yet, a fixed text, said once. */}
           {typed
             ? [
-                found.length === 0 ? 'Nothing matches' : found.join(', '),
+                found.length > 0 ? found.join(', ') : pending ? 'Loading titles…' : 'Nothing matches',
                 loading?.failed ? 'Some titles did not load.' : '',
               ]
                 .filter(Boolean)
@@ -239,6 +248,8 @@ export function SearchView({
               {progress ?? `Type a title, an address or an action. ${plural(entryCount, 'entry', 'entries')}.`}
             </p>
           </>
+        ) : waiting ? (
+          [actionsGroup, waiting]
         ) : matches === 0 && actionCount === 0 ? (
           <p className="m-0 px-1 text-sm text-tray-muted-foreground">Nothing matches “{query.trim()}”.</p>
         ) : actionsFirst ? (

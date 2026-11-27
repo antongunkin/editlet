@@ -219,19 +219,22 @@ function SearchSheet({
   const files = useFiles().data;
   const branch = useWorkspace()?.active ?? null;
   const [theme, chooseTheme] = useThemeChoice();
-  // Nothing is read before the first opening; what was read stays while the sheet closes (no flash of an empty list).
+  // Nothing is listed before the first opening, and no file is read before the first character typed. Both then stay
+  // for the session: no flash of an empty list on closing, and clearing the field does not stop the read.
   const [used, setUsed] = useState(open);
+  const [searched, setSearched] = useState(false);
+  const typed = query.trim() !== '';
+  if (typed && !searched) setSearched(true);
   const [wasOpen, setWasOpen] = useState(open);
   if (open && !used) setUsed(true);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) setQuery(''); // a new opening starts empty
   }
-  const { entries, loaded, total, failed } = useSearchEntries(used);
+  const { entries, loaded, total, failed } = useSearchEntries(used, searched);
   // The screen already open is no navigation (no route change closes the search): choosing it closes the search itself.
   const choose = (to: Route) => (formatRoute(to) === raw ? onOpenChange(false) : navigate(to));
 
-  const typed = query.trim() !== '';
   const found = useMemo(() => searchEntries(entries, query), [entries, query]);
   const all = useMemo(
     () => (schema ? buildActions({ schema, files, branch, route, theme, screenActions }) : []),

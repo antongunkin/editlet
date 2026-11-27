@@ -3,10 +3,13 @@ import {
   type DevCommitChange,
   type DevCommitRequest,
   type DevFilesResponse,
+  type DevHistoryRequest,
+  type DevHistoryResponse,
   type DevVersionsResponse,
+  MAX_HISTORY_PATHS,
 } from '../../../core/devApi';
 import { EditletError, type Issue } from '../../../core/issues';
-import { versionLimit, type ContentSource, type FileChange } from '../../../core/source';
+import { versionLimit, type ContentSource, type FileChange, type FileEvent } from '../../../core/source';
 
 /** A `FileChange` with an optional expected blob sha (`null` = the file must not exist yet). */
 export type SourceChange = FileChange & { sha?: string | null };
@@ -16,6 +19,8 @@ export type LocalSource = ContentSource & {
   commit(changes: SourceChange[], message: string): Promise<{ issues: Issue[] }>;
   listVersions: NonNullable<ContentSource['listVersions']>;
   readVersion: NonNullable<ContentSource['readVersion']>;
+  /** The last commit of each file (`null`: none), one request per `MAX_HISTORY_PATHS` paths. */
+  lastCommits(paths: string[]): Promise<Map<string, FileEvent | null>>;
 };
 
 export interface LocalSourceOptions {
@@ -80,6 +85,22 @@ export function createLocalSource({
         return { issues };
       }
       throw new Error(`Dev API ${res.status}`);
+    },
+
+    async lastCommits(paths) {
+      const out = new Map<string, FileEvent | null>();
+      for (let i = 0; i < paths.length; i += MAX_HISTORY_PATHS) {
+        const body: DevHistoryRequest = { paths: paths.slice(i, i + MAX_HISTORY_PATHS) };
+        const res = await fetchFn(`${base}/history`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.status !== 200) throw new Error(`Dev API ${res.status}`);
+        const { histories } = (await res.json()) as DevHistoryResponse;
+        for (const path of body.paths) out.set(path, histories[path]?.updated ?? null);
+      }
+      return out;
     },
 
     async listVersions(path, limit) {

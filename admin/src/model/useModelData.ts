@@ -2,11 +2,20 @@ import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { diffModel, type ModelChanges } from './model';
-import { entryProblems, problemCandidates, type ProblemFile, type ReadResult } from './problems';
+import {
+  entryProblems,
+  maybeProblem,
+  problemCandidates,
+  projectContext,
+  type ProblemCandidate,
+  type ProblemFile,
+  type ReadResult,
+} from './problems';
 
 import { EditletError } from '../../../core/issues';
 import type { Schema } from '../../../core/schema';
 import { entryFileQuery, invalidateFiles, useFiles, type EntryFileData, type SchemaData } from '../data/queries';
+import { useSummaries, type SummaryRef } from '../data/summaries';
 import { useSource } from '../source/context';
 
 export const GITHUB_POLL_MS = 30_000;
@@ -34,26 +43,54 @@ type ReadState = { data: EntryFileData | undefined; error: Error | null };
 const combineReads = (rs: { data: EntryFileData | undefined; error: Error | null }[]): ReadState[] =>
   rs.map((r) => ({ data: r.data, error: r.error }));
 
-/** Entries that fail the current schema, reading each entry file through the shared entry-file cache. */
+type EntryCandidate = ProblemCandidate & { entry: NonNullable<ProblemCandidate['entry']> };
+
+const isEntry = (c: ProblemCandidate): c is EntryCandidate => c.entry !== null;
+
+/**
+ * Entries that fail the current schema. First the summary of every entry (`useSummaries`: no full file when it is kept),
+ * then the full files of the suspects only (`maybeProblem`, and a summary that failed), through the shared entry-file
+ * cache, validated as `entryProblems` does.
+ */
 export function useEntryProblems(data: SchemaData): { problems: ProblemFile[]; pending: boolean } {
   const source = useSource();
   const files = useFiles();
   const { schema, schemaPath } = data;
+  const listed = files.data;
   const candidates = useMemo(
-    () => (files.data ? problemCandidates(schema, schemaPath, files.data) : []),
-    [schema, schemaPath, files.data],
+    () => (listed ? problemCandidates(schema, schemaPath, listed) : []),
+    [schema, schemaPath, listed],
   );
-  const entryCandidates = useMemo(() => candidates.filter((c) => c.entry), [candidates]);
+  const entryCandidates = useMemo(() => candidates.filter(isEntry), [candidates]);
+  const refs = useMemo(
+    () => entryCandidates.map(({ path, sha, entry }): SummaryRef => ({ path, sha, ...entry })),
+    [entryCandidates],
+  );
+  const { rows, errors } = useSummaries(refs);
+
+  const { suspects, clean } = useMemo(() => {
+    const toRead: EntryCandidate[] = [];
+    const passed = new Set<string>();
+    const ctx = projectContext(listed ?? [], candidates);
+    entryCandidates.forEach((c, i) => {
+      const summary = rows[i];
+      // A summary that failed: the full read gives the error to report, with this file's path.
+      if (errors[i] || (summary && maybeProblem(schema, ctx, c.path, c.entry, summary))) toRead.push(c);
+      else if (summary) passed.add(c.path);
+    });
+    return { suspects: toRead, clean: passed };
+  }, [schema, listed, candidates, entryCandidates, rows, errors]);
+
   const results = useQueries({
-    queries: entryCandidates.map((c) => entryFileQuery(source, c)),
+    queries: suspects.map((c) => entryFileQuery(source, c)),
     combine: combineReads,
   });
-  const listed = files.data;
+
   return useMemo(() => {
     if (!listed) return { problems: [], pending: !files.error };
-    const byPath = new Map(entryCandidates.map((c, i) => [c.path, results[i]]));
+    const byPath = new Map(suspects.map((c, i) => [c.path, results[i]]));
     const read = candidates.map((c): ReadResult => {
-      if (!c.entry) return { issues: [] };
+      if (!c.entry || clean.has(c.path)) return { issues: [] };
       const result = byPath.get(c.path);
       if (result?.data) return { file: result.data.file };
       if (result?.error) {
@@ -65,7 +102,7 @@ export function useEntryProblems(data: SchemaData): { problems: ProblemFile[]; p
       return undefined;
     });
     return entryProblems(schema, listed, candidates, read);
-  }, [schema, listed, files.error, candidates, entryCandidates, results]);
+  }, [schema, listed, files.error, candidates, suspects, clean, results]);
 }
 
 /** Marks what changed between the previous and the current schema. `null` until the schema changes once. */

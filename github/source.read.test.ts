@@ -173,6 +173,45 @@ describe('createGitHubSource (read side)', () => {
     expect(rawGets(calls)).toHaveLength(0);
   });
 
+  it('readFiles with keep: false returns the files and stores no blob, from GraphQL or REST', async () => {
+    const { source, fake, cache } = setup();
+    await source.listFiles();
+    const put = vi.spyOn(cache, 'putBlobs');
+    const paths = ['cms/content/post/img/cover.png', ...TEXT_PATHS];
+    const shas = await Promise.all(paths.map((p) => gitBlobSha(bytesOf(FILES[p]!))));
+    const from = fake.calls.length;
+    const files = await source.readFiles(paths, { keep: false });
+    for (const p of paths) expect(files.get(p)).toEqual(bytesOf(FILES[p]!));
+    expect(put).not.toHaveBeenCalled();
+    expect((await cache.getBlobs(shas)).size).toBe(0);
+    // Nothing was kept, so the next read asks GitHub again.
+    await source.readFiles(paths, { keep: false });
+    expect(blobOps(fake.calls.slice(from))).toBe(2);
+    expect(rawGets(fake.calls.slice(from))).toHaveLength(2);
+  });
+
+  it('readFiles with keep: false serves a cached blob from the cache, and a plain read keeps what it fetches', async () => {
+    const { source, fake, cache } = setup();
+    const image = 'cms/content/post/img/cover.png';
+    const hello = 'cms/content/post/hello.md';
+    // Plain reads keep entries and images, as before.
+    await source.readFiles([hello, image]);
+    const shas = [await gitBlobSha(HELLO), await gitBlobSha(IMAGE)];
+    expect((await cache.getBlobs(shas)).size).toBe(2);
+    const from = fake.calls.length;
+    const files = await source.readFiles([hello, image], { keep: false });
+    expect(files.get(hello)).toEqual(bytesOf(HELLO));
+    expect(files.get(image)).toEqual(IMAGE);
+    expect(blobOps(fake.calls.slice(from))).toBe(0);
+    expect(rawGets(fake.calls.slice(from))).toHaveLength(0);
+    // A file only read with keep: false is fetched again by the plain read, which keeps it.
+    const world = 'cms/content/post/world.md';
+    await source.readFiles([world], { keep: false });
+    await source.readFile(world);
+    await source.readFile(world);
+    expect(blobOps(fake.calls.slice(from))).toBe(2);
+  });
+
   it('falls back to raw on sha mismatch', async () => {
     const { source, fake } = setup();
     const sha = await gitBlobSha(BOM);
@@ -206,11 +245,14 @@ describe('createGitHubSource (read side)', () => {
   });
 
   it('walks subtrees when the tree is truncated', async () => {
-    const { source, fake } = setup();
+    const { fake, make, source } = setup();
     const expected = await source.listFiles();
+    // a source of its own: its first load reads the (truncated) trees; a reload of `source` would answer 304 for an
+    // unchanged head (source.poll.test.ts)
+    const truncated = make();
     fake.state.options.truncateTrees = true;
     const from = fake.calls.length;
-    expect(await source.listFiles()).toEqual(expected);
+    expect(await truncated.listFiles()).toEqual(expected);
     const treeGets = fake.calls.slice(from).filter((c) => c.url.includes('/git/trees/'));
     // one truncated recursive read, then content/, post/, post/img/, author/, .draft/ one level at a time
     expect(treeGets.filter((c) => c.url.includes('recursive'))).toHaveLength(1);

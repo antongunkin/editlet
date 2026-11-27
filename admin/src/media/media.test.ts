@@ -14,6 +14,7 @@ import { sanitizeSvg } from './svg';
 
 import { parseEntryFile } from '../../../core/entryFile';
 import type { FileRef } from '../../../core/source';
+import { summarizeEntry } from '../../../core/summary';
 import type { EntryFileData } from '../data/queries';
 import { schema } from '../entry/testSchema';
 
@@ -52,10 +53,13 @@ const read = new Map([
   ['cms/content/post/other.md', entry(OTHER, 'e2')],
 ]);
 
+const summaries = (files_: ReadonlyMap<string, EntryFileData> = read) =>
+  new Map([...files_].map(([path, e]) => [path, summarizeEntry(schema, 'post', e.file)]));
+
 const sized = (n: number) => ({ content: new Uint8Array(n) });
 const svg = (inner: string, attrs = '') => `<svg xmlns="http://www.w3.org/2000/svg"${attrs}>${inner}</svg>`;
 
-const index = (): MediaIndex => buildMediaIndex(schema, files, read);
+const index = (): MediaIndex => buildMediaIndex(schema, files, summaries());
 const image = (i: MediaIndex, path: string) => i.images.find((x) => x.path === `cms/content/${path}`)!;
 
 describe('buildMediaIndex', () => {
@@ -88,7 +92,7 @@ describe('buildMediaIndex', () => {
     const partial = buildMediaIndex(
       schema,
       files,
-      new Map([['cms/content/post/hello.md', read.get('cms/content/post/hello.md')!]]),
+      summaries(new Map([['cms/content/post/hello.md', read.get('cms/content/post/hello.md')!]])),
     );
     expect(partial.incomplete).toBe(true);
     expect(() => deleteChanges(partial, ['cms/content/post/hello/old.jpg'])).toThrow(/Not every entry/);
@@ -123,11 +127,16 @@ describe('media edits', () => {
     const i = index();
     const cover = image(i, 'post/hello/cover.webp');
     const chart = image(i, 'post/hello/chart.png');
-    const changes = entryEdits(schema, i, [
-      { use: cover.uses[0]!, alt: 'A desk' },
-      { use: chart.uses[0]!, alt: 'Sales chart' },
-      { use: cover.uses[1]!, alt: 'A desk' },
-    ]);
+    const changes = entryEdits(
+      schema,
+      i,
+      [
+        { use: cover.uses[0]!, alt: 'A desk' },
+        { use: chart.uses[0]!, alt: 'Sales chart' },
+        { use: cover.uses[1]!, alt: 'A desk' },
+      ],
+      read,
+    );
     expect(changes).toEqual([
       {
         path: 'cms/content/post/hello.md',
@@ -142,10 +151,10 @@ describe('media edits', () => {
     const i = index();
     const cover = image(i, 'post/hello/cover.webp');
     const bytes = new Uint8Array([7]);
-    expect(replaceChanges(schema, i, cover, { name: 'x.webp', bytes }).changes).toEqual([
+    expect(replaceChanges(schema, i, cover, { name: 'x.webp', bytes }, new Map()).changes).toEqual([
       { path: cover.path, content: bytes, sha: 'i1' },
     ]);
-    const { changes, path } = replaceChanges(schema, i, cover, { name: 'x.PNG', bytes });
+    const { changes, path } = replaceChanges(schema, i, cover, { name: 'x.PNG', bytes }, read);
     expect(path).toBe('cms/content/post/hello/cover.png');
     expect(
       changes.map((c) => [c.path, c.sha, typeof c.content === 'string' ? c.content : c.content && 'bytes']),
@@ -155,6 +164,28 @@ describe('media edits', () => {
       ['cms/content/post/hello.md', 'e1', HELLO.replace('hello/cover.webp', 'hello/cover.png')],
       ['cms/content/post/other.md', 'e2', OTHER.replace('hello/cover.webp', 'hello/cover.png')],
     ]);
+  });
+
+  it('changes the one of two equal uses it was given', () => {
+    const text = ['---', 'title: Twice', '---', '', '![](hello/chart.png) and ![](hello/chart.png)', ''].join('\n');
+    const twice = new Map([['cms/content/post/hello.md', entry(text, 'e1')]]);
+    const i = buildMediaIndex(schema, files, summaries(twice));
+    const [, second] = image(i, 'post/hello/chart.png').uses;
+    expect(entryEdits(schema, i, [{ use: second!, alt: 'Second' }], twice).map((c) => c.content)).toEqual([
+      text.replace('and ![]', 'and ![Second]'),
+    ]);
+  });
+
+  it('keeps the listed sha for a file that moved since, and refuses one that lost the use', () => {
+    const i = index();
+    const [use] = image(i, 'post/hello/cover.webp').uses;
+    const read_ = (text: string) => new Map([['cms/content/post/hello.md', entry(text, 'e1')]]);
+    // The rest of the file moved: the change still names the listed sha, which the commit refuses.
+    const [change] = entryEdits(schema, i, [{ use: use!, alt: 'A desk' }], read_(HELLO.replace('Intro', 'Outro')));
+    expect(change!.sha).toBe('e1');
+    expect(() =>
+      entryEdits(schema, i, [{ use: use!, alt: 'A desk' }], read_(HELLO.replace('A laptop', 'Another'))),
+    ).toThrow('cms/content/post/hello.md changed since it was read');
   });
 
   it('deletes only unused images', () => {

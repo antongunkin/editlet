@@ -1,16 +1,28 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createMemorySource } from '../../../core/source';
+import { createMemorySource, type FileEvent } from '../../../core/source';
+import { openGitHubCache } from '../../../github';
 import { readEditletRoute, withEditletRoute } from '../../../loader/protocol';
 import { App } from '../App';
+import { setLocalChangesCache } from '../changes/store';
 import { pendingNewEntries } from '../entry/pending';
 import { tokenSession, writeSession } from '../github/session';
 import { activeBranchKey } from '../github/workspace';
+import { askedPaths, historiesResponse, sourceWithDevHistory } from '../test/devHistory';
 import { createAdminFakeGitHub } from '../test/fakeGitHub';
 import { createFakeWindow, ORIGIN } from '../test/fakeWindow';
 import { LIVE_CONFIG, renderLiveApp, siteFetch } from '../test/liveApp';
-import { createTestQueryClient, doneField, fixtureFiles, HOME_LOADED, renderApp, sheet } from '../test/render';
+import {
+  createTestQueryClient,
+  doneField,
+  fixtureFiles,
+  HOME_LOADED,
+  renderApp,
+  setField,
+  sheet,
+} from '../test/render';
 
 /** The fixture site with `titleField: 'title'` on post and one extra draft post. */
 function variantFiles(): Record<string, string | Uint8Array> {
@@ -88,12 +100,14 @@ describe('All content', () => {
 
 describe('Collection', () => {
   const list = () => within(main()).getByRole('list', { name: /entries$/ });
-  function mockHistory(byPath: (path: string) => object | null) {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = new URL(String(input), 'http://localhost');
-      const body = url.pathname.endsWith('/history') ? byPath(url.searchParams.get('path')!) : null;
-      return new Response(body ? JSON.stringify(body) : '{}', { status: body ? 200 : 404 });
-    });
+  /** `POST /__editlet/history` answers `updated` per path; renders with a source that asks it. */
+  function mockHistory(updated: (path: string) => FileEvent) {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) =>
+      String(input).endsWith('/history')
+        ? historiesResponse(askedPaths(init), updated)
+        : new Response('{}', { status: 404 }),
+    );
+    renderApp({ source: sourceWithDevHistory(variantFiles()), route: 'post' });
   }
   const width = window.innerWidth;
   afterEach(() => {
@@ -209,14 +223,11 @@ describe('Collection', () => {
 
   it('when it changed comes from the git history; newest first by default', async () => {
     window.innerWidth = 375;
-    mockHistory((path) => ({
-      updated: path.endsWith('second-post.md')
+    mockHistory((path) =>
+      path.endsWith('second-post.md')
         ? { actor: { name: 'Ann Lee' }, date: '2025-11-19T14:48:00Z', message: 'm' }
         : { actor: { name: 'Bob Stone' }, date: '2025-10-02T09:00:00Z', message: 'm' },
-      created: null,
-      commits: 1,
-    }));
-    renderApp({ files: variantFiles(), route: 'post' });
+    );
     const second = await within(main()).findByRole('button', { name: /^Second post/ });
     await waitFor(() => expect(second.textContent).toBe('Second postDraft · Nov 19, 2025 · Ann L'));
     expect(
@@ -228,14 +239,11 @@ describe('Collection', () => {
 
   it('Sort: the header button opens one choice; a tap sorts, closes, and the choice is marked', async () => {
     window.innerWidth = 375;
-    mockHistory((path) => ({
-      updated: path.endsWith('second-post.md')
+    mockHistory((path) =>
+      path.endsWith('second-post.md')
         ? { actor: { name: 'Ann Lee' }, date: '2025-11-19T14:48:00Z', message: 'm' }
         : { actor: { name: 'Bob Stone' }, date: '2025-10-02T09:00:00Z', message: 'm' },
-      created: null,
-      commits: 1,
-    }));
-    renderApp({ files: variantFiles(), route: 'post' });
+    );
     await within(main()).findByRole('button', { name: /^Second post/ });
     fireEvent.click(within(main()).getByRole('button', { name: 'Sort' }));
     const dialog = within(await screen.findByRole('dialog', { name: 'Sort' }));
@@ -306,6 +314,68 @@ describe('Collection', () => {
   it('a singleton route renders the entry screen', async () => {
     renderApp({ route: 'homePage' });
     expect(await within(main()).findByRole('group', { name: / fields$/ })).toBeDefined();
+  });
+});
+
+describe('A large collection in dev mode', () => {
+  const COUNT = 300;
+  const list = () => within(main()).getByRole('list', { name: /entries$/ });
+  const titles = () =>
+    within(list())
+      .getAllByRole('button')
+      .map((b) => b.querySelector('span > span')?.textContent);
+
+  /** `post` with `COUNT` entries, of which the highest number changed last. */
+  function largeSite() {
+    const files = variantFiles();
+    delete files['cms/content/post/hello-world.md'];
+    delete files['cms/content/post/second-post.md'];
+    for (let i = 0; i < COUNT; i++) {
+      const n = String(i).padStart(3, '0');
+      files[`cms/content/post/p-${n}.md`] = `---\ntitle: Post ${n}\n---\n`;
+    }
+    return files;
+  }
+  const updated = (path: string): FileEvent => ({
+    actor: { name: 'Ann Lee' },
+    date: new Date(Date.UTC(2026, 0, 1, 0, Number(/p-(\d+)/.exec(path)?.[1] ?? 0))).toISOString(),
+    message: 'm',
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('lists from one history call and reads only the rows on screen; a new unsaved entry comes first', async () => {
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) =>
+        String(input).endsWith('/history')
+          ? historiesResponse(askedPaths(init), updated)
+          : new Response('{}', { status: 404 }),
+      );
+    const source = sourceWithDevHistory(largeSite());
+    const read = vi.spyOn(source, 'readFile');
+    const client = createTestQueryClient();
+    setLocalChangesCache(client, openGitHubCache({ indexedDB: new IDBFactory(), IDBKeyRange }));
+    renderApp({ source, route: 'post', queryClient: client });
+    await within(main()).findByRole('button', { name: /^Post 299/ });
+    expect(titles()?.slice(0, 3)).toEqual(['Post 299', 'Post 298', 'Post 297']);
+    const asked = () => read.mock.calls.map(([path]) => path).filter((path) => path.startsWith('cms/content/post/'));
+    expect(asked()).toHaveLength(20);
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/history'))).toHaveLength(1);
+
+    fireEvent.click(within(main()).getByRole('button', { name: 'New post' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'New post' }));
+    fireEvent.change(dialog.getByLabelText('Title'), { target: { value: 'Brand new' } });
+    fireEvent.click(dialog.getByRole('button', { name: 'Create post' }));
+    await screen.findByRole('button', { name: /^Title/ });
+    await setField('Title', 'Brand new indeed');
+    fireEvent.click(screen.getByRole('link', { name: 'Back' }));
+    await within(main()).findByRole('button', { name: /^Brand new indeed/ });
+    expect(titles().slice(0, 2)).toEqual(['Brand new indeed', 'Post 299']);
+    // 20 rows: the unsaved one takes one of them.
+    expect(within(list()).getByRole('button', { name: /^Show 20 more/ }).textContent).toBe(
+      'Show 20 more20 of 301 shown',
+    );
   });
 });
 

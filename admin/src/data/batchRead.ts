@@ -3,7 +3,7 @@
 
 import { EditletError } from '../../../core/issues';
 import type { ContentSource } from '../../../core/source';
-import { GitHubError } from '../../../github';
+import { GitHubError, type GitHubSource } from '../../../github';
 
 /** The most paths one `readFiles` call asks for (the GitHub source splits them into queries of 50, 6 at a time). */
 export const BATCH_LIMIT = 200;
@@ -20,9 +20,26 @@ interface Waiter {
 }
 
 const readers = new WeakMap<ContentSource, BatchedReader>();
+const unkeptReaders = new WeakMap<ContentSource, BatchedReader>();
 
-/** One reader per source: every query of a source shares its queue. Without `readFiles`, it reads one file at a time. */
-export function batchedReader(source: ContentSource): BatchedReader {
+/** The GitHub source takes `keep` in `readFiles`; the `ContentSource` contract does not. */
+const takesKeep = (source: ContentSource): source is GitHubSource =>
+  source.kind === 'github' && source.readFiles !== undefined;
+
+/**
+ * One reader per source: every query of a source shares its queue. Without `readFiles`, it reads one file at a time.
+ * `keep: false` is for bytes the caller does not need again: a GitHub source writes none of them to its blob cache. It
+ * is a second reader with its own queue, so a batch never mixes the two; any other source has the one reader.
+ */
+export function batchedReader(source: ContentSource, { keep = true }: { keep?: boolean } = {}): BatchedReader {
+  if (!keep && takesKeep(source)) {
+    let reader = unkeptReaders.get(source);
+    if (!reader) {
+      reader = queueReader((paths) => source.readFiles(paths, { keep: false }));
+      unkeptReaders.set(source, reader);
+    }
+    return reader;
+  }
   let reader = readers.get(source);
   if (!reader) {
     reader = source.readFiles ? queueReader(source.readFiles.bind(source)) : { read: (path) => source.readFile(path) };

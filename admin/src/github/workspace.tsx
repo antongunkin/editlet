@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { useOnForget } from './auth';
+
 import { isEditletBranchName, resolveGitStyle, type GitStyle } from '../../../core/gitStyle';
 import { createGitHubSource, type CmsBranch, type GitHubClient, type GitHubSource } from '../../../github';
 import { EDITLET_PARAM, EDITLET_SOURCE } from '../../../loader/protocol';
@@ -137,6 +139,20 @@ export function WorkspaceProvider({
     },
     [sources, base],
   );
+
+  // A sign-out or an account switch drops the content the cache keeps (blobs, last commits), once: every source shares
+  // the one cache. Unsaved edits stay, and a failure does not block the sign-out.
+  const forgetContent = useCallback(() => {
+    try {
+      void sources
+        .get(base)!
+        .cache.clearContent()
+        .catch(() => undefined);
+    } catch {
+      // Best effort.
+    }
+  }, [sources, base]);
+  useOnForget(forgetContent);
 
   /** `restoring`: `active` came from storage, until the first branch listing confirms it (or the user switches). */
   const [state, setState] = useState(() => {

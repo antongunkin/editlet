@@ -172,3 +172,39 @@ describe('detectMode', () => {
     expect(await source.listVersions('cms/content/author/jane.md')).toEqual([]);
   });
 });
+
+describe('createLocalSource lastCommits', () => {
+  it('reads the last commit of each file, null for one without', async () => {
+    const { root, source } = await setup();
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=Ann', '-c', 'user.email=a@t', ...args], { cwd: root, stdio: 'pipe' });
+    git('init', '-b', 'main');
+    git('add', '.');
+    git('commit', '-m', 'init');
+    const hello = 'cms/content/post/hello-world.md';
+    const commits = await source.lastCommits([hello, 'cms/content/post/never.md']);
+    expect(commits.get(hello)).toMatchObject({ actor: { name: 'Ann' }, message: 'init' });
+    expect([...commits.keys()]).toEqual([hello, 'cms/content/post/never.md']);
+    expect(commits.get('cms/content/post/never.md')).toBeNull();
+  });
+
+  it('asks 500 paths per request, and none for no paths', async () => {
+    const { fetch } = await setup();
+    const sizes: number[] = [];
+    const source = createLocalSource({
+      fetch: ((url: string, init?: RequestInit) => {
+        sizes.push((JSON.parse(String(init?.body)) as { paths: string[] }).paths.length);
+        return fetch(url, init);
+      }) as typeof globalThis.fetch,
+    });
+    expect(await source.lastCommits([])).toEqual(new Map());
+    const paths = Array.from({ length: 1201 }, (_, i) => `cms/content/post/p-${i}.md`);
+    expect((await source.lastCommits(paths)).size).toBe(1201);
+    expect(sizes).toEqual([500, 500, 201]);
+  });
+
+  it('throws when the dev API refuses', async () => {
+    const { source } = await setup();
+    await expect(source.lastCommits(['../x'])).rejects.toThrow('Dev API 400');
+  });
+});

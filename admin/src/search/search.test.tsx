@@ -399,18 +399,25 @@ describe('counts on rows', () => {
 });
 
 describe('the loading line', () => {
-  it('counts the titles up while they load, then gives the hint back', async () => {
+  it('reads no title on opening; from the first character typed counts them up, also with the field cleared', async () => {
     const source = createMemorySource(files());
     const read = source.readFile.bind(source);
     let release = () => {};
     const held = new Promise<void>((resolve) => (release = resolve));
-    vi.spyOn(source, 'readFile').mockImplementation(async (path) => {
+    const reads = vi.spyOn(source, 'readFile').mockImplementation(async (path) => {
       if (path.endsWith('post/tires.md')) await held;
       return read(path);
     });
     renderApp({ source });
     await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
-    const { sheet } = await openSearch();
+    reads.mockClear();
+    const { sheet, field } = await openSearch();
+    expect(await within(sheet).findByText(/^Type a title, an address or an action\. 4 entries\./)).toBeDefined();
+    // Time for the fingerprints and a batch, had one been asked for.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    expect(reads).not.toHaveBeenCalled();
+    type(field, 't');
+    type(field, '');
     expect(await within(sheet).findByText('Loading titles: 3 of 4.', { selector: 'p' })).toBeDefined();
     expect(sheet.querySelector('output')!.textContent).toBe('Loading titles: 3 of 4.');
     release();
@@ -427,10 +434,11 @@ describe('the loading line', () => {
     renderApp({ source });
     await within(screen.getByRole('main')).findByRole('link', { name: HOME_LOADED });
     const { sheet, field } = await openSearch();
-    expect(await within(sheet).findByText('Some titles did not load.', { selector: 'p' })).toBeDefined();
     type(field, 'tires');
     const list = await within(sheet).findByRole('list', { name: 'Entries' });
     expect(within(list).getByRole('link').textContent).toBe('tiresPost');
-    expect(sheet.querySelector('output')!.textContent).toBe('1 entry. Some titles did not load.');
+    await waitFor(() => expect(sheet.querySelector('output')!.textContent).toBe('1 entry. Some titles did not load.'));
+    type(field, '');
+    expect(await within(sheet).findByText('Some titles did not load.', { selector: 'p' })).toBeDefined();
   });
 });

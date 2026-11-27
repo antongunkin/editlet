@@ -1,7 +1,6 @@
-import { useQueries } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import { DEFAULT_SORT, SORTS, sortRows, type SortKey } from './collectionSort';
+import { DEFAULT_SORT, LAZY_THRESHOLD, needsAll, SORTS, sortRows, type Sortable, type SortKey } from './collectionSort';
 import {
   CollectionView,
   PAGE_SIZE,
@@ -9,16 +8,17 @@ import {
   type CollectionFilterData,
   type CollectionRowData,
 } from './CollectionView';
-import { fileHistoryQuery, shortName, When } from './EntryMeta';
+import { shortName, When } from './EntryMeta';
 import { entryNoun, NewEntryDialog } from './NewEntryDialog';
 
 import { collectionNames } from '../../../core/schema';
+import type { FileEvent } from '../../../core/source';
 import { useBuffer } from '../changes/trayContext';
-import { useEntries, type SchemaData } from '../data/queries';
+import { useCollectionRefs, useEntries, type SchemaData } from '../data/queries';
 import { useWorkspace } from '../github/workspace';
 import { parentRoute } from '../route';
 import { RouteLink } from '../RouteLink';
-import { useSource } from '../source/context';
+import { useLastCommits } from '../status/lastCommits';
 import { fileStatusLabel, useFileStatuses } from '../status/useFileStatus';
 import { Banner, Button, buttonVariants, cn, Icon } from '../ui';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -38,10 +38,18 @@ function useWide(): boolean {
   return wide;
 }
 
-/** The chips after *All*. *In review* is GitHub mode's: the dev server has no pull requests. */
-function collectionFilters(github: boolean, pending: boolean): CollectionFilterData[] {
+/** A row's last change as the list sorts and shows it. */
+function changeOf(event: FileEvent | null | undefined): Sortable['updated'] {
+  return event ? { date: event.date, by: shortName(event.actor) } : null;
+}
+
+/**
+ * The chips after *All*. *In review* is GitHub mode's: the dev server has no pull requests. *Drafts* is not counted
+ * until every entry's summary is read; *Changed* and *In review* need the file statuses only.
+ */
+function collectionFilters(github: boolean, pending: boolean, noDrafts: boolean): CollectionFilterData[] {
   const filters: CollectionFilterData[] = [
-    { key: 'drafts', label: 'Drafts', empty: 'No drafts. Every entry is published.' },
+    { key: 'drafts', label: 'Drafts', empty: 'No drafts. Every entry is published.', pending: noDrafts },
     {
       key: 'changed',
       label: 'Changed',
@@ -60,12 +68,17 @@ function collectionFilters(github: boolean, pending: boolean): CollectionFilterD
  * entries edited in this browser and those saved but not live; *In review* those in an open pull request. Newest change first until *Sort*
  * says another order; 20 rows at a time. *New* in the bottom bar asks for the name first (NewEntryDialog). The view is
  * CollectionView.tsx.
+ *
+ * From `LAZY_THRESHOLD` entries only the rows on screen read their summaries (title, draft): the rows come from the file
+ * list, their order from the last commits, and a row shows its slug until its summary is there. A title or status order,
+ * or the *Drafts* chip (`needsAll`), reads every summary.
  */
 export function Collection({ collection, schema }: { collection: string; schema: SchemaData }) {
   const { navigate } = useRoute();
-  const source = useSource();
   const workspace = useWorkspace();
-  const entries = useEntries(collection);
+  const refs = useCollectionRefs(collection);
+  // The last commit of every entry file: when it changed, and who (one batch of 50 paths in GitHub mode).
+  const { updated: lastCommits, pending: datesPending } = useLastCommits(refs);
   const statuses = useFileStatuses();
   const buffer = useBuffer();
   const chrome = useScreenChrome();
@@ -75,61 +88,96 @@ export function Collection({ collection, schema }: { collection: string; schema:
   const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
   const [sortOpen, setSortOpen] = useState(false);
   const [limit, setLimit] = useState(PAGE_SIZE);
+  const [askedAll, setAskedAll] = useState(false);
   const def = schema.schema.collections[collection];
   const label = def?.label ?? collection;
   const heading = def ? collectionNames(def).many : collection;
 
-  // The last commit of every entry file: when it changed, and the order. Same queries as the entry's Meta.
-  const list = entries.data;
-  const histories = useQueries({
-    queries: (list ?? []).map((e) => fileHistoryQuery(source, workspace, e.path, e.sha)),
-  });
+  const lazy = refs.length >= LAZY_THRESHOLD;
+  const readsAll = lazy && needsAll(sort, filter);
+  // Once every summary was asked for, the screen keeps asking: the *Drafts* count stays exact (they cost no new read).
+  if (readsAll && !askedAll) setAskedAll(true);
+  const wantsAll = !lazy || askedAll || readsAll;
+  // A large list has no order before its dates. A failed or empty answer is one too: the rows then go by slug.
+  const dated = !datesPending || lastCommits.size > 0;
+
+  // Unsaved new entries (and copies) of this collection: first, with the *Unsaved* badge.
+  const listed = new Set(refs.map((r) => r.path));
+  const fresh = buffer.entries.filter((e) => e.collection === collection && e.isNew && !listed.has(e.path));
+  const freshRows = fresh.map((e): CollectionRowData => ({
+    key: e.path,
+    title: e.title,
+    statusText: fileStatusLabel('unsaved'),
+    badge: <StatusBadge draft={e.after?.data.draft === true} status="unsaved" showPublished />,
+    filters: [...(e.after?.data.draft === true ? ['drafts'] : []), 'changed'],
+    onOpen: () => navigate({ kind: 'entry', collection, slug: e.slug }),
+  }));
+  const filtersOf = (path: string, draft: boolean | null) => {
+    const { unsaved, changed, review } = statuses.refs;
+    return [
+      ...(draft ? ['drafts'] : []),
+      ...(unsaved.has(path) || changed.has(path) ? ['changed'] : []),
+      ...(review.has(path) ? ['review'] : []),
+    ];
+  };
+
+  // Which rows are on screen: it takes their dates and file statuses only, never a summary, so that what is read does
+  // not depend on what has been read.
+  const byDate = useMemo(
+    () =>
+      wantsAll
+        ? []
+        : sortRows(
+            refs.map((r) => ({
+              path: r.path,
+              slug: r.slug,
+              title: null,
+              draft: null,
+              updated: changeOf(lastCommits.get(r.path)),
+            })),
+            sort,
+            { bySlug: true },
+          ),
+    [wantsAll, refs, lastCommits, sort],
+  );
+  const shows = (filters: string[] | undefined) => filter === 'all' || filters?.includes(filter) === true;
+  const room = Math.max(0, limit - freshRows.filter((row) => shows(row.filters)).length);
+  const visible = (dated ? byDate : []).filter((r) => shows(filtersOf(r.path, null))).slice(0, room);
+  const entries = useEntries(collection, wantsAll ? 'all' : new Set(visible.map((r) => r.path)));
+
   // What the editor would see on opening an entry with unsaved edits: its unsaved title.
   const bufferedTitle = new Map(buffer.entries.map((e) => [e.path, e.title]));
-  const listed = new Set((list ?? []).map((e) => e.path));
-  // Unsaved new entries (and copies) of this collection: first, with the *Unsaved* badge.
-  const fresh = buffer.entries.filter((e) => e.collection === collection && e.isNew && !listed.has(e.path));
+  // A small list waits for every summary; a large one for its dates.
+  const list = entries.data && (lazy ? dated : entries.loaded >= entries.total) ? entries.data : undefined;
   const rows: CollectionRowData[] | undefined = list
     ? [
-        ...fresh.map((e): CollectionRowData => ({
-          key: e.path,
-          title: e.title,
-          statusText: fileStatusLabel('unsaved'),
-          badge: <StatusBadge draft={e.after?.data.draft === true} status="unsaved" showPublished />,
-          filters: [...(e.after?.data.draft === true ? ['drafts'] : []), 'changed'],
-          onOpen: () => navigate({ kind: 'entry', collection, slug: e.slug }),
-        })),
+        ...freshRows,
         ...sortRows(
-          list.map((e, i) => {
-            const updated = histories[i]?.data?.updated ?? null;
-            return {
-              ...e,
-              title: bufferedTitle.get(e.path) ?? e.title,
-              updated: updated && { date: updated.date, by: shortName(updated.actor) },
-            };
-          }),
+          list.map((e) => ({
+            ...e,
+            title: bufferedTitle.get(e.path) ?? e.title,
+            updated: changeOf(lastCommits.get(e.path)),
+          })),
           sort,
-        ),
-      ].map((row) => {
-        if (!('slug' in row)) return row;
-        const status = statuses.of(row.path);
-        const { unsaved, changed, review } = statuses.refs;
-        return {
-          key: row.path,
-          title: row.title,
-          statusText: status ? fileStatusLabel(status) : row.draft ? 'Draft' : 'Published',
-          badge: <StatusBadge draft={row.draft} status={status} showPublished />,
-          filters: [
-            ...(row.draft ? ['drafts'] : []),
-            ...(unsaved.has(row.path) || changed.has(row.path) ? ['changed'] : []),
-            ...(review.has(row.path) ? ['review'] : []),
-          ],
-          updated: row.updated ? <When date={row.updated.date} /> : undefined,
-          by: row.updated?.by,
-          onOpen: () => navigate({ kind: 'entry', collection, slug: row.slug }),
-        };
-      })
+          { bySlug: lazy },
+        ).map((row): CollectionRowData => {
+          const status = statuses.of(row.path);
+          return {
+            key: row.path,
+            title: row.title ?? row.slug,
+            loading: row.draft === null,
+            statusText: status ? fileStatusLabel(status) : row.draft ? 'Draft' : 'Published',
+            badge: <StatusBadge draft={row.draft === true} status={status} showPublished />,
+            filters: filtersOf(row.path, row.draft),
+            updated: row.updated ? <When date={row.updated.date} /> : undefined,
+            by: row.updated?.by,
+            onOpen: () => navigate({ kind: 'entry', collection, slug: row.slug }),
+          };
+        }),
+      ]
     : undefined;
+  // Under the threshold the *Drafts* count is there with the rows.
+  const noDrafts = lazy && (list?.some((e) => e.draft === null) ?? false);
 
   const home = parentRoute({ kind: 'collection', collection });
   return (
@@ -159,7 +207,8 @@ export function Collection({ collection, schema }: { collection: string; schema:
         </>
       }
       rows={entries.error ? [] : rows}
-      filters={collectionFilters(workspace !== null, !statuses.ready)}
+      progress={readsAll ? entries : undefined}
+      filters={collectionFilters(workspace !== null, !statuses.ready, noDrafts)}
       filter={filter}
       onFilter={(f) => {
         setFilter(f);

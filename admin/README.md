@@ -27,7 +27,9 @@ It has two modes with the same screens:
 1. The admin calls `GET /__editlet/files`. An answer means dev mode, and the admin uses the local content source.
    Otherwise it reads `config.json` next to itself (written by the adapter: repo, auth URL), signs the editor in, checks
    write access, and uses the GitHub source of the active branch.
-2. It reads the schema and the entry files through that source. In dev it polls the file list every 2 seconds.
+2. It reads the schema and the entry files through that source. Its lists keep a small
+   [summary](../../../docs/core/summary.md) of each entry, not the file, and a collection list of 200 or more entries
+   reads only the rows on screen. In dev it polls the file list every 2 seconds.
 3. The `?editlet` value picks the screen: home, a collection, one entry, the content model (`schema`), media (`media`), All content (`all-content`),
    or a branch review (`branch:<name>`, production).
 4. On an entry, the form shows the fields from the schema. **Save** validates, shows a diff, and commits the entry
@@ -40,16 +42,17 @@ It has two modes with the same screens:
 | Feature | Doc |
 |---|---|
 | Mode detection, local content source, `sha` conflict check, polling | [docs/admin/modes-and-source.md](../../../docs/admin/modes-and-source.md) |
+| Entry summaries: what lists read instead of full files, and where they are kept | [docs/core/summary.md](../../../docs/core/summary.md#in-the-admin) |
 | `?editlet` routes, navigation, protocol bridge, unsaved-changes guard | [docs/admin/routing-and-bridge.md](../../../docs/admin/routing-and-bridge.md) |
 | Accessibility checks at every screen key: axe, 44 px targets, focus ring, 320 px reflow; the exceptions list; the VoiceOver smoke tests (`npm run e2e:voiceover`, a Mac) | [docs/admin/accessibility.md](../../../docs/admin/accessibility.md) |
 | Home (your changes, All content, the account button), the All content list, the collapsed pill | [docs/admin/home.md](../../../docs/admin/home.md) |
 | Search (⌘K) over the entries' titles and addresses, with how many entries use each one, and actions (*New post*, *Duplicate this entry*, Go to, *Switch branch…*, Appearance), from Home's header or the keyboard | [docs/admin/search.md](../../../docs/admin/search.md) |
 | The account sheet: who, role, Appearance (System, Light, Dark), Reviewers, Sign out | [docs/admin/account.md](../../../docs/admin/account.md) |
-| Collection list: the plural heading (`pluralLabel`), filter chips (Drafts, Changed, In review), entries as rows (title, file status, when it changed), New post | [docs/admin/collection.md](../../../docs/admin/collection.md) |
+| Collection list: the plural heading (`pluralLabel`), filter chips (Drafts, Changed, In review), entries as rows (title, file status, when it changed), New post; from 200 entries only the rows on screen are read | [docs/admin/collection.md](../../../docs/admin/collection.md) |
 | Entry form: values, validation, new entry, Duplicate, Set as draft, delete, conflicts | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md) |
 | Page addresses from the collection's `url`: New entry's address, Details' *Page*, ⋯ → **Open on the page** | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#open-on-the-page) |
 | Field groups as tabs (`groups` in the schema), a dot on a changed or invalid tab | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#field-groups) |
-| References: search and pick in a modal, Open link, broken references, **Used by**, Rename, delete with the references removed | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#used-by) |
+| References: search and pick in a modal (20 options at a time; from 200 entries, titles load as you search), Open link, broken references, **Used by**, Rename, delete with the references removed | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#used-by) |
 | `object` and `blocks`: fields as rows one level down, drag or arrow keys to move, Add block, remove, nested errors and images | [docs/admin/entry-form.md](../../../docs/admin/entry-form.md#widgets) |
 | Image fields: upload staging, naming, limits, choose existing (`MediaPicker`) | [docs/admin/images.md](../../../docs/admin/images.md) |
 | Media at `?editlet=media`: usage index, upload, replace, alt text across uses and the missing alt queue, delete unused, SVG cleaning, large uploads | [docs/admin/media.md](../../../docs/admin/media.md) |

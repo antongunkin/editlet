@@ -1,10 +1,11 @@
 import type { MediaImage, MediaIndex, MediaUse } from './mediaIndex';
 import { sanitizeSvg } from './svg';
 
-import { applyImageEdits } from '../../../core/assets';
+import { applyImageEdits, findImageRefs, type ImageUse } from '../../../core/assets';
 import { decodeUtf8 } from '../../../core/entryFile';
 import { isImagePath } from '../../../core/paths';
 import type { Schema } from '../../../core/schema';
+import type { EntryFileData } from '../data/queries';
 import { relativeSrc, uniqueAssetPath } from '../entry/changes';
 import { serializeEntry } from '../entry/values';
 import type { SourceChange } from '../source/local';
@@ -81,40 +82,80 @@ export function batchBySize<T extends { content: Uint8Array }>(changes: T[], max
 /** A change to one use: a new alt and/or src. */
 export type UseEdit = { use: MediaUse; alt?: string; src?: string };
 
+/** What tells the uses of one entry apart without the body ranges; equal ones are told apart by their order. */
+const keyOf = (use: Pick<ImageUse, 'field' | 'at' | 'src' | 'alt'>) =>
+  JSON.stringify([use.field, use.at ?? null, use.src, use.alt]);
+
+/**
+ * The use of the full file (`found`, from `findImageRefs`) that the index's `use` stands for: it has the body ranges.
+ * `use` must be an object of `index`, which tells equal uses of one entry apart. `undefined` when the file no longer has
+ * it, so it is not the file the index listed.
+ */
+function exactUse(index: MediaIndex, found: ImageUse[], use: MediaUse): ImageUse | undefined {
+  const key = keyOf(use);
+  const same = (index.images.find((i) => i.path === use.path)?.uses ?? []).filter(
+    (u) => u.entryPath === use.entryPath && keyOf(u) === key,
+  );
+  return found.filter((u) => keyOf(u) === key)[same.indexOf(use)];
+}
+
 /**
  * The entry files rewritten for `edits`: image fields get the new `alt`/`src` in their data (at any depth), images in
- * the body or in a nested Markdown string are changed in place (`editBodyImages`, every other byte kept). One change
- * per entry, with the sha it was read at.
+ * the body or in a nested Markdown string are changed in place (`editBodyImages`, every other byte kept). `files` are
+ * those entries read in full (`readEntryFiles`). One change per entry, with the sha it was read at.
  */
-export function entryEdits(schema: Schema, index: MediaIndex, edits: UseEdit[]): SourceChange[] {
+export function entryEdits(
+  schema: Schema,
+  index: MediaIndex,
+  edits: UseEdit[],
+  files: ReadonlyMap<string, EntryFileData>,
+): SourceChange[] {
   const byEntry = new Map<string, UseEdit[]>();
   for (const edit of edits) byEntry.set(edit.use.entryPath, [...(byEntry.get(edit.use.entryPath) ?? []), edit]);
   const out: SourceChange[] = [];
   for (const [path, list] of byEntry) {
-    const entry = index.entries.get(path);
+    const entry = files.get(path);
     if (!entry) throw new Error(`${path} is not loaded`);
     const collection = schema.collections[list[0]!.use.collection]!;
-    const { data, body } = applyImageEdits(entry.file.data, entry.file.body, list);
+    const found = findImageRefs(schema, collection, path, entry.file.data, entry.file.body);
+    const exact = list.map((edit) => {
+      const use = exactUse(index, found, edit.use);
+      if (!use) throw new Error(`${path} changed since it was read; reload and review`);
+      return { ...edit, use };
+    });
+    const { data, body } = applyImageEdits(entry.file.data, entry.file.body, exact);
     out.push({ path, content: serializeEntry(collection, data, body, entry.keyOrder), sha: entry.sha });
   }
   return out;
 }
 
 /**
+ * The uses a replacement by `file` rewrites: none for the same extension (the file is overwritten). Throws when the index
+ * is incomplete, because a use could be missed.
+ */
+export function replacedUses(index: MediaIndex, image: MediaImage, file: { name: string }): MediaUse[] {
+  if (extOf(file.name) === extOf(image.path)) return [];
+  if (index.incomplete)
+    throw new Error('Not every entry could be read, so not every use can be pointed at the new file');
+  return image.uses;
+}
+
+/**
  * Replacing an image with another file: the same extension overwrites it (sha-checked, so every use sees the new
  * one); another extension adds a new file next to it, deletes the old one and points every use at the new path.
+ * `files` are the entries of `replacedUses`, read in full.
  */
 export function replaceChanges(
   schema: Schema,
   index: MediaIndex,
   image: MediaImage,
   file: { name: string; bytes: Uint8Array },
+  files: ReadonlyMap<string, EntryFileData>,
 ): { changes: SourceChange[]; path: string } {
   if (extOf(file.name) === extOf(image.path)) {
     return { changes: [{ path: image.path, content: file.bytes, sha: image.sha }], path: image.path };
   }
-  if (index.incomplete)
-    throw new Error('Not every entry could be read, so not every use can be pointed at the new file');
+  const uses = replacedUses(index, image, file);
   const base = image.name.slice(0, image.name.lastIndexOf('.'));
   const listed = new Set(index.images.map((i) => i.path));
   listed.delete(image.path);
@@ -122,7 +163,8 @@ export function replaceChanges(
   const rewrites = entryEdits(
     schema,
     index,
-    image.uses.map((use) => ({ use, src: relativeSrc(use.entryPath, path) })),
+    uses.map((use) => ({ use, src: relativeSrc(use.entryPath, path) })),
+    files,
   );
   return {
     changes: [

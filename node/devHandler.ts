@@ -9,27 +9,23 @@ import { z } from 'zod';
 
 import { DEFAULT_SCHEMA_PATH, listFiles, loadProjectSchema } from './fs';
 import { parsePorcelainZ, porcelainEntries } from './gitStatus';
+import { fileHistories, fileHistory } from './history';
 
 import {
   DEV_API_BASE,
   type DevErrorResponse,
   type DevFilesResponse,
   type DevGitResponse,
+  type DevHistoryResponse,
   type DevVersionsResponse,
+  MAX_HISTORY_PATHS,
 } from '../core/devApi';
 import { decodeUtf8 } from '../core/entryFile';
 import { EditletError, type Issue } from '../core/issues';
-import { isHiddenContentPath } from '../core/paths';
+import { isCanonicalPath, isHiddenContentPath } from '../core/paths';
 import { parseSchemaText, type Schema } from '../core/schema';
 import { gitBlobSha } from '../core/sha';
-import {
-  MAX_FILE_VERSIONS,
-  versionLimit,
-  type FileChange,
-  type FileEvent,
-  type FileHistory,
-  type FileVersion,
-} from '../core/source';
+import { MAX_FILE_VERSIONS, versionLimit, type FileChange, type FileHistory, type FileVersion } from '../core/source';
 import { isWritablePath, validateChanges, validateCommit, type ChangeContext } from '../core/writes';
 import { fromBase64 } from '../github/base64';
 
@@ -61,6 +57,8 @@ const commitBody = z.strictObject({
   ),
 });
 
+const historyBody = z.strictObject({ paths: z.array(z.string()).min(1).max(MAX_HISTORY_PATHS) });
+
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -88,7 +86,7 @@ function contentType(path: string): string {
 
 function json(
   status: number,
-  body: DevFilesResponse | DevGitResponse | FileHistory | DevVersionsResponse | DevErrorResponse,
+  body: DevFilesResponse | DevGitResponse | FileHistory | DevHistoryResponse | DevVersionsResponse | DevErrorResponse,
   headers: Record<string, string> = {},
 ) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
@@ -391,25 +389,22 @@ export function createDevHandler(opts: {
     return json(200, body);
   }
 
-  /** `git log` of one file: newest and oldest commit plus the count; empty when git is not usable. */
-  async function historyRoute(path: string): Promise<Response> {
-    let body: FileHistory = { updated: null, created: null, commits: 0 };
+  async function historiesRoute(req: Request): Promise<Response> {
+    let raw: unknown;
     try {
-      const out = (
-        await execFileAsync('git', ['-C', root, 'log', '--format=%an%x1f%aI%x1f%s', '--', path], { maxBuffer: 1 << 24 })
-      ).stdout;
-      const events = out
-        .split('\n')
-        .filter(Boolean)
-        .map((line): FileEvent => {
-          const [name = '', date = '', message = ''] = line.split('\x1f');
-          return { actor: { name }, date, message };
-        });
-      body = { updated: events[0] ?? null, created: events.at(-1) ?? null, commits: events.length };
+      raw = await req.json();
     } catch {
-      // not a git checkout, or no git binary
+      return fail(400, 'Body must be JSON');
     }
-    return json(200, body);
+    const body = historyBody.safeParse(raw);
+    if (!body.success) {
+      return json(400, { issues: body.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
+    }
+    const bad = body.data.paths.filter((path) => !isCanonicalPath(path) || CONTROL.test(path));
+    if (bad.length > 0) {
+      return json(400, { issues: bad.map((file) => ({ file, path: '', message: 'Path not readable' })) });
+    }
+    return json(200, { histories: Object.fromEntries(await fileHistories(root, body.data.paths)) });
   }
 
   /** Runs git in `root` (pathspecs literal: a `*` in a file name is not a glob). */
@@ -520,11 +515,12 @@ export function createDevHandler(opts: {
     }
 
     if (url.pathname === HISTORY_ROUTE) {
-      if (req.method !== 'GET') return fail(405, 'Method not allowed', { Allow: 'GET' });
+      if (req.method === 'POST') return historiesRoute(req);
+      if (req.method !== 'GET') return fail(405, 'Method not allowed', { Allow: 'GET, POST' });
       const path = url.searchParams.get('path');
       if (path === null || path === '') return fail(400, 'Missing "path" query parameter');
       if (path.startsWith('/') || path.split('/').includes('..')) return fail(400, 'Path not readable');
-      return historyRoute(path);
+      return json(200, await fileHistory(root, path));
     }
 
     if (url.pathname === VERSIONS_ROUTE || url.pathname === VERSION_ROUTE) {

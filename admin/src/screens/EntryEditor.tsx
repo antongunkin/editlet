@@ -19,14 +19,15 @@ import type { FieldItem } from './FieldRows';
 import { serializeEntryFile } from '../../../core/entryFile';
 import type { Issue } from '../../../core/issues';
 import { isHiddenContentPath, isImagePath, parseEntryPath, resolveAssetPath } from '../../../core/paths';
-import { referenceFields } from '../../../core/references';
+import { entryReferences, referenceFields } from '../../../core/references';
 import { markdownFieldKey, type Collection, type Field } from '../../../core/schema';
 import { validateEntry } from '../../../core/validate';
 import { GitHubError } from '../../../github';
 import { onChanges, TAB_ID, useChangesStore } from '../changes/store';
 import { useBuffer, useChangesTray, useOpenChanges } from '../changes/trayContext';
+import { useFormOptions } from '../data/formOptions';
 import { ImagePlaceholder, PreviewImage } from '../data/PreviewImage';
-import { invalidateFiles, IssuesError, useCommit, useEntryOptions, useFiles } from '../data/queries';
+import { invalidateFiles, IssuesError, useCommit, useEntryTitles, useFiles } from '../data/queries';
 import { AssetPreview, canOpenInWindow, mimeType } from '../data/useAssetUrl';
 import { CompareSheet } from '../diff/CompareSheet';
 import {
@@ -234,7 +235,14 @@ export function useEntryEditor({
   useEffect(() => () => setFormPreview(ref, null), [ref, setFormPreview]);
 
   const listed = useMemo(() => new Set((files.data ?? []).map((f) => f.path)), [files.data]);
-  const entryOptions = useEntryOptions(useMemo(() => referenceTargets(def), [def]));
+  // Reference options are read when a picker asks for them; before that, only the entries the values name.
+  const targets = useMemo(() => referenceTargets(def), [def]);
+  const chosenTitles = useEntryTitles(
+    entryReferences(def, current.data)
+      .map((r) => r.ref)
+      .filter((r) => targets.includes(r.slice(0, r.indexOf('/')))),
+  );
+  const { options: entryOptions, picker } = useFormOptions(targets, chosenTitles);
 
   const ctx = useMemo<FieldContext>(() => {
     const assets = `${schema.contentDir}/`;
@@ -245,8 +253,7 @@ export function useEntryEditor({
       ]),
     ].toSorted();
     return {
-      entries: (cs) => entryOptions.filter((o) => cs.includes(o.ref.slice(0, o.ref.indexOf('/')))),
-      entriesPending: files.data === undefined,
+      ...picker,
       images,
       contentDir: schema.contentDir,
       entryPath: path,
@@ -277,20 +284,7 @@ export function useEntryEditor({
           }
         : undefined,
     };
-  }, [
-    schema,
-    listed,
-    staged,
-    entryOptions,
-    files.data,
-    path,
-    collection,
-    slug,
-    selectTargets,
-    prefix,
-    entrySheet,
-    ref,
-  ]);
+  }, [schema, listed, staged, picker, path, collection, slug, selectTargets, prefix, entrySheet, ref]);
   const mdKey = markdownFieldKey(def);
   // After a rebase the form may hold a body the newer file has not (kept from yours): its row shows too.
   const showBody = Object.hasOwn(start?.values ?? initialValues, BODY_KEY);
@@ -595,8 +589,12 @@ export function useEntryEditor({
     ...(mdKey !== undefined ? [item(mdKey, def.fields[mdKey]!, BODY_KEY)] : []),
     ...(mdKey === undefined && showBody ? [item(BODY_KEY, BODY_FIELD, BODY_KEY)] : []),
   ];
-  const titles = useMemo(() => new Map(entryOptions.map((o) => [o.ref, o.title])), [entryOptions]);
-  const titleOf = (r: string) => titles.get(r) ?? (files.data === undefined ? r : `Not found: ${r}`);
+  const titles = useMemo(
+    () => new Map(entryOptions.flatMap((o) => (o.title === null ? [] : [[o.ref, o.title] as const]))),
+    [entryOptions],
+  );
+  const titleOf = (r: string) =>
+    chosenTitles.get(r) ?? titles.get(r) ?? (files.data === undefined ? r : `Not found: ${r}`);
   const titleValue = def.titleField ? values[def.titleField] : itemTitle(def.fields, values);
   const entryTitle = typeof titleValue === 'string' && titleValue.trim() !== '' ? titleValue.trim() : slug;
   const invalidItems = items.filter((i) => (i.error?.length ?? 0) > 0);

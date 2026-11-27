@@ -8,6 +8,7 @@ import { Sheet, SheetProvider } from '../ui/parts/sheet';
 
 const ctx = (over: Partial<FieldContext> = {}): FieldContext => ({
   entries: () => [],
+  wantEntries: () => {},
   images: ['cms/content/post/hello-world/cover.webp', 'cms/content/shared/logo.png'],
   entryPath: 'cms/content/post/hello-world.md',
   stageUpload: vi.fn(async (file: File) => `hello-world/${file.name}`),

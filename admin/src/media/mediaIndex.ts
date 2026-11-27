@@ -1,15 +1,20 @@
-import { useQueries, type QueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
-import { findImageRefs, type ImageUse } from '../../../core/assets';
 import { isHiddenContentPath, isImagePath, parseEntryPath } from '../../../core/paths';
 import type { Schema } from '../../../core/schema';
 import type { ContentSource, FileRef } from '../../../core/source';
+import { resolveSummaryImages, type EntrySummary, type SummaryImageUse } from '../../../core/summary';
+import type { GitHubCache } from '../../../github';
 import { entryFileQuery, useFiles, type EntryFileData } from '../data/queries';
-import { filesKey, useSource } from '../source/context';
+import { fingerprintsQuery, summariesQuery, useSummaries } from '../data/summaries';
+import { filesKey } from '../source/context';
 
-/** One place an entry uses an image, with the entry it is in. */
-export type MediaUse = ImageUse & { entryPath: string; collection: string; slug: string; title: string };
+/**
+ * One place an entry uses an image, with the entry it is in. It comes from the entry's summary, so it has no body
+ * ranges: a rewrite finds them in the full file (`entryEdits`).
+ */
+export type MediaUse = SummaryImageUse & { entryPath: string; collection: string; slug: string; title: string };
 
 export type MediaImage = {
   path: string;
@@ -26,8 +31,8 @@ export type MediaIndex = {
   images: MediaImage[];
   /** Folders that hold images, sorted. */
   folders: string[];
-  /** Entry files by path, as read (for rewriting alt and src). */
-  entries: Map<string, EntryFileData>;
+  /** The listed sha of every entry in the index, by path: what a rewrite reads and commits against. */
+  shas: ReadonlyMap<string, string>;
   /** Some entries are not read yet (or failed to read): uses may be missing, so nothing counts as unused. */
   incomplete: boolean;
 };
@@ -51,13 +56,14 @@ export function allEntryRefs(schema: Schema, files: FileRef[]): (FileRef & { col
 }
 
 /**
- * The usage index: every listed image under contentDir with the entries that use it (image fields and body images,
- * `findImageRefs`). `read` gives the entry files read so far; entries missing from it make the index `incomplete`.
+ * The usage index: every listed image under contentDir with the entries that use it (image fields and body images, from
+ * their summaries). `summaries` gives the entries summarized so far, by path; an entry missing from it makes the index
+ * `incomplete`.
  */
 export function buildMediaIndex(
   schema: Schema,
   files: FileRef[],
-  read: ReadonlyMap<string, EntryFileData | undefined>,
+  summaries: ReadonlyMap<string, EntrySummary | undefined>,
 ): MediaIndex {
   const prefix = `${schema.contentDir}/`;
   const images = files
@@ -71,25 +77,23 @@ export function buildMediaIndex(
     }))
     .toSorted((a, b) => a.path.localeCompare(b.path));
   const byPath = new Map(images.map((i) => [i.path, i]));
-  const entries = new Map<string, EntryFileData>();
+  const shas = new Map<string, string>();
   let incomplete = false;
   for (const ref of allEntryRefs(schema, files)) {
-    const entry = read.get(ref.path);
-    if (!entry) {
+    const summary = summaries.get(ref.path);
+    if (!summary) {
       incomplete = true;
       continue;
     }
-    entries.set(ref.path, entry);
-    const collection = schema.collections[ref.collection]!;
-    const titleRaw = collection.titleField === undefined ? undefined : entry.file.data[collection.titleField];
-    const title = typeof titleRaw === 'string' && titleRaw.trim() !== '' ? titleRaw : ref.slug;
-    for (const use of findImageRefs(schema, collection, ref.path, entry.file.data, entry.file.body)) {
+    shas.set(ref.path, ref.sha);
+    const title = summary.title ?? ref.slug;
+    for (const use of resolveSummaryImages(schema, ref.path, summary)) {
       const image = use.path === null ? undefined : byPath.get(use.path);
       image?.uses.push({ ...use, entryPath: ref.path, collection: ref.collection, slug: ref.slug, title });
     }
   }
   const folders = [...new Set(images.map((i) => i.folder))].toSorted();
-  return { images, folders, entries, incomplete };
+  return { images, folders, shas, incomplete };
 }
 
 export const isUsed = (image: MediaImage) => image.uses.length > 0;
@@ -127,33 +131,62 @@ export function filterCounts(images: MediaImage[]): Record<MediaFilter, number> 
   };
 }
 
-const dataOf = (rs: { data: EntryFileData | undefined }[]) => rs.map((r) => r.data);
-
-/** The usage index over the listed files, reading every entry through the shared entry-file cache (by sha). */
+/** The usage index over the listed files, from the summary of every entry (`data/summaries.ts`). */
 export function useMediaIndex(schema: Schema): MediaIndex | undefined {
-  const source = useSource();
   const files = useFiles();
   const refs = useMemo(() => (files.data ? allEntryRefs(schema, files.data) : []), [schema, files.data]);
-  const results = useQueries({
-    queries: refs.map((ref) => entryFileQuery(source, ref)),
-    combine: dataOf,
-  });
+  const { rows } = useSummaries(refs);
   const listed = files.data;
   return useMemo(() => {
     if (!listed) return undefined;
-    const read = new Map(refs.map((ref, i) => [ref.path, results[i]]));
-    return buildMediaIndex(schema, listed, read);
-  }, [schema, listed, refs, results]);
+    return buildMediaIndex(schema, listed, new Map(refs.map((ref, i) => [ref.path, rows[i]])));
+  }, [schema, listed, refs, rows]);
 }
 
-/** A fresh index (file list and entries read now), for the check right before a delete. */
-export async function loadMediaIndex(client: QueryClient, source: ContentSource, schema: Schema): Promise<MediaIndex> {
+/**
+ * A fresh index (the file list read now, and a summary of every entry in it), for the check right before a delete or an
+ * alt text: an unchanged entry costs no read. `cache` keeps the summaries (GitHub mode; `null` in dev mode).
+ */
+export async function loadMediaIndex(
+  client: QueryClient,
+  source: ContentSource,
+  schema: Schema,
+  cache: GitHubCache | null,
+): Promise<MediaIndex> {
   const files = await client.fetchQuery({
     queryKey: filesKey(source),
     queryFn: () => source.listFiles(),
     staleTime: 0,
   });
   const refs = allEntryRefs(schema, files);
-  const read = await Promise.all(refs.map((ref) => client.fetchQuery(entryFileQuery(source, ref))));
-  return buildMediaIndex(schema, files, new Map(refs.map((ref, i) => [ref.path, read[i]])));
+  const fingerprints = await client.fetchQuery(fingerprintsQuery(schema));
+  // One batch for all of them, so the kept summaries and the file reads go out in batches.
+  const batch = await client.fetchQuery(summariesQuery(source, cache, client, refs, schema, fingerprints));
+  const [error] = batch.errors.values();
+  if (error) throw error;
+  const summaries = refs.map(
+    (ref) => [ref.path, batch.rows.get(`${ref.sha}:${fingerprints.get(ref.collection)!}`)] as const,
+  );
+  return buildMediaIndex(schema, files, new Map(summaries));
+}
+
+/** The listed files of the entries `uses` are in, once each: what a rewrite of those uses reads. */
+export function entriesOf(index: MediaIndex, uses: MediaUse[]): FileRef[] {
+  return [...new Set(uses.map((u) => u.entryPath))].map((path) => ({ path, sha: index.shas.get(path)! }));
+}
+
+/**
+ * The full files of `refs`, by path, read right before a rewrite at the shas the index listed. A file that moved since
+ * then keeps its listed sha here, so the commit's sha check refuses it.
+ */
+export async function readEntryFiles(
+  client: QueryClient,
+  source: ContentSource,
+  refs: FileRef[],
+): Promise<Map<string, EntryFileData>> {
+  return new Map(
+    await Promise.all(
+      refs.map(async (ref) => [ref.path, await client.fetchQuery(entryFileQuery(source, ref))] as const),
+    ),
+  );
 }

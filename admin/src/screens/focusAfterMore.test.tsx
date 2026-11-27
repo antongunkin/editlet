@@ -72,7 +72,7 @@ const CASES: Case[] = [
       const history = await sheet('History');
       const list = await history.findByRole('list', { name: 'Versions' });
       fireEvent.click(within(list).getByRole('button', { name: /Create post/ }));
-      const version = await sheetElement(/ago|Nov 1, 2026/);
+      const version = await sheetElement(/ago|Nov 19/);
       await within(version).findByRole('region', { name: 'Title' });
       fireEvent.click(within(version).getByRole('button', { name: 'Restore this version' }));
       await gone('dialog', 'History');
@@ -87,9 +87,9 @@ const CASES: Case[] = [
       const list = await history.findByRole('list', { name: 'Versions' });
       const row = within(list).getByRole('button', { name: /Create post/ });
       fireEvent.click(row);
-      const version = await sheetElement(/ago|Nov 1, 2026/);
+      const version = await sheetElement(/ago|Nov 19/);
       fireEvent.keyDown(version, { key: 'Escape' });
-      await waitFor(() => expect(screen.queryByRole('dialog', { name: /ago|Nov 1, 2026/ })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /ago|Nov 19/ })).toBeNull());
       expect(screen.getByRole('dialog', { name: 'History' })).toBeDefined();
       return row;
     },

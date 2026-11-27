@@ -16,6 +16,7 @@ function makeCtx(over: Partial<FieldContext> = {}): FieldContext {
             { ref: 'second', title: 'Second post' },
           ]
         : [{ ref: 'jane', title: 'Jane' }],
+    wantEntries: () => {},
     images: ['cms/content/post/hello-world/cover.webp', 'cms/content/shared/logo.png'],
     entryPath: 'cms/content/post/hello-world.md',
     stageUpload: vi.fn(async (file: File) => `hello-world/${file.name.toLowerCase()}`),

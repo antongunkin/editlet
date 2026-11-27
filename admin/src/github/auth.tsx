@@ -40,8 +40,16 @@ export interface Auth {
    * sign-out notice says the token was not accepted (instead of "expired").
    */
   signInWithToken(token: string): void;
-  /** Clears the stored session, the in-memory refresh token and the query cache. */
+  /** Clears the stored session, the in-memory refresh token, the query cache and the cached content (`onForget`). */
   signOut(notice?: string): void;
+  /**
+   * Calls `listener` when this session's content must leave this computer: on a sign-out (`signOut`) and on an account
+   * switch (`forgetContent`). Not on a lapsed session. Returns the function that removes it. Unsaved edits are not the
+   * listeners' business: they stay.
+   */
+  onForget(listener: () => void): () => void;
+  /** Calls the `onForget` listeners now: the sign-in that replaces the account (a different login, or none to tell). */
+  forgetContent(): void;
   /**
    * The access token, refreshed first when it is about to expire. A refused refresh signs out; a refresh that could
    * not reach the auth handler keeps the session and rejects with `GitHubError('network_error')`. Without a refresh
@@ -147,6 +155,8 @@ export function AuthProvider({
   const renewing = useRef<Promise<StoredSession> | null>(null);
   /** A pasted token that GitHub has not accepted yet (no non-`401` answer with it in this tab). */
   const unverifiedToken = useRef(false);
+  /** The `onForget` listeners (the workspace's cache). */
+  const forgetters = useRef(new Set<() => void>());
 
   useEffect(() => {
     // The P8 first cut kept the session, refresh token included, in `localStorage`.
@@ -189,6 +199,20 @@ export function AuthProvider({
     [persist],
   );
 
+  const onForget = useCallback((listener: () => void): (() => void) => {
+    forgetters.current.add(listener);
+    return () => void forgetters.current.delete(listener);
+  }, []);
+  const forgetContent = useCallback(() => {
+    for (const listener of forgetters.current) {
+      try {
+        listener();
+      } catch {
+        // Best effort: a listener that fails does not block the sign-out.
+      }
+    }
+  }, []);
+
   /** Drops the session. `lapsed`: it ended by itself, so the query cache (and the open screen) stays. */
   const drop = useCallback(
     (notice: string | null, lapsed: boolean) => {
@@ -202,10 +226,12 @@ export function AuthProvider({
       renewing.current = null;
       unverifiedToken.current = false;
       setState({ session: null, notice, lapsed });
-      // Nothing read with the old session may show to the next one.
-      if (!lapsed) queryClient.clear();
+      if (lapsed) return;
+      // Nothing read with the old session may show to the next one, and nothing it cached stays on this computer.
+      queryClient.clear();
+      forgetContent();
     },
-    [store, queryClient],
+    [store, queryClient, forgetContent],
   );
   const signOut = useCallback((notice?: string) => drop(notice ?? null, false), [drop]);
   const lapse = useCallback((notice: string) => drop(notice, true), [drop]);
@@ -357,10 +383,12 @@ export function AuthProvider({
       signIn,
       signInWithToken,
       signOut,
+      onForget,
+      forgetContent,
       getToken,
       fetch: fetchWithAuth,
     }),
-    [state, signIn, signInWithToken, signOut, getToken, fetchWithAuth],
+    [state, signIn, signInWithToken, signOut, onForget, forgetContent, getToken, fetchWithAuth],
   );
 
   return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>;
@@ -370,4 +398,16 @@ export function useAuth(): Auth {
   const auth = useContext(AuthContext);
   if (!auth) throw new Error('useAuth must be used inside <AuthProvider>');
   return auth;
+}
+
+/**
+ * Runs `listener` while the component is mounted, whenever the session's content is forgotten (`Auth.onForget`).
+ * Does nothing outside an `AuthProvider` (the workspace also renders on its own, in tests).
+ */
+export function useOnForget(listener: () => void): void {
+  const onForget = useContext(AuthContext)?.onForget;
+  useEffect(() => {
+    if (!onForget) return;
+    return onForget(listener);
+  }, [onForget, listener]);
 }

@@ -26,6 +26,7 @@ import { filesSubject } from '../../../core/gitStyle';
 import type { Schema } from '../../../core/schema';
 import type { SchemaData } from '../data/queries';
 import { AssetPreview } from '../data/useAssetUrl';
+import { useWorkspace } from '../github/workspace';
 import { RouteLink } from '../RouteLink';
 import { useSource } from '../source/context';
 import { buttonVariants, cn, Icon, IconButton } from '../ui';
@@ -130,6 +131,7 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
   const chrome = useScreenChrome();
   const index = useMediaIndex(schema);
   const source = useSource();
+  const cache = useWorkspace()?.source.cache ?? null;
   const client = useQueryClient();
   const commit = useMediaCommit();
   const [notice, setNotice] = useState<string | null>(null);
@@ -169,7 +171,7 @@ export function MediaScreen({ schema: data }: { schema: SchemaData }) {
       finalFocus,
       message: paths.length === 1 ? `Delete ${paths[0]!.split('/').pop()}` : `Delete ${paths.length} images`,
       subject: filesSubject(schema, 'delete', paths),
-      build: async () => [deleteChanges(await loadMediaIndex(client, source, schema), paths)],
+      build: async () => [deleteChanges(await loadMediaIndex(client, source, schema, cache), paths)],
       confirm: {
         title: `Delete ${count(paths.length, 'image', 'images')}?`,
         description:

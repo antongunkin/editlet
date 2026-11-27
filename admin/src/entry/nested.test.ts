@@ -8,6 +8,7 @@ import { entryToForm, formToEntry, ITEM_KEY, newItem, serializeEntry } from './v
 
 import { parseEntryFile } from '../../../core/entryFile';
 import { parseSchemaText } from '../../../core/schema';
+import { summarizeEntry } from '../../../core/summary';
 import { entryEdits } from '../media/edits';
 import { buildMediaIndex } from '../media/mediaIndex';
 
@@ -76,7 +77,7 @@ describe('media edits inside object and blocks', () => {
     { path: 'cms/content/page/landing/chart.webp', sha: 'c' },
   ];
   const read = new Map([[PATH, { file, sha: 'a', keyOrder: Object.keys(file.data) }]]);
-  const index = buildMediaIndex(schema, files, read);
+  const index = buildMediaIndex(schema, files, new Map([[PATH, summarizeEntry(schema, 'page', file)]]));
 
   it('lists nested uses with their labels', () => {
     const hero = index.images.find((i) => i.name === 'hero.webp')!;
@@ -86,10 +87,15 @@ describe('media edits inside object and blocks', () => {
   it('changes alt and src in a nested image field and in a nested Markdown string, nothing else', () => {
     const hero = index.images.find((i) => i.name === 'hero.webp')!.uses[0]!;
     const chart = index.images.find((i) => i.name === 'chart.webp')!.uses[0]!;
-    const [change] = entryEdits(schema, index, [
-      { use: hero, alt: 'A crowd' },
-      { use: chart, src: 'landing/chart-2.webp', alt: 'Chart' },
-    ]);
+    const [change] = entryEdits(
+      schema,
+      index,
+      [
+        { use: hero, alt: 'A crowd' },
+        { use: chart, src: 'landing/chart-2.webp', alt: 'Chart' },
+      ],
+      read,
+    );
     const after = change!.content as string;
     expect(after).toBe(
       text

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sortRows, type Sortable } from './collectionSort';
+import { needsAll, SORTS, sortRows, type Sortable } from './collectionSort';
 
 const row = (slug: string, title: string, draft: boolean, updated: Sortable['updated']): Sortable => ({
   slug,
@@ -33,5 +33,52 @@ describe('sortRows', () => {
 
   it('by status: drafts first, then by title', () => {
     expect(slugs('status')).toEqual(['b', 'a', 'c', 'd']);
+  });
+});
+
+describe('sortRows with rows whose summary is not read', () => {
+  const at = (day: number) => ({ date: `2026-11-0${day}T00:00:00Z`, by: 'Mo H' });
+  const unread = (slug: string, updated: Sortable['updated']): Sortable => ({
+    slug,
+    title: null,
+    draft: null,
+    updated,
+  });
+  const mixed = [
+    unread('u-old', at(1)),
+    row('b', 'Saddle', false, at(2)),
+    unread('u-new', at(3)),
+    row('a', 'Zip', true, null),
+  ];
+  const order = (key: Parameters<typeof sortRows>[1]) => sortRows(mixed, key).map((r) => r.slug);
+
+  it('a title or status order puts them last, newest first', () => {
+    expect(order('title-asc')).toEqual(['b', 'a', 'u-new', 'u-old']);
+    expect(order('title-desc')).toEqual(['a', 'b', 'u-new', 'u-old']);
+    expect(order('status')).toEqual(['a', 'b', 'u-new', 'u-old']);
+  });
+
+  it('a date order does not need them', () => {
+    expect(order('newest')).toEqual(['u-new', 'b', 'u-old', 'a']);
+  });
+
+  it('bySlug: ties of a date or author order go by address, so a title changes nothing', () => {
+    const tied = (titles: boolean) =>
+      ['c', 'a', 'b'].map((slug, i) => ({ slug, title: titles ? `T${i}` : null, draft: null, updated: at(1) }));
+    for (const key of ['newest', 'oldest', 'author'] as const) {
+      for (const titles of [false, true]) {
+        expect(sortRows(tied(titles), key, { bySlug: true }).map((r) => r.slug)).toEqual(['a', 'b', 'c']);
+      }
+      expect(sortRows(tied(true), key).map((r) => r.slug)).toEqual(['c', 'a', 'b']);
+    }
+    expect(sortRows(tied(true), 'title-asc', { bySlug: true }).map((r) => r.slug)).toEqual(['c', 'a', 'b']);
+  });
+});
+
+describe('needsAll', () => {
+  it('is true for the title and status orders and the Drafts chip', () => {
+    const orders = SORTS.map((s) => s.key);
+    expect(orders.filter((key) => needsAll(key, 'all'))).toEqual(['title-asc', 'title-desc', 'status']);
+    expect(['all', 'changed', 'review', 'drafts'].filter((chip) => needsAll('newest', chip))).toEqual(['drafts']);
   });
 });

@@ -115,7 +115,7 @@ function SignedIn({
 }) {
   const auth = useAuth();
   const queryClient = useQueryClient();
-  const { getToken, fetch: authFetch, signOut, session } = auth;
+  const { getToken, fetch: authFetch, signOut, session, forgetContent } = auth;
   const client = useMemo(() => createGitHubClient({ token: getToken, fetch: authFetch }), [getToken, authFetch]);
   const access = useQuery({
     queryKey: ACCESS_KEY,
@@ -155,6 +155,8 @@ function SignedIn({
       (result) => {
         if (cancelled) return;
         if (result.status !== 'ok' || result.user.login !== loginRef.current) {
+          // Another account (or none to tell): nothing it or the old one cached stays on this computer.
+          forgetContent();
           queryClient.clear();
           onReplace();
           return;
@@ -168,6 +170,7 @@ function SignedIn({
         if (cancelled) return;
         // GitHub refused the new token: the session lapsed again and the dialog asks once more.
         if (error instanceof AuthError && error.code === 'unauthorized') return;
+        forgetContent();
         queryClient.clear();
         onReplace();
       },
@@ -175,7 +178,7 @@ function SignedIn({
     return () => {
       cancelled = true;
     };
-  }, [recheck, session, client, github, queryClient, onReplace]);
+  }, [recheck, session, client, github, queryClient, onReplace, forgetContent]);
 
   const signOutButton = (size: 'md' | 'lg' = 'md') => (
     <Button size={size} full icon={<Icon name="logout" />} onClick={() => signOut()}>

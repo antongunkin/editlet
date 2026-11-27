@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-import { moveAmongRadios, radioTab } from './FieldRows';
+import { moveAmongRadios, PAGE_SIZE, radioTab } from './listControls';
 
 import { BottomBar } from '../ui/parts/bottom-bar';
 import { Card } from '../ui/parts/card';
@@ -34,11 +34,13 @@ export interface CollectionRowData {
   updated?: ReactNode;
   /** Who changed it last (*Dana K*). */
   by?: string;
+  /** Its summary is not read yet: `title` is the slug, and a loading bar stands where its status goes. */
+  loading?: boolean;
   onOpen(): void;
 }
 
-/** Rows shown at a time; the last row of the card shows the next ones. */
-export const PAGE_SIZE = 20;
+// Rows shown at a time; the last row of the card shows the next ones. Passed on for the list's container and /design.
+export { PAGE_SIZE };
 
 /** One order of *Sort*. */
 export interface CollectionSortData {
@@ -67,6 +69,8 @@ export interface CollectionViewProps {
   banners?: ReactNode;
   /** The entries; `undefined` while they load (placeholder rows, the CTA already works). */
   rows?: CollectionRowData[];
+  /** An order or chip that needs every entry's title is reading them: the line under the chips counts them. */
+  progress?: { loaded: number; total: number };
   /** The chips after *All*: *Drafts*, *Changed*, *In review* (each counts the rows whose `filters` name it). */
   filters: CollectionFilterData[];
   /** Which chip is on. */
@@ -145,14 +149,25 @@ function Trail({ row }: { row: CollectionRowData }) {
   );
 }
 
+/** `Row`'s loading bar, for a row that already has a title (its slug) and opens. Exported for /design. */
+export const LoadingBar = () => (
+  <span className="flex h-5 items-center">
+    <span className="sr-only">Loading…</span>
+    <span aria-hidden="true" className="h-2 w-28 rounded-full bg-muted" />
+  </span>
+);
+
 function Entry({ row, wide }: { row: CollectionRowData; wide?: boolean }) {
   return (
     <li>
       <Row
         title={row.title}
+        aria-busy={row.loading || undefined}
         // A phone: the line under the title says the status, when and who (*Published · 5d ago · Dana K*).
         sub={
-          wide ? undefined : (
+          wide ? undefined : row.loading ? (
+            <LoadingBar />
+          ) : (
             <>
               {row.statusText}
               {row.updated ? (
@@ -164,7 +179,7 @@ function Entry({ row, wide }: { row: CollectionRowData; wide?: boolean }) {
             </>
           )
         }
-        trail={wide ? <Trail row={row} /> : undefined}
+        trail={wide ? row.loading ? <LoadingBar /> : <Trail row={row} /> : undefined}
         size={wide ? 56 : 72}
         onClick={row.onOpen}
       />
@@ -190,6 +205,7 @@ export function CollectionView({
   actions,
   banners,
   rows,
+  progress,
   filters,
   filter,
   onFilter,
@@ -215,6 +231,7 @@ export function CollectionView({
   const on = filters.find((f) => f.key === filter);
   // A chip whose rows are not known yet shows placeholder rows, never its empty text.
   const busy = loading || on?.pending === true;
+  const reading = progress !== undefined && progress.loaded < progress.total;
   const matching = on ? (rows ?? []).filter((r) => r.filters?.includes(on.key)) : (rows ?? []);
   const shown = matching.slice(0, limit);
   const rest = matching.length - shown.length;
@@ -250,6 +267,11 @@ export function CollectionView({
       />
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {banners ? <div className="flex flex-col gap-2 px-4 pb-3 empty:hidden">{banners}</div> : null}
+        {/* What a screen reader hears when an order or chip starts reading titles: once, not at every count. */}
+        {/* No role: the list's one `status` is an empty chip's text. */}
+        <p aria-live="polite" className="sr-only">
+          {reading ? 'Loading titles…' : ''}
+        </p>
         {rows !== undefined && rows.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-4 pt-16 pb-4 text-center">
             <IconTile name="file" size={56} />
@@ -264,6 +286,12 @@ export function CollectionView({
               all={loading ? '…' : rows.length}
               filters={loading ? [] : chips}
             />
+            {reading ? (
+              // Search's line (SearchView.tsx), 20 px in like the text there.
+              <p className="m-0 px-5 pb-2 text-sm text-tray-muted-foreground">
+                Loading titles: {progress.loaded.toLocaleString('en')} of {progress.total.toLocaleString('en')}.
+              </p>
+            ) : null}
             {/* pb-8: the card's shadow reaches 28 px below it; never cut it (ui4.content). */}
             <div ref={list} className="px-4 pb-8">
               {!busy && shown.length === 0 ? (

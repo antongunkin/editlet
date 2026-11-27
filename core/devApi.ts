@@ -1,7 +1,10 @@
 import type { Issue } from './issues';
-import type { FileRef, FileVersion } from './source';
+import type { FileHistory, FileRef, FileVersion } from './source';
 
 export const DEV_API_BASE = '/__editlet';
+
+/** The most paths one `POST /__editlet/history` takes. */
+export const MAX_HISTORY_PATHS = 500;
 
 // GET    /__editlet/files                 → 200 { files: FileRef[] }   (contentDir tree + the schema file; sha = git blob sha1 of content)
 // GET    /__editlet/file?path=<repo path> → 200 raw bytes, Content-Type from extension
@@ -11,6 +14,8 @@ export const DEV_API_BASE = '/__editlet';
 // GET    /__editlet/git                   → 200 DevGitResponse   (read-only: the checkout's branch, its uncommitted content
 //                                            files (count and list) and the project id; no paths outside contentDir)
 // GET    /__editlet/history?path=<path>   → 200 FileHistory      (read-only: `git log` of one file; empty without git)
+// POST   /__editlet/history               → 200 DevHistoryResponse | 400   body = DevHistoryRequest (JSON); read-only:
+//                                            the same FileHistory as GET for each of 1..MAX_HISTORY_PATHS paths
 // GET    /__editlet/versions?path=<path>[&limit=<n>] → 200 DevVersionsResponse (read-only: `git log` of one file,
 //                                            newest first, with the file's blob sha per commit; [] without git)
 // GET    /__editlet/version?path=<path>&commit=<id>  → 200 raw bytes | 404   (read-only: the file as that commit left it)
@@ -29,6 +34,8 @@ export const DEV_API_BASE = '/__editlet';
 // - Only reachable in dev, on localhost / 127.0.0.1 / [::1] / *.localhost (plus configured hosts), same-origin.
 //   Adapters must build `req.url` from the real Host header (the host check reads it from the URL). The admin must
 //   not run in a sandboxed (opaque-origin) iframe: browsers then send `Origin: null`, which gets 403.
+// - POST /history takes canonical repo paths without control characters (else 400, for the whole batch); a path
+//   asked twice is answered once.
 // - /versions and /version take entry and image paths under contentDir and the schema path (else 400), a `limit` of
 //   1..100 (default 30) and a full commit id (40 or 64 hex digits; else 400). /version answers 404 when the file is not in that
 //   commit, the commit is unknown or there is no git. While the schema is broken, both answer 500 with its issues
@@ -60,6 +67,16 @@ export interface DevGitResponse {
    * Clients read a missing one (an older dev server) as `'default'`.
    */
   project: string;
+}
+
+export interface DevHistoryRequest {
+  /** Repo paths, 1 to `MAX_HISTORY_PATHS`. */
+  paths: string[];
+}
+
+export interface DevHistoryResponse {
+  /** One history per requested path. */
+  histories: Record<string, FileHistory>;
 }
 
 export interface DevVersionsResponse {

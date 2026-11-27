@@ -4,9 +4,31 @@ import type { Field } from '../../../core/schema';
 import type { SelectTarget } from '../select/useApplySelect';
 
 export interface FieldContext {
-  /** Entries of the given collections, for reference pickers. */
-  entries(collections: string[]): { ref: string; title: string }[];
-  /** True while the entry list is not loaded yet: reference widgets do not call unlisted values missing then. */
+  /**
+   * Entries of the given collections, for reference pickers: all of a wanted collection (`wantEntries`), else only the
+   * ones the form's own values name. Under 200 of them (`LAZY_THRESHOLD`) they sort by title, which is the slug while it
+   * loads; from 200 by collection then slug, and `title` is `null` until it is read (`wantTitles`).
+   */
+  entries(collections: string[]): { ref: string; title: string | null }[];
+  /**
+   * A picker over these collections opened: their entries are listed now, and stay for the form's life. Under 200 of
+   * them every title is read too. Safe to call again; the same function for the form's life.
+   */
+  wantEntries(collections: string[]): void;
+  /**
+   * The titles a picker over 200 entries or more needs: of the refs its page shows, or of every one (`'all'`) once
+   * someone types in its search, which is not taken back. Safe to call again; the same function for the form's life.
+   */
+  wantTitles?(collections: string[], refs: string[] | 'all'): void;
+  /**
+   * Over 200 entries or more, once every title was asked for: how many are there. Reference widgets show the loading
+   * line and keep *No entries match* back while `loaded < total`. Undefined otherwise.
+   */
+  titlesProgress?(collections: string[]): { loaded: number; total: number } | undefined;
+  /**
+   * True while the file list loads, or the titles of a wanted target under 200 entries: reference widgets do not call
+   * unlisted values missing then.
+   */
   entriesPending?: boolean;
   /** A link that opens the entry `to` (`collection/slug`) in the admin; without it reference widgets show no link. */
   EntryLink?(props: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }): ReactNode;

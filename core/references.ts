@@ -78,17 +78,58 @@ export interface Referrer<E extends Entry = Entry> {
   fields: string[];
 }
 
-/** Entries with a reference to `ref`, in the order of `entries`. An entry pointing at itself counts. */
-export function findReferrers<E extends Entry>(schema: Schema, entries: Iterable<E>, ref: string): Referrer<E>[] {
-  const out: Referrer<E>[] = [];
-  for (const entry of entries) {
-    if (!Object.hasOwn(schema.collections, entry.collection)) continue;
-    const fields = entryReferences(schema.collections[entry.collection], entry.data)
-      .filter((r) => r.ref === ref)
-      .map((r) => r.field);
-    if (fields.length > 0) out.push({ entry, fields: [...new Set(fields)] });
+/** One entry's outgoing references: what the referrer rules below read, from a full entry or from its summary. */
+export interface EntryRefs {
+  collection: string;
+  refs: { field: string; ref: string }[];
+}
+
+/**
+ * The one referrer rule: which of `items` point at `ref`, in their order, each with the fields that hold it. `refsOf`
+ * gives an item's references, or `undefined` to skip it.
+ */
+export function matchReferrers<T>(
+  items: Iterable<T>,
+  refsOf: (item: T) => EntryRefs['refs'] | undefined,
+  ref: string,
+): { item: T; fields: string[] }[] {
+  const out: { item: T; fields: string[] }[] = [];
+  for (const item of items) {
+    const fields = (refsOf(item) ?? []).filter((r) => r.ref === ref).map((r) => r.field);
+    if (fields.length > 0) out.push({ item, fields: [...new Set(fields)] });
   }
   return out;
+}
+
+/**
+ * The one counting rule: how many of `items` point at each target, by their collection. An item counts once per target;
+ * items of a collection the schema lacks are skipped.
+ */
+export function tallyReferrers(schema: Schema, items: Iterable<EntryRefs>): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const { collection, refs } of items) {
+    if (!Object.hasOwn(schema.collections, collection)) continue;
+    for (const ref of new Set(refs.map((r) => r.ref))) {
+      const by = out.get(ref) ?? new Map<string, number>();
+      by.set(collection, (by.get(collection) ?? 0) + 1);
+      out.set(ref, by);
+    }
+  }
+  return out;
+}
+
+/** An entry's references, or `undefined` when the schema lacks its collection. */
+function refsOfEntry(schema: Schema, entry: Entry): EntryRefs['refs'] | undefined {
+  if (!Object.hasOwn(schema.collections, entry.collection)) return undefined;
+  return entryReferences(schema.collections[entry.collection], entry.data);
+}
+
+/** Entries with a reference to `ref`, in the order of `entries`. An entry pointing at itself counts. */
+export function findReferrers<E extends Entry>(schema: Schema, entries: Iterable<E>, ref: string): Referrer<E>[] {
+  return matchReferrers(entries, (e) => refsOfEntry(schema, e), ref).map(({ item, fields }) => ({
+    entry: item,
+    fields,
+  }));
 }
 
 /**
@@ -97,17 +138,8 @@ export function findReferrers<E extends Entry>(schema: Schema, entries: Iterable
  * list items hold it, an entry pointing at itself counts, entries of a collection the schema lacks are skipped.
  */
 export function countReferrers(schema: Schema, entries: Iterable<Entry>): Map<string, Map<string, number>> {
-  const out = new Map<string, Map<string, number>>();
-  for (const entry of entries) {
-    if (!Object.hasOwn(schema.collections, entry.collection)) continue;
-    const targets = new Set(entryReferences(schema.collections[entry.collection], entry.data).map((r) => r.ref));
-    for (const ref of targets) {
-      const by = out.get(ref) ?? new Map<string, number>();
-      by.set(entry.collection, (by.get(entry.collection) ?? 0) + 1);
-      out.set(ref, by);
-    }
-  }
-  return out;
+  const items = Array.from(entries, (e) => ({ collection: e.collection, refs: refsOfEntry(schema, e) ?? [] }));
+  return tallyReferrers(schema, items);
 }
 
 /** Throws `RangeError` unless `depth` is a whole number from 0 to `MAX_REFERENCE_DEPTH`. */

@@ -100,6 +100,11 @@ describe('batchedReader', () => {
     expect(readFile).toHaveBeenCalledTimes(2000);
   });
 
+  it('has one reader for a source that is not GitHub, whatever keep is', () => {
+    const { source } = batching(paths(1));
+    expect(batchedReader(source, { keep: false })).toBe(batchedReader(source));
+  });
+
   it('asks once for a path asked twice in the same task, and gives both the file', async () => {
     const { source, readFiles } = batching(paths(1));
     const reader = batchedReader(source);

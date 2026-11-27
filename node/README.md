@@ -27,7 +27,7 @@ import { readProject, validateProject, writeTypes, createDevHandler } from 'edit
 | Feature | Doc |
 |---|---|
 | Reading and validating a repo, writing types, the skill scripts | [docs/project.md](../../../docs/node/project.md) |
-| Dev file API: routes (files, commit, git with the uncommitted files and the project id, history, file versions), statuses, `If-Match`, security | [docs/dev-api.md](../../../docs/node/dev-api.md) |
+| Dev file API: routes (files, commit, git with the uncommitted files and the project id, history of one file or of up to 500 at once, file versions), statuses, `If-Match`, security | [docs/dev-api.md](../../../docs/node/dev-api.md) |
 
 ## Scripts
 
@@ -47,5 +47,6 @@ From the repo root (they run `packages/editlet/skills/editlet/scripts/*.ts` with
 | `project.ts` | `readProject`, `validateProject`, `writeTypes` |
 | `fs.ts` | Internal: schema loader and content-directory walker (not exported) |
 | `devHandler.ts` | `createDevHandler` |
+| `history.ts` | Internal: the `git log` reads of the history routes, one file and a batch |
 | `index.ts` | Barrel: `project.ts` and `createDevHandler` |
 | `__fixtures__/` | `site` (valid) and `broken` repos used by tests |

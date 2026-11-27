@@ -1,20 +1,18 @@
-import { useQueries } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import type { SearchEntry } from './match';
 
-import { canReference, countReferrers } from '../../../core/references';
-import type { Entry } from '../../../core/validate';
-import { entryFileQuery, entryRefs, useFiles, useSchema, type EntryFileData } from '../data/queries';
-import { useSource } from '../source/context';
+import { canReference } from '../../../core/references';
+import { countReferrersFromSummaries, type SummaryRow } from '../../../core/summary';
+import { entryRefs, useFiles, useSchema } from '../data/queries';
+import { useSummaries, type SummaryRef } from '../data/summaries';
 import { useFileStatuses } from '../status/useFileStatus';
 
-const settledOf = (rs: { data: EntryFileData | undefined; status: string }[]) =>
-  rs.map((r) => ({ data: r.data, pending: r.status === 'pending', failed: r.status === 'error' }));
+const NO_REFS: SummaryRef[] = [];
 
 export interface SearchEntries {
   entries: SearchEntry[];
-  /** Entry files read so far (or failed): the loading line says *Loading titles: 340 of 2,000.* while `loaded < total`. */
+  /** Entries summarized so far (or failed): the loading line says *Loading titles: 340 of 2,000.* while `loaded < total`. */
   loaded: number;
   total: number;
   /** Entry files that did not load: those rows keep their address (*Some titles did not load.*). */
@@ -22,40 +20,40 @@ export interface SearchEntries {
 }
 
 /**
- * Every entry of every collection with its title and draft flag, from the entry files the admin reads anyway (cached by
- * sha, shared with the collection list and the reference pickers). Reads nothing while `enabled` is false: the search
- * costs nothing until it opens. A title that has not loaded yet is the address, so matching works at once. An entry
- * that can be referenced gets `uses` (who points at it, from the same files) once those files have settled. `loaded`,
- * `total` and `failed` count the reads, for the loading line.
+ * Every entry of every collection with its title and draft flag, from entry summaries (`data/summaries.ts`, shared with
+ * the collection list and the reference pickers). `list` lists them from the file list alone (nothing while false);
+ * `read` asks for their summaries, so the search costs no file until something is typed. A title that has not loaded
+ * yet is the address, so matching works at once. An entry that can be referenced gets `uses` (who points at it, from
+ * the same summaries) once those have settled. `loaded`, `total` and `failed` count the summaries asked for, for the
+ * loading line.
  */
-export function useSearchEntries(enabled: boolean): SearchEntries {
-  const source = useSource();
+export function useSearchEntries(list: boolean, read: boolean): SearchEntries {
   const files = useFiles();
   const schema = useSchema().data?.schema;
   const statuses = useFileStatuses();
   const refs = useMemo(
     () =>
-      enabled && schema && files.data
+      list && schema && files.data
         ? Object.keys(schema.collections).flatMap((collection) =>
             entryRefs(schema, files.data, collection).map((ref) => ({ ...ref, collection })),
           )
         : [],
-    [enabled, schema, files.data],
+    [list, schema, files.data],
   );
-  // `combine` keeps the array the same until a read changes, so the memo below does not run on every keystroke.
-  const results = useQueries({ queries: refs.map((ref) => entryFileQuery(source, ref)), combine: settledOf });
+  // The result stays the same object until a summary changes, so the memo below does not run on every keystroke.
+  const summaries = useSummaries(read ? refs : NO_REFS);
 
-  // Who points at whom, once every file of the collections that can point has settled (loaded or failed): a count that
+  // Who points at whom, once every entry of the collections that can point has settled (loaded or failed): a count that
   // climbs while files load reads as wrong, and a broken file must not hide counts for good.
   const counts = useMemo(() => {
-    if (!schema) return null;
+    if (!schema || !read) return null;
     const settled = new Map<string, boolean>();
-    const loaded: Entry[] = [];
+    const loaded: SummaryRow[] = [];
     refs.forEach((ref, i) => {
-      const result = results[i];
-      settled.set(ref.collection, (settled.get(ref.collection) ?? true) && result?.pending !== true);
-      const file = result?.data?.file;
-      if (file) loaded.push({ collection: ref.collection, slug: ref.slug, data: file.data, body: file.body });
+      const summary = summaries.rows[i];
+      const done = summary !== undefined || summaries.errors[i] !== null;
+      settled.set(ref.collection, (settled.get(ref.collection) ?? true) && done);
+      if (summary) loaded.push({ collection: ref.collection, slug: ref.slug, summary });
     });
     const defs = Object.entries(schema.collections);
     // The collections an entry of `target` gets a count in: every referring one has settled.
@@ -67,30 +65,24 @@ export function useSearchEntries(enabled: boolean): SearchEntries {
         })
         .map(([target]) => target),
     );
-    return { ready, by: countReferrers(schema, loaded) };
-  }, [schema, refs, results]);
+    return { ready, by: countReferrersFromSummaries(schema, loaded) };
+  }, [schema, read, refs, summaries]);
 
   const entries = refs.map((ref, i): SearchEntry => {
     const definition = schema!.collections[ref.collection]!;
-    const data = results[i]?.data?.file.data;
-    const raw = definition.titleField === undefined ? undefined : data?.[definition.titleField];
+    const summary = summaries.rows[i];
     return {
       collection: ref.collection,
       collectionLabel: definition.label,
       slug: ref.slug,
       // A singleton's address is always `index`: its page is named by the collection.
-      title: typeof raw === 'string' && raw.trim() !== '' ? raw : definition.singleton ? definition.label : ref.slug,
-      draft: data?.draft === true,
+      title: summary?.title ?? (definition.singleton ? definition.label : ref.slug),
+      draft: summary?.draft === true,
       status: statuses.of(ref.path),
       uses: counts?.ready.has(ref.collection)
         ? (counts.by.get(`${ref.collection}/${ref.slug}`) ?? new Map<string, number>())
         : undefined,
     };
   });
-  return {
-    entries,
-    loaded: results.filter((r) => !r.pending).length,
-    total: refs.length,
-    failed: results.filter((r) => r.failed).length,
-  };
+  return { entries, loaded: summaries.loaded, total: summaries.total, failed: summaries.failed };
 }

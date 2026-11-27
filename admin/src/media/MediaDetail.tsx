@@ -1,7 +1,8 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type ReactNode } from 'react';
 
-import { entryEdits, imageBytes, imageFileError, replaceChanges } from './edits';
-import { isUsed, type MediaImage, type MediaIndex } from './mediaIndex';
+import { entryEdits, imageBytes, imageFileError, replaceChanges, replacedUses } from './edits';
+import { entriesOf, isUsed, readEntryFiles, type MediaImage, type MediaIndex, type MediaUse } from './mediaIndex';
 import { MediaUses } from './MediaUses';
 import { MediaImageView } from './MediaView';
 import type { MediaCommit } from './useMediaCommit';
@@ -12,6 +13,7 @@ import type { Schema } from '../../../core/schema';
 import { BIG_PREVIEW, ImagePlaceholder, PreviewImage } from '../data/PreviewImage';
 import { canOpenInWindow, mimeType, useAssetBlob, useObjectUrl } from '../data/useAssetUrl';
 import { RouteLink } from '../RouteLink';
+import { useSource } from '../source/context';
 import { Icon, IconButton } from '../ui';
 import { ActionSheet } from '../ui/parts/action-sheet';
 import type { FinalFocus } from '../ui/parts/focus';
@@ -47,6 +49,8 @@ export function MediaDetail({
   /** Upload files into a folder (the open image's). */
   onUpload(files: File[], folder: string, finalFocus?: FinalFocus): void;
 }) {
+  const client = useQueryClient();
+  const source = useSource();
   const blob = useAssetBlob(image.path);
   const url = useObjectUrl(blob);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -60,13 +64,19 @@ export function MediaDetail({
   const changed = image.uses.map((u, i) => ({ use: u, alt: altOf(i) })).filter(({ use, alt }) => alt !== use.alt);
   const used = isUsed(image);
 
+  /** The full files of the entries `uses` are in, read right before the commit that rewrites them. */
+  const filesOf = (uses: MediaUse[]) => readEntryFiles(client, source, entriesOf(index, uses));
+
   const saveAlts = () =>
     commit.request({
       message: `Update alt text of ${image.name}`,
       subject: entriesSubject('update', [
         ...new Map(changed.map(({ use }) => [use.entryPath, { collection: use.collection, slug: use.slug }])).values(),
       ]),
-      build: () => [entryEdits(schema, index, changed)],
+      build: async () => {
+        const files = await filesOf(changed.map(({ use }) => use));
+        return [entryEdits(schema, index, changed, files)];
+      },
       onDone: () => setAlts({}),
     });
 
@@ -75,12 +85,13 @@ export function MediaDetail({
     const invalid = imageFileError(file);
     if (invalid) return setReplaceError(invalid);
     try {
-      const bytes = await imageBytes(file);
-      const { changes } = replaceChanges(schema, index, image, { name: file.name, bytes });
+      const upload = { name: file.name, bytes: await imageBytes(file) };
+      // Asked now, so a replacement the index cannot make is refused before any dialog.
+      const uses = replacedUses(index, image, upload);
       commit.request({
         message: `Replace ${image.name}`,
         subject: filesSubject(schema, 'update', [image.path]),
-        build: () => [changes],
+        build: async () => [replaceChanges(schema, index, image, upload, await filesOf(uses)).changes],
         finalFocus: more,
       });
     } catch (e) {

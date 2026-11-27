@@ -2,20 +2,34 @@
 // admin's access check makes (`GET /user`, `GET /repos/o/r`), which the P7 fake does not route.
 import { fixtureFiles } from './fixture';
 
-import { createFakeGitHub, json, type FakeGitHub, type FileInput } from '../../../github/test/fakeGitHub';
+import {
+  bodyBytes,
+  createFakeGitHub,
+  json,
+  type FakeGitHub,
+  type FakeHistoryCommit,
+  type FileInput,
+} from '../../../github/test/fakeGitHub';
 
 export type AdminFakeGitHub = FakeGitHub & { fetch: typeof fetch };
 
 export function createAdminFakeGitHub(
   opts: {
     files?: Record<string, FileInput>;
+    /** Commits applied to `main` after `files`. */
+    history?: FakeHistoryCommit[];
     push?: boolean;
     admin?: boolean;
     login?: string;
     repoMissing?: boolean;
   } = {},
 ): AdminFakeGitHub {
-  const fake = createFakeGitHub({ owner: 'o', repo: 'r', branches: { main: opts.files ?? fixtureFiles() } });
+  const fake = createFakeGitHub({
+    owner: 'o',
+    repo: 'r',
+    branches: { main: opts.files ?? fixtureFiles() },
+    history: opts.history,
+  });
   const login = opts.login ?? 'octocat';
   const push = opts.push ?? true;
 
@@ -27,8 +41,14 @@ export function createAdminFakeGitHub(
     if (url.origin !== 'https://api.github.com' || method !== 'GET' || !(isUser || isRepo)) {
       return fake.fetch(input, init);
     }
-    fake.calls.push({ method, url: url.toString() });
-    const auth = new Headers(init.headers).get('authorization');
+    const call = { method, url: url.toString(), bytes: 0 };
+    fake.calls.push(call);
+    const response = answer(isUser, new Headers(init.headers).get('authorization'));
+    call.bytes = await bodyBytes(response);
+    return response;
+  }
+
+  function answer(isUser: boolean, auth: string | null): Response {
     if (!auth?.startsWith('Bearer ') || auth === 'Bearer bad') {
       return json({ message: 'Bad credentials', status: '401' }, 401);
     }

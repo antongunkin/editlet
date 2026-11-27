@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 
 import { useEdgeHover, usePageSheet, usePageViewport, useWindowGesture } from './channel';
 import { ChromeProvider } from './chrome';
+import { useCollapsed } from './collapsed';
 import { EntryStatusProvider } from './entryStatus';
 import { OPEN_MODAL } from './modal';
 import { Pill } from './Pill';
@@ -67,13 +68,13 @@ export function WindowFrame({
   search?: boolean;
   children: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useCollapsed();
   // Expanding from the pill puts the focus back where it was when the window collapsed (the Minimize button, a field).
   const focusBeforeCollapse = useRef<HTMLElement | null>(null);
   const collapse = useCallback(() => {
     focusBeforeCollapse.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setCollapsed(true);
-  }, []);
+  }, [setCollapsed]);
   useEffect(() => {
     if (collapsed) return;
     const el = focusBeforeCollapse.current;
@@ -84,7 +85,7 @@ export function WindowFrame({
   const { request } = useSelectRequest();
   useEffect(() => {
     if (request) setCollapsed(false);
-  }, [request]);
+  }, [request, setCollapsed]);
   useEscapeToCollapse(collapse, collapsed);
   usePageViewport(window.parent !== window);
   const sheet = usePageSheet();

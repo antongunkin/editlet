@@ -10,6 +10,7 @@ import { SourceProvider } from './source/context';
 import { detectMode } from './source/detect';
 import { createLocalSource } from './source/local';
 import { BridgeProvider } from './useRoute';
+import { CollapsedProvider } from './window/collapsed';
 
 import type { Issue } from '../../core/issues';
 import type { ContentSource } from '../../core/source';
@@ -109,7 +110,7 @@ export function App({ source, win, fetch: fetchFn, storage, queryClient }: AppPr
     <QueryClientProvider client={client}>
       <BridgeProvider win={win}>
         <PreviewProvider flag={github} sessionMinutes={github ? mode.config?.sessionMinutes : undefined}>
-          {content}
+          <CollapsedProvider>{content}</CollapsedProvider>
         </PreviewProvider>
       </BridgeProvider>
     </QueryClientProvider>

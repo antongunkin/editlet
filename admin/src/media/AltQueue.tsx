@@ -3,12 +3,13 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { AltQueueView } from './AltQueueView';
 import { entryEdits } from './edits';
-import { blankUses, loadMediaIndex, type MediaImage, type MediaUse } from './mediaIndex';
+import { blankUses, entriesOf, loadMediaIndex, readEntryFiles, type MediaImage, type MediaUse } from './mediaIndex';
 import { useMediaCommit } from './useMediaCommit';
 
 import { entriesSubject } from '../../../core/gitStyle';
 import type { Schema } from '../../../core/schema';
 import { AssetPreview } from '../data/useAssetUrl';
+import { useWorkspace } from '../github/workspace';
 import { useSiteRefresh } from '../preview/PreviewProvider';
 import { useSource } from '../source/context';
 
@@ -42,12 +43,13 @@ type Tally = { saved: number; already: number; skipped: MediaImage[] };
  * at a time: the picture, where it is used, one **Alt text** field, **Save & next**, **Skip** and the progress
  * (docs/admin/media.md#the-missing-alt-queue). One commit per image through its own `useMediaCommit` (so the new-branch
  * question on the base branch opens as a second level inside this sheet, once), and one refresh of the site when the
- * queue closes. Every save reads a fresh index: after one commit an entry's sha and the body ranges of its other images
- * have moved, so the uses captured when the queue opened are stale.
+ * queue closes. Every save reads a fresh index: after one commit an entry's sha has moved, so the uses captured when
+ * the queue opened are stale.
  */
 export function AltQueue({ schema, images, open, onOpenChange, onOpenImage }: AltQueueProps) {
   const client = useQueryClient();
   const source = useSource();
+  const cache = useWorkspace()?.source.cache ?? null;
   const refreshSite = useSiteRefresh();
   const commit = useMediaCommit();
   const [order, setOrder] = useState<MediaImage[]>(images);
@@ -110,7 +112,7 @@ export function AltQueue({ schema, images, open, onOpenChange, onOpenImage }: Al
     setReadError(null);
     try {
       // Fixed elsewhere meanwhile? Then there is nothing to commit (and on the base branch, no branch to create).
-      const fresh = await loadMediaIndex(client, source, schema);
+      const fresh = await loadMediaIndex(client, source, schema, cache);
       const uses = blankUses(fresh.images.find((i) => i.path === image.path));
       if (uses.length === 0) return advance({ ...tally, already: tally.already + 1 }, 'Already has alt text.');
       commit.request({
@@ -121,13 +123,15 @@ export function AltQueue({ schema, images, open, onOpenChange, onOpenImage }: Al
         refresh: false,
         build: async () => {
           // Read again: a commit can land between the check and this one.
-          const again = await loadMediaIndex(client, source, schema);
+          const again = await loadMediaIndex(client, source, schema, cache);
           const blank = blankUses(again.images.find((i) => i.path === image.path));
+          const files = await readEntryFiles(client, source, entriesOf(again, blank));
           return [
             entryEdits(
               schema,
               again,
               blank.map((use) => ({ use, alt: text })),
+              files,
             ),
           ];
         },

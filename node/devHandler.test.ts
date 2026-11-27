@@ -404,7 +404,7 @@ describe('createDevHandler', () => {
       const { handler } = await setup();
       expect((await handler(new Request(`${ORIGIN}${DEV_API_BASE}/history`))).status).toBe(400);
       expect((await handler(new Request(historyUrl('../x')))).status).toBe(400);
-      expect((await handler(new Request(historyUrl('a.md'), { method: 'POST' }))).status).toBe(405);
+      expect((await handler(new Request(historyUrl('a.md'), { method: 'PUT' }))).status).toBe(405);
     });
   });
 

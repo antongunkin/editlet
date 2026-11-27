@@ -50,13 +50,16 @@ async function rowOf(query: string) {
 
 describe('status words on rows', () => {
   it('has none for a file with no status', async () => {
-    expect((await rowOf('hello')).textContent).toBe('Hello worldPost');
+    const row = await rowOf('hello');
+    // The title is read from the first character typed: until then the row is the address.
+    await waitFor(() => expect(row.textContent).toBe('Hello worldPost'));
   });
 
   it('says Changed, In review or Unsaved after Draft; Unsaved wins over Changed', async () => {
     state.changed = ['cms/content/post/hello-world.md', 'cms/content/post/tires.md'];
     state.unsaved = ['cms/content/post/tires.md'];
-    expect((await rowOf('tires')).textContent).toBe('Tires for a rigid bikePost · Draft · Unsaved');
+    const row = await rowOf('tires');
+    await waitFor(() => expect(row.textContent).toBe('Tires for a rigid bikePost · Draft · Unsaved'));
   });
 
   it('In review and Changed', async () => {

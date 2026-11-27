@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { batchedReader } from './batchRead';
 
@@ -50,5 +50,29 @@ describe('batched reads on the GitHub source', () => {
     expect(blobQueries).toBe(40);
     expect(most).toBeLessThanOrEqual(6);
     expect(most).toBeGreaterThan(1);
+  });
+
+  it('keep: false has its own queue: the files of one task do not share a batch, and only the kept one is stored', async () => {
+    const fake = createFakeGitHub({
+      branches: {
+        main: {
+          'cms/schema.json': SCHEMA,
+          'cms/content/post/a.md': '---\ntitle: A\n---\n',
+          'cms/content/post/b.md': '---\ntitle: B\n---\n',
+        },
+      },
+    });
+    const cache = createMemoryCache();
+    const client = createGitHubClient({ token: 'tok', fetch: fake.fetch });
+    const source = createGitHubSource({ owner: 'o', repo: 'r', branch: 'main', client, cache });
+    const [a, b] = (await source.listFiles()).filter((f) => f.path !== 'cms/schema.json');
+    const readFiles = vi.spyOn(source, 'readFiles');
+    expect(batchedReader(source, { keep: false })).toBe(batchedReader(source, { keep: false }));
+    expect(batchedReader(source, { keep: false })).not.toBe(batchedReader(source));
+    await Promise.all([batchedReader(source).read(a!.path), batchedReader(source, { keep: false }).read(b!.path)]);
+    expect(readFiles.mock.calls).toHaveLength(2);
+    expect(readFiles.mock.calls).toContainEqual([[a!.path]]);
+    expect(readFiles.mock.calls).toContainEqual([[b!.path], { keep: false }]);
+    expect([...(await cache.getBlobs([a!.sha, b!.sha])).keys()]).toEqual([a!.sha]);
   });
 });

@@ -13,6 +13,20 @@ export interface FakeCommit {
   files: Map<string, string>;
   /** Non-default modes only: `120000` symlink, `160000` submodule. Absent means `100644`. */
   modes: Map<string, string>;
+  /** ISO commit date; unset answers a fixed one. */
+  date?: string;
+  /** Unset answers a fixed one. `user` is the GitHub account, `null` when the email matches none. */
+  author?: { name: string; email?: string; user: { login: string; avatarUrl: string } | null };
+}
+
+/** One commit of `createFakeGitHub({ history })`. */
+export interface FakeHistoryCommit {
+  message: string;
+  author: { name: string; email: string };
+  /** ISO commit date. */
+  date: string;
+  /** path → content, added or replaced; a file whose content does not change is not touched by the commit. */
+  files: Record<string, FileInput>;
 }
 
 export interface FakeOptions {
@@ -77,6 +91,8 @@ export interface FakeCall {
   url: string;
   /** GraphQL operation name (`Snapshot`, `Blobs`, …); undefined for REST. */
   operation?: string;
+  /** Response body size in bytes. */
+  bytes: number;
 }
 
 export interface GraphQLResult {
@@ -113,8 +129,38 @@ export function blobSha(bytes: Uint8Array): string {
   return sha1(Buffer.concat([Buffer.from(`blob ${bytes.byteLength}\0`), bytes]));
 }
 
-export const json = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+/** Body sizes of the responses made here, so logging `FakeCall.bytes` does not read them. */
+const bodySizes = new WeakMap<Response, number>();
+
+function sized(
+  body: Uint8Array<ArrayBuffer>,
+  status: number,
+  type: string,
+  headers: Record<string, string> = {},
+): Response {
+  const response = new Response(body, { status, headers: { 'content-type': type, ...headers } });
+  bodySizes.set(response, body.byteLength);
+  return response;
+}
+
+export const json = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
+  sized(encoder.encode(JSON.stringify(body)), status, 'application/json', headers);
+
+/** `304 Not Modified` for a conditional request: no body, the ETag it matched. */
+const notModified = (etag: string): Response => {
+  const response = new Response(null, { status: 304, headers: { etag } });
+  bodySizes.set(response, 0);
+  return response;
+};
+
+const raw = (bytes: Uint8Array): Response => sized(new Uint8Array(bytes), 200, 'application/vnd.github.raw');
+
+/** The size of a response's body; one built elsewhere (a test's own route) is read from a clone. */
+export async function bodyBytes(response: Response): Promise<number> {
+  const known = bodySizes.get(response);
+  if (known !== undefined) return known;
+  return response.body ? (await response.clone().arrayBuffer()).byteLength : 0;
+}
 
 const branchOf = (ref: string) => (ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref);
 
@@ -131,6 +177,8 @@ const unprocessable = (message: string, errors?: { message: string }[]) =>
 const decodeRef = (s: string) => s.split('/').map(decodeURIComponent).join('/');
 
 const notFound = () => json({ message: 'Not Found', status: '404' }, 404);
+
+const isGraphQL = (url: URL) => url.origin === 'https://api.github.com' && url.pathname === '/graphql';
 
 /** A failed `createCommitOnBranch` (HTTP 200, `data.createCommitOnBranch: null`, one typed error). */
 const commitFailed = (type: string, message: string): GraphQLResult => ({
@@ -150,6 +198,8 @@ export function createFakeGitHub(init: {
   branches: Record<string, Record<string, FileInput>>;
   /** Applied to every initial commit: path → `120000` (symlink) or `160000` (submodule). */
   modes?: Record<string, string>;
+  /** Commits applied to `main` in order after the initial branches (the other branches do not get them). */
+  history?: FakeHistoryCommit[];
 }) {
   const state: FakeState = {
     owner: init.owner ?? 'o',
@@ -216,6 +266,12 @@ export function createFakeGitHub(init: {
     const c = newCommit(root, map, modes, `Initial ${branch}`);
     root ??= c.oid;
     state.refs.set(branch, c.oid);
+  }
+
+  for (const { message, author, date, files } of init.history ?? []) {
+    const added = state.commits.get(commit('main', files, message))!;
+    added.date = date;
+    added.author = { ...author, user: null };
   }
 
   function treeOid(commitOid: string, dir: string): string {
@@ -318,7 +374,28 @@ export function createFakeGitHub(init: {
     return out;
   }
 
+  /** The newest commit from `oid` back that changed each of `paths`: one walk for all of them. */
+  function newestTouching(oid: string, paths: string[]): Map<string, FakeCommit> {
+    const wanted = new Set(paths);
+    const out = new Map<string, FakeCommit>();
+    for (let cur = state.commits.get(oid); cur && wanted.size > 0;) {
+      const parent: FakeCommit | undefined = cur.parent ? state.commits.get(cur.parent) : undefined;
+      for (const path of wanted) {
+        if (cur.files.get(path) === parent?.files.get(path)) continue;
+        out.set(path, cur);
+        wanted.delete(path);
+      }
+      cur = parent;
+    }
+    return out;
+  }
+
   const fakeAuthor = { name: 'Jane Doe', user: { login: 'jane', avatarUrl: 'https://avatars.test/jane' } };
+  /** `committedDate` and `author` as the `History` and `Versions` queries select them. */
+  const signature = (c: FakeCommit) => ({
+    committedDate: c.date ?? '2025-11-19T14:48:00Z',
+    author: c.author ? { name: c.author.name, user: c.author.user } : fakeAuthor,
+  });
 
   const graphqlOps: Record<string, GraphQLOp> = {
     History(v) {
@@ -329,10 +406,30 @@ export function createFakeGitHub(init: {
       const nodes = all.slice(0, 1).map((c) => ({
         url: `https://github.test/${c.oid}`,
         messageHeadline: c.message,
-        committedDate: '2025-11-19T14:48:00Z',
-        author: fakeAuthor,
+        ...signature(c),
       }));
       return { data: { repository: { ref: { target: { history: { totalCount: all.length, nodes } } } } } };
+    },
+    // One alias `p<i>` per variable `$p<i>`.
+    LastCommits(v) {
+      if (!isRepo(v)) return repoMissing();
+      const oid = String(v.oid);
+      if (!state.commits.has(oid)) return { data: { repository: { object: null } } };
+      const aliases = Object.keys(v).filter((key) => /^p\d+$/.test(key));
+      const newest = newestTouching(
+        oid,
+        aliases.map((alias) => String(v[alias])),
+      );
+      const object = Object.fromEntries(
+        aliases.map((alias) => {
+          const c = newest.get(String(v[alias]));
+          const nodes = c
+            ? [{ oid: c.oid, url: `https://github.test/${c.oid}`, messageHeadline: c.message, ...signature(c) }]
+            : [];
+          return [alias, { nodes }];
+        }),
+      );
+      return { data: { repository: { object } } };
     },
     Versions(v) {
       if (!isRepo(v)) return repoMissing();
@@ -347,8 +444,7 @@ export function createFakeGitHub(init: {
             oid: c.oid,
             url: `https://github.test/${c.oid}`,
             messageHeadline: c.message,
-            committedDate: '2025-11-19T14:48:00Z',
-            author: fakeAuthor,
+            ...signature(c),
             file: entry && { oid: entry.oid, type: entry.type },
           };
         });
@@ -535,8 +631,13 @@ export function createFakeGitHub(init: {
             ? [
                 {
                   html_url: `https://github.test/${c.oid}`,
-                  commit: { message: c.message, author: { name: 'Old Timer', date: '2025-10-02T09:00:00Z' } },
-                  author: { login: 'old', avatar_url: 'https://avatars.test/old' },
+                  commit: {
+                    message: c.message,
+                    author: { name: c.author?.name ?? 'Old Timer', date: c.date ?? '2025-10-02T09:00:00Z' },
+                  },
+                  author: c.author
+                    ? c.author.user && { login: c.author.user.login, avatar_url: c.author.user.avatarUrl }
+                    : { login: 'old', avatar_url: 'https://avatars.test/old' },
                 },
               ]
             : [],
@@ -546,11 +647,14 @@ export function createFakeGitHub(init: {
     {
       method: 'GET',
       pattern: /^\/git\/ref\/heads\/(.+)$/,
-      handle({ match }) {
+      handle({ headers, match }) {
         const name = decodeRef(match[1]!);
         const sha = state.refs.get(name);
         if (!sha) return notFound();
-        return json({ ref: `refs/heads/${name}`, object: { sha, type: 'commit' } });
+        // The ETag is derived from the sha: a conditional read of an unchanged head answers 304, as GitHub does.
+        const etag = `"${sha}"`;
+        if (headers.get('if-none-match') === etag) return notModified(etag);
+        return json({ ref: `refs/heads/${name}`, object: { sha, type: 'commit' } }, 200, { etag });
       },
     },
     {
@@ -671,10 +775,7 @@ export function createFakeGitHub(init: {
         const bytes = sha === undefined ? undefined : state.blobs.get(sha);
         if (!bytes) return notFound();
         if (headers.get('accept') === RAW_ACCEPT) {
-          return new Response(bytes.slice(), {
-            status: 200,
-            headers: { 'content-type': 'application/vnd.github.raw' },
-          });
+          return raw(bytes);
         }
         return json({ sha, size: bytes.length, content: Buffer.from(bytes).toString('base64'), encoding: 'base64' });
       },
@@ -780,10 +881,7 @@ export function createFakeGitHub(init: {
         const bytes = state.blobs.get(sha);
         if (!bytes) return notFound();
         if (headers.get('accept') === RAW_ACCEPT) {
-          return new Response(bytes.slice(), {
-            status: 200,
-            headers: { 'content-type': 'application/vnd.github.raw' },
-          });
+          return raw(bytes);
         }
         const content = (
           Buffer.from(bytes)
@@ -795,6 +893,28 @@ export function createFakeGitHub(init: {
     },
   ];
 
+  function respond(call: FakeCall, body: unknown, headers: Headers, url: URL): Response {
+    const auth = checkAuth(headers);
+    if (auth) return auth;
+    if (isGraphQL(url)) {
+      const { query, variables } = body as { query: string; variables?: Record<string, unknown> };
+      const op = call.operation ? graphqlOps[call.operation] : undefined;
+      if (!op) {
+        return json({ errors: [{ message: `Fake GitHub: unknown operation ${call.operation ?? '(anonymous)'}` }] });
+      }
+      return json(op(variables ?? {}, query));
+    }
+    const repoPrefix = `/repos/${state.owner}/${state.repo}`;
+    if (url.origin !== 'https://api.github.com' || !url.pathname.startsWith(`${repoPrefix}/`)) return notFound();
+    const rest = url.pathname.slice(repoPrefix.length);
+    for (const route of restRoutes) {
+      if (route.method !== call.method) continue;
+      const match = rest.match(route.pattern);
+      if (match) return route.handle({ method: call.method, url, headers, body, match });
+    }
+    return notFound();
+  }
+
   async function fakeFetch(input: RequestInfo | URL, reqInit: RequestInit = {}): Promise<Response> {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     const method = (reqInit.method ?? 'GET').toUpperCase();
@@ -802,29 +922,14 @@ export function createFakeGitHub(init: {
     const rawBody = typeof reqInit.body === 'string' ? reqInit.body : undefined;
     const body: unknown = rawBody === undefined ? undefined : JSON.parse(rawBody);
 
-    if (url.origin === 'https://api.github.com' && url.pathname === '/graphql') {
-      const { query, variables } = body as { query: string; variables?: Record<string, unknown> };
-      const operation = /^\s*(?:query|mutation)\s+(\w+)/.exec(query)?.[1];
-      calls.push({ method, url: url.toString(), operation });
-      const auth = checkAuth(headers);
-      if (auth) return auth;
-      const op = operation ? graphqlOps[operation] : undefined;
-      if (!op) return json({ errors: [{ message: `Fake GitHub: unknown operation ${operation ?? '(anonymous)'}` }] });
-      return json(op(variables ?? {}, query));
-    }
-
-    calls.push({ method, url: url.toString() });
-    const auth = checkAuth(headers);
-    if (auth) return auth;
-    const repoPrefix = `/repos/${state.owner}/${state.repo}`;
-    if (url.origin !== 'https://api.github.com' || !url.pathname.startsWith(`${repoPrefix}/`)) return notFound();
-    const rest = url.pathname.slice(repoPrefix.length);
-    for (const route of restRoutes) {
-      if (route.method !== method) continue;
-      const match = rest.match(route.pattern);
-      if (match) return route.handle({ method, url, headers, body, match });
-    }
-    return notFound();
+    const query = isGraphQL(url) ? (body as { query: string }).query : undefined;
+    const operation = query === undefined ? undefined : /^\s*(?:query|mutation)\s+(\w+)/.exec(query)?.[1];
+    // Logged before it is handled, so a call is on record even when its handler throws.
+    const call: FakeCall = { method, url: url.toString(), ...(query === undefined ? {} : { operation }), bytes: 0 };
+    calls.push(call);
+    const response = respond(call, body, headers, url);
+    call.bytes = await bodyBytes(response);
+    return response;
   }
 
   return {

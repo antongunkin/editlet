@@ -12,7 +12,7 @@ import { EditletError } from '../../core/issues';
 import { isHiddenContentPath, parseEntryPath } from '../../core/paths';
 import { parseSchemaText, type Schema } from '../../core/schema';
 import type { Entry } from '../../core/validate';
-import type { FileInput } from '../../github/test/fakeGitHub';
+import type { FakeHistoryCommit, FileInput } from '../../github/test/fakeGitHub';
 import { DEFAULT_SCHEMA_PATH } from '../../node/fs';
 import { ADMIN_CONFIG_FILE, type AdminConfig } from '../config';
 import { createAdminFakeGitHub, type AdminFakeGitHub } from '../src/test/fakeGitHub';
@@ -28,6 +28,8 @@ export interface GitHubHostOptions {
   port?: number;
   /** The files of `main`; default the node fixture site. */
   files?: Record<string, FileInput>;
+  /** Commits applied to `main` after `files`, with their own dates and authors. */
+  history?: FakeHistoryCommit[];
   /** The signed-in account: its login and repository permissions (default `octocat`, push, not admin). */
   login?: string;
   push?: boolean;
@@ -194,6 +196,7 @@ export async function startGitHubHost(opts: GitHubHostOptions = {}): Promise<Git
   const site = await buildDemoSite();
   const fake = createAdminFakeGitHub({
     files: opts.files,
+    history: opts.history,
     login: opts.login,
     push: opts.push,
     admin: opts.admin,

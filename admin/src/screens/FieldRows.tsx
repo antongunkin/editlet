@@ -1,6 +1,8 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
+import { EntryOptions } from './EntryOptions';
 import { EntrySearch, matches } from './EntrySearch';
+import { moveAmongRadios, radioTab, slugOf } from './listControls';
 
 import { BLOCK_KEY, type BlockDef, type Field } from '../../../core/schema';
 import { fieldSummary, itemTitle } from '../entry/summary';
@@ -263,32 +265,6 @@ function FieldSheet(props: SheetProps) {
   );
 }
 
-const RADIO_KEYS: Record<string, (i: number, n: number) => number> = {
-  ArrowDown: (i, n) => (i + 1) % n,
-  ArrowRight: (i, n) => (i + 1) % n,
-  ArrowUp: (i, n) => (i - 1 + n) % n,
-  ArrowLeft: (i, n) => (i - 1 + n) % n,
-  Home: () => 0,
-  End: (_, n) => n - 1,
-};
-
-/**
- * A list of options in a modal is one tab stop (the chosen option, else the first): the arrow keys, Home and End move
- * the focus, Space or Enter chooses. Choosing closes the modal, so the focus moving does not choose (unlike a plain radio
- * group, where it would close the modal on the first arrow press).
- */
-export function moveAmongRadios(e: KeyboardEvent<HTMLElement>) {
-  const step = RADIO_KEYS[e.key];
-  if (!step) return;
-  const radios = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')];
-  if (radios.length === 0) return;
-  e.preventDefault();
-  radios[step(Math.max(0, radios.indexOf(document.activeElement as HTMLElement)), radios.length)]?.focus();
-}
-
-/** The option's tab stop: the chosen one, else the first. */
-export const radioTab = (selected: boolean, first: boolean, any: boolean) => (selected || (!any && first) ? 0 : -1);
-
 /** A single choice (FigCraft *Edit · Category*): a tap chooses and closes. No CTA. */
 function SelectSheet({ item, sub, open, onOpenChange }: SheetProps) {
   const { field } = item;
@@ -326,19 +302,58 @@ function SelectSheet({ item, sub, open, onOpenChange }: SheetProps) {
 const entryLabel = (field: Field) => (field.type === 'reference' ? field.label.toLowerCase() : 'entries');
 
 /**
+ * A picker that opens asks for its collections' entries: they are read then, not with the form. Before the paint, so
+ * no frame shows the picker without its list.
+ */
+function useWantEntries({ wantEntries }: FieldContext, field: Field, open: boolean) {
+  const collections = field.type === 'reference' ? field.collections : undefined;
+  useLayoutEffect(() => {
+    if (open && collections) wantEntries(collections);
+  }, [open, collections, wantEntries]);
+}
+
+/**
+ * A picker's search, and what its list asks of the form: the titles of the refs its page shows, and every title at the
+ * first character typed (only a target of 200 entries or more waits for either), with the counts of that load.
+ */
+function usePickerSearch({ wantTitles, titlesProgress }: FieldContext, field: Field) {
+  const collections = field.type === 'reference' ? field.collections : undefined;
+  const [query, setQuery] = useState('');
+  const onShown = useCallback(
+    (refs: string[]) => {
+      if (collections) wantTitles?.(collections, refs);
+    },
+    [collections, wantTitles],
+  );
+  const search = (next: string) => {
+    setQuery(next);
+    if (collections && next.trim() !== '') wantTitles?.(collections, 'all');
+  };
+  return { query, setQuery, search, onShown, progress: collections && titlesProgress?.(collections) };
+}
+
+/**
  * A reference to one entry (FigCraft *Edit · Author*): search, then a tap chooses and closes. The chosen entry can be
- * opened; a reference to an entry that is not there says so, and can be cleared.
+ * opened; a reference to an entry that is not there says so, and can be cleared. With nothing typed the chosen entry is
+ * the first option, so it is on the first page.
  */
 function ReferenceSheet({ item, ctx, sub, open, onOpenChange }: SheetProps) {
   const { field } = item;
-  const [query, setQuery] = useState('');
+  const { query, search, onShown, progress } = usePickerSearch(ctx, field);
   const [onTop, setOnTop] = useState(false);
-  if (field.type !== 'reference') return null;
   const value = asString(item.value);
+  // The entry that goes first. It follows the value only while the modal is open: choosing closes the modal, and the
+  // rows must not move while it slides away.
+  const [first, setFirst] = useState(value);
+  if (open && first !== value) setFirst(value);
+  useWantEntries(ctx, field, open);
+  if (field.type !== 'reference') return null;
   const entries = ctx.entries(field.collections);
   const chosen = entries.find((e) => e.ref === value);
   const missing = value !== '' && chosen === undefined && !ctx.entriesPending;
-  const shown = entries.filter(matches(query));
+  const found = entries.filter(matches(query));
+  const top = query.trim() === '' ? found.find((e) => e.ref === first) : undefined;
+  const options = top ? [top, ...found.filter((e) => e !== top)] : found;
   const choose = (next: string) => {
     item.onChange(next);
     onOpenChange(false);
@@ -347,42 +362,37 @@ function ReferenceSheet({ item, ctx, sub, open, onOpenChange }: SheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title={field.label} sub={sub}>
       <div className="flex flex-col gap-3 px-4 pt-1 pb-8">
-        <EntrySearch label={`Search ${entryLabel(field)}`} value={query} onChange={setQuery} />
+        <EntrySearch label={`Search ${entryLabel(field)}`} value={query} onChange={search} />
         {missing ? (
           <Card>
             {/* No second line: muted text is under 4.5 : 1 on the danger tint, and the title says it all. */}
             <SelectedRow title={`Not found: ${value}`} missing onRemove={() => choose('')} />
           </Card>
         ) : null}
-        <Card role="radiogroup" aria-label={field.label} id={item.name} onKeyDown={moveAmongRadios}>
-          {shown.map((e, i) => (
-            <Option
-              key={e.ref}
-              title={e.title}
-              sub={e.ref}
-              selected={e.ref === value}
-              tabIndex={radioTab(
-                e.ref === value,
-                i === 0,
-                shown.some((x) => x.ref === value),
-              )}
-              onClick={() => choose(e.ref)}
-            />
-          ))}
-          {shown.length === 0 ? <p className="m-0 p-4 text-base text-muted-foreground">No entries match</p> : null}
-        </Card>
+        <EntryOptions
+          label={field.label}
+          id={item.name}
+          options={options}
+          query={query}
+          chosen={value}
+          onChoose={choose}
+          emptyText="No entries match"
+          pending={ctx.entriesPending}
+          progress={progress}
+          onShown={onShown}
+        />
         {chosen && EntrySheet && ctx.selfRef !== chosen.ref ? (
           // The chosen entry edited on top of this picker (one entry on top; the entry's own fields only).
           <Button variant="secondary" full aria-haspopup="dialog" onClick={() => setOnTop(true)}>
             <Icon name="pencil" size={20} />
-            Edit {chosen.title}
+            Edit {chosen.title ?? slugOf(chosen.ref)}
           </Button>
         ) : chosen && EntryLink ? (
           <EntryLink
             to={chosen.ref}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-full text-base font-medium text-foreground underline-offset-2 hovered:underline"
           >
-            Open {chosen.title}
+            Open {chosen.title ?? slugOf(chosen.ref)}
             <Icon name="chevron-right" size={16} />
           </EntryLink>
         ) : null}
@@ -405,7 +415,7 @@ function ReferenceSheet({ item, ctx, sub, open, onOpenChange }: SheetProps) {
 function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
   const { field } = item;
   const [adding, setAdding] = useState(false);
-  const [query, setQuery] = useState('');
+  const { query, setQuery, search, onShown, progress } = usePickerSearch(ctx, field);
   const [picked, setPicked] = useState<string[]>([]);
   // The chosen entry edited on top of this list (a chosen title is a button, not a link).
   const [onTop, setOnTop] = useState<string | null>(null);
@@ -417,10 +427,11 @@ function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
         }
       : undefined,
   );
+  useWantEntries(ctx, field, open);
   if (field.type !== 'reference') return null;
   const value = asStringList(item.value);
   const entries = ctx.entries(field.collections);
-  const titles = new Map(entries.map((e) => [e.ref, e.title]));
+  const titles = new Map(entries.map((e) => [e.ref, e.title ?? slugOf(e.ref)]));
   const full = field.max !== undefined && value.length >= field.max;
   const available = entries.filter((e) => !value.includes(e.ref)).filter(matches(query));
   const { EntryLink, EntrySheet } = ctx;
@@ -507,25 +518,20 @@ function TagsSheet({ item, ctx, sub, open, nested, onOpenChange }: SheetProps) {
         }
       >
         <div className="flex flex-col gap-3 px-4 pt-1 pb-8">
-          <EntrySearch label={`Search ${noun}`} value={query} onChange={setQuery} />
-          <Card as="fieldset" aria-label={`${field.label} to add`}>
-            {available.map((e) => (
-              <Option
-                key={e.ref}
-                multi
-                title={e.title}
-                sub={e.ref}
-                selected={picked.includes(e.ref)}
-                disabled={
-                  !picked.includes(e.ref) && field.max !== undefined && value.length + picked.length >= field.max
-                }
-                onClick={() => setPicked((p) => (p.includes(e.ref) ? p.filter((x) => x !== e.ref) : [...p, e.ref]))}
-              />
-            ))}
-            {available.length === 0 ? (
-              <p className="m-0 p-4 text-base text-muted-foreground">No entries to add</p>
-            ) : null}
-          </Card>
+          <EntrySearch label={`Search ${noun}`} value={query} onChange={search} />
+          <EntryOptions
+            multi
+            label={`${field.label} to add`}
+            options={available}
+            query={query}
+            picked={picked}
+            max={field.max === undefined ? undefined : field.max - value.length}
+            onToggle={(ref) => setPicked((p) => (p.includes(ref) ? p.filter((x) => x !== ref) : [...p, ref]))}
+            emptyText="No entries to add"
+            pending={ctx.entriesPending}
+            progress={progress}
+            onShown={onShown}
+          />
         </div>
       </Sheet>
     </Sheet>

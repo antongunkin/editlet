@@ -180,7 +180,7 @@ describe('references in the admin, end to end', { timeout: 60_000 }, () => {
     await screen.findByRole('button', { name: /^Next question/ });
     await waitFor(() => expect(rowText('Next question')).toContain('Not found: question/gone'));
     const modal = await openField('Next question');
-    expect(modal.getByText('Not found: question/gone')).toBeDefined();
+    expect(await modal.findByText('Not found: question/gone')).toBeDefined();
     expect(modal.queryByRole('link', { name: /^Open / })).toBeNull();
     await doneOrClose('Next question');
     // Save keeps the issue, marks the row and opens no review; picking an existing entry fixes it.

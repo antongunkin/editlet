@@ -416,6 +416,32 @@ describe('idle timeout', () => {
     expect(auth().lapsed).toBe(false);
   });
 
+  it('onForget: a sign-out and an account switch call the listener, a lapse does not, an unsubscribed one stays out', () => {
+    vi.useFakeTimers({ now: new Date(2026, 10, 11, 9, 0) });
+    const listener = vi.fn();
+    const other = vi.fn();
+    const auth = renderAuth();
+    let unsubscribe = () => {};
+    act(() => {
+      auth().onForget(listener);
+      unsubscribe = auth().onForget(other);
+    });
+    act(() => auth().signInWithToken('pat_3'));
+    act(() => vi.advanceTimersByTime(61 * MINUTE));
+    expect(auth().lapsed).toBe(true);
+    expect(listener).not.toHaveBeenCalled();
+
+    act(() => auth().signInWithToken('pat_4'));
+    act(() => auth().signOut());
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    act(() => auth().forgetContent());
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(other).toHaveBeenCalledTimes(1);
+  });
+
   it('writes the activity time at most once a minute', () => {
     vi.useFakeTimers({ now: new Date(2026, 10, 11, 9, 0) });
     const start = Date.now();

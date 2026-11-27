@@ -16,8 +16,18 @@ export interface RestInit {
   fresh?: boolean;
 }
 
+/** A conditional `GET`: `notModified` when GitHub answers `304` to the `etag` sent; the ETag of the answer otherwise. */
+export type ConditionalResponse<T> =
+  | { notModified: true; etag: string | null }
+  | { notModified: false; etag: string | null; body: T };
+
 export interface GitHubClient {
   rest<T>(method: string, path: string, init?: RestInit): Promise<T>;
+  /**
+   * A `GET` sent with `If-None-Match: etag` (when given). A `304` resolves as `notModified` (never thrown, never retried)
+   * and costs no rate limit on GitHub's side; a `200` carries its body and ETag.
+   */
+  restConditional<T>(path: string, etag: string | null): Promise<ConditionalResponse<T>>;
   graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T>;
   readonly sleep: (ms: number) => Promise<void>;
 }
@@ -219,6 +229,7 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
     url: string,
     init: RequestInit,
     graphqlRetryable?: (parsed: unknown) => number | null,
+    allowNotModified = false,
   ): Promise<{ res: RawResponse; parsed: unknown }> {
     for (let attempt = 1; ; attempt++) {
       const res = await send(url, init);
@@ -228,6 +239,7 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
         wait = graphqlRetryable ? graphqlRetryable(parsed) : null;
         if (wait === null) return { res, parsed };
       } else {
+        if (allowNotModified && res.status === 304) return { res, parsed };
         wait = rateLimitWait(res, parsed);
         if (wait === null) throw mapError(res, parsed);
       }
@@ -267,6 +279,22 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
     return parsed as T;
   }
 
+  async function restConditional<T>(path: string, etag: string | null): Promise<ConditionalResponse<T>> {
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': API_VERSION,
+    };
+    if (etag !== null) headers['If-None-Match'] = etag;
+    // `no-store`, not `fresh`'s `no-cache`: the browser's HTTP cache must neither answer for GitHub nor add a
+    // validator of its own (a `no-cache` lookup turns a 304 into the cached body as a 200). The `If-None-Match` sent
+    // here is the only validator, and the 304 reaches this code as it is.
+    const req: RequestInit = { method: 'GET', headers, cache: 'no-store' };
+    const { res, parsed } = await withGate(false, () => execute(`${API}${path}`, req, undefined, true));
+    const tag = res.headers.get('etag');
+    if (res.status === 304) return { notModified: true, etag: tag ?? etag };
+    return { notModified: false, etag: tag, body: parsed as T };
+  }
+
   async function graphql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
     const req: RequestInit = {
       method: 'POST',
@@ -294,5 +322,5 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
     return (parsed as { data: T }).data;
   }
 
-  return { rest, graphql, sleep };
+  return { rest, restConditional, graphql, sleep };
 }

@@ -37,6 +37,7 @@ const issues = validateEntry(schema, { collection: 'post', slug: 'hello', data, 
 | `ContentSource`, batched reads (`readFiles?`), the memory source, the error contract, `gitBlobSha`, file versions | [docs/content-source.md](../../../docs/core/content-source.md) |
 | Image references in fields and body, in-place alt and `src` edits | [docs/assets.md](../../../docs/core/assets.md) |
 | References between entries: referrers, resolving several levels deep, the `Resolved` type | [docs/references.md](../../../docs/core/references.md) |
+| Entry summaries: what the admin's lists know of an entry (`summarizeEntry`), its cache fingerprint (`summaryFingerprint`), images and referrers from summaries, the entries a delete can break (`deleteSuspects`) | [docs/summary.md](../../../docs/core/summary.md) |
 | Page URLs: an entry's path from its collection's `url` and a path back to entries | [docs/urls.md](../../../docs/core/urls.md) |
 | Rename an entry's slug or delete it, with references and images rewritten in one change | [docs/rename.md](../../../docs/core/rename.md) |
 | Git style: branch prefix, commit messages and trailer, pull request title and body | [docs/git-style.md](../../../docs/core/git-style.md) |
@@ -57,7 +58,8 @@ throw for bad content.
 | `entryFile.ts` | Parse and write `.md` + frontmatter, `decodeUtf8` |
 | `paths.ts` | Entry paths, slugs, ref keys, asset resolution |
 | `assets.ts` | `findBodyImages`, `findImageRefs`, `editBodyImages` |
-| `references.ts` | `referenceFields`, `entryReferences`, `findReferrers`, `countReferrers`, `createResolver`, `Resolved` |
+| `references.ts` | `referenceFields`, `entryReferences`, `findReferrers`, `countReferrers`, `matchReferrers` and `tallyReferrers` (the rules they share with summaries), `createResolver`, `Resolved` |
+| `summary.ts` | `SUMMARY_VERSION`, `EntrySummary`, `summarizeEntry`, `summaryFingerprint`, `resolveSummaryImages`, `countReferrersFromSummaries`, `findReferrersFromSummaries`, `deleteSuspects` |
 | `rename.ts` | `planRename`, `planRemove`: the file changes of a slug rename and of a delete with references removed |
 | `walk.ts` | `visitFields`, `mapFields`, `blockFields`, `allFields`: data with its fields, into `object` and `blocks` |
 | `gitStyle.ts` | `resolveGitStyle`, `isEditletBranchName`, commit subjects and messages, pull request title and body |

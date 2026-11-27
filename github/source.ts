@@ -1,6 +1,13 @@
 import { toBase64 } from './base64.ts';
-import { openGitHubCache, type GitHubCache, type PendingQueue } from './cache.ts';
-import { createGitHubClient, GitHubError, type GitHubClient, type GitHubClientOptions } from './client.ts';
+import { openGitHubCache, whenIdle, type BlobKind, type GitHubCache, type PendingQueue } from './cache.ts';
+import {
+  createGitHubClient,
+  encodeRef,
+  GitHubError,
+  type ConditionalResponse,
+  type GitHubClient,
+  type GitHubClientOptions,
+} from './client.ts';
 import {
   makeRepoOps,
   type BranchDiff,
@@ -13,10 +20,11 @@ import {
   type PullRequestReview,
 } from './repo.ts';
 
-import { decodeUtf8 } from '../core/entryFile.ts';
+import { AuthError } from '../auth/client.ts';
+import { decodeUtf8, parseEntryFile } from '../core/entryFile.ts';
 import { resolveGitStyle } from '../core/gitStyle.ts';
 import { EditletError, type Issue } from '../core/issues.ts';
-import { isHiddenContentPath } from '../core/paths.ts';
+import { isHiddenContentPath, isImagePath, parseEntryPath } from '../core/paths.ts';
 import { parseSchemaText, type Schema } from '../core/schema.ts';
 import { gitBlobSha } from '../core/sha.ts';
 import {
@@ -28,6 +36,7 @@ import {
   type FileRef,
   type FileVersion,
 } from '../core/source.ts';
+import { deleteSuspects, summarizeEntry, summaryFingerprint, type EntrySummary } from '../core/summary.ts';
 import { validateCommit } from '../core/writes.ts';
 
 export interface GitHubSourceOptions {
@@ -54,6 +63,14 @@ export interface GitHubSourceOptions {
  */
 export type GitHubFileChange = FileChange & { sha?: string | null };
 
+export interface ReadFilesOptions {
+  /**
+   * `false`: a blob this call has to fetch is not written to the blob cache. A blob already cached is still read from
+   * it. For a caller that keeps what it made of the bytes (the admin's summaries). Default `true`.
+   */
+  keep?: boolean;
+}
+
 export interface GitHubSource extends ContentSource {
   readonly kind: 'github';
   readonly owner: string;
@@ -68,7 +85,7 @@ export interface GitHubSource extends ContentSource {
   /** From the current snapshot (loaded if none). A missing path rejects with an `EditletError`. */
   readFile(path: string): Promise<Uint8Array>;
   /** Batched; in input order. Any missing path rejects with an `EditletError` listing all of them. */
-  readFiles(paths: string[]): Promise<Map<string, Uint8Array>>;
+  readFiles(paths: string[], options?: ReadFilesOptions): Promise<Map<string, Uint8Array>>;
   /** Any blob by sha (e.g. the base side of a diff). */
   readBlob(sha: string): Promise<Uint8Array>;
   /** Head commit oid of the current snapshot (loaded if none). */
@@ -86,6 +103,12 @@ export interface GitHubSource extends ContentSource {
   ): Promise<{ issues: Issue[]; commit?: { oid: string; url: string } }>;
   /** The commits of this branch that touched `path`: newest, oldest and the count (all `null` / 0 for a new file). */
   history(path: string): Promise<FileHistory>;
+  /**
+   * The last commit that touched each path (`history().updated` for many paths), as of the current snapshot's head
+   * (loaded if none): one query per `LAST_COMMIT_BATCH` paths not in the cache. `null` when no commit is found, or when
+   * GitHub timed out even for that path alone (not cached). A path not in the snapshot rejects like `readFiles`.
+   */
+  lastCommits(paths: string[]): Promise<Map<string, FileEvent | null>>;
   /** The commits of this branch that touched `path`, newest first, each with the file's blob sha (one GraphQL call). */
   listVersions(path: string, limit?: number): Promise<FileVersion[]>;
   /** The file as `commit` left it (blob cache first); `EditletError` when it is not a file there. */
@@ -174,7 +197,15 @@ export interface SourceContext {
   schemaPath: string;
   baseBranch?: string;
   branchPrefix?: string;
+  /** Blob shas of every tree listed with this context; a source's context keeps them for the page. */
+  reachable?: Set<string>;
 }
+
+/** An unreachable cached row is dropped once it was last used this long ago. */
+const PRUNE_AGE_MS = 30 * 24 * 60 * 60_000;
+
+/** Paths per `LastCommits` query (one rate-limit point; 100 and more risk GitHub's 10 s timeout). */
+export const LAST_COMMIT_BATCH = 50;
 
 const BLOB_BATCH = 50;
 const RAW_ACCEPT = 'application/vnd.github.raw+json';
@@ -202,12 +233,19 @@ function blobsQuery(shas: string[]): string {
   return `query Blobs($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n    ${fields.join('\n    ')}\n  }\n}`;
 }
 
+const kindOf = (path: string): BlobKind => (isImagePath(path) ? 'image' : 'entry');
+
 /**
  * Reads blobs by sha: cache first, then batched GraphQL text (accepted only when its git sha matches), then raw REST
  * for binary, truncated or mismatching blobs. Every fetched blob is sha-verified and cached (each GraphQL chunk as it
- * lands).
+ * lands), as an image when its sha is in `images`; with `keep: false` none is written to the cache.
  */
-export async function readBlobs(ctx: SourceContext, shas: string[]): Promise<Map<string, Uint8Array>> {
+export async function readBlobs(
+  ctx: SourceContext,
+  shas: string[],
+  images: ReadonlySet<string> = new Set(),
+  { keep = true }: ReadFilesOptions = {},
+): Promise<Map<string, Uint8Array>> {
   const unique = [...new Set(shas)];
   for (const sha of unique) {
     if (!SHA_RE.test(sha)) throw new GitHubError('not_found', `Blob not found: ${sha}`);
@@ -216,6 +254,9 @@ export async function readBlobs(ctx: SourceContext, shas: string[]): Promise<Map
   const missing = unique.filter((sha) => !out.has(sha));
   if (missing.length === 0) return out;
 
+  const store = async (blobs: { sha: string; bytes: Uint8Array }[]): Promise<void> => {
+    if (keep) await ctx.cache.putBlobs(blobs.map((b) => ({ ...b, kind: images.has(b.sha) ? 'image' : 'entry' })));
+  };
   const fetched: { sha: string; bytes: Uint8Array }[] = [];
   const raw: string[] = [];
   const chunks: string[][] = [];
@@ -242,7 +283,7 @@ export async function readBlobs(ctx: SourceContext, shas: string[]): Promise<Map
         }),
       );
       fetched.push(...landed);
-      await ctx.cache.putBlobs(landed);
+      await store(landed);
     }),
   );
   const rawFetched: { sha: string; bytes: Uint8Array }[] = [];
@@ -257,7 +298,7 @@ export async function readBlobs(ctx: SourceContext, shas: string[]): Promise<Map
       rawFetched.push({ sha, bytes });
     }),
   );
-  await ctx.cache.putBlobs(rawFetched);
+  await store(rawFetched);
   for (const { sha, bytes } of [...fetched, ...rawFetched]) out.set(sha, bytes);
   return out;
 }
@@ -357,13 +398,13 @@ async function walkTree(ctx: SourceContext, sha: string, dir: string, files: Map
 
 async function readTreeInto(ctx: SourceContext, sha: string, dir: string, files: Map<string, string>): Promise<void> {
   const res = await getTree(ctx, sha, true);
-  if (!res.truncated) {
-    addBlobs(files, dir, res.tree);
-    return;
+  const listed = new Map<string, string>();
+  if (res.truncated) await walkTree(ctx, sha, dir, listed);
+  else addBlobs(listed, dir, res.tree);
+  for (const [path, blob] of listed) {
+    files.set(path, blob);
+    ctx.reachable?.add(blob);
   }
-  const walked = new Map<string, string>();
-  await walkTree(ctx, sha, dir, walked);
-  for (const [path, blob] of walked) files.set(path, blob);
 }
 
 /** Builds the snapshot of commit `headOid` given its schema blob sha (null = no schema file). */
@@ -372,6 +413,7 @@ export async function buildSnapshot(ctx: SourceContext, headOid: string, schemaS
   const snapshot: Snapshot = { headOid, schemaPath: ctx.schemaPath, schemaSha, schema: null, contentDir: null, files };
   if (schemaSha === null) return snapshot;
   files.set(ctx.schemaPath, schemaSha);
+  ctx.reachable?.add(schemaSha);
 
   const bytes = (await readBlobs(ctx, [schemaSha])).get(schemaSha)!;
   const decoded = decodeUtf8(bytes, ctx.schemaPath);
@@ -391,15 +433,21 @@ export async function buildSnapshot(ctx: SourceContext, headOid: string, schemaS
   return snapshot;
 }
 
-/** Snapshot of the head of `branch` (`refs/heads/<branch>`). */
-export async function loadSnapshot(ctx: SourceContext, branch: string): Promise<Snapshot> {
+/** The head of `branch` (`refs/heads/<branch>`) and its schema blob sha (`null` = no schema file): one GraphQL call. */
+async function readHead(ctx: SourceContext, branch: string): Promise<{ oid: string; schemaSha: string | null }> {
   const repo = await repoQuery<{ ref: { target: { oid: string; schema?: { oid: string } | null } } | null }>(
     ctx,
     SNAPSHOT_QUERY,
     { ref: `refs/heads/${branch}`, schemaPath: ctx.schemaPath },
   );
   if (!repo.ref) throw new GitHubError('not_found', `Branch not found: ${branch}`);
-  return buildSnapshot(ctx, repo.ref.target.oid, repo.ref.target.schema?.oid ?? null);
+  return { oid: repo.ref.target.oid, schemaSha: repo.ref.target.schema?.oid ?? null };
+}
+
+/** Snapshot of the head of `branch` (`refs/heads/<branch>`). */
+export async function loadSnapshot(ctx: SourceContext, branch: string): Promise<Snapshot> {
+  const head = await readHead(ctx, branch);
+  return buildSnapshot(ctx, head.oid, head.schemaSha);
 }
 
 /** Snapshot at a commit oid (e.g. a merge base). */
@@ -479,6 +527,74 @@ function restEvent(c: RestCommit): FileEvent {
     url: c.html_url,
   };
 }
+
+/** One `history` alias per path; the paths are variables `$p0`…, never part of the query text. */
+function lastCommitsQuery(count: number): string {
+  const indexes = Array.from({ length: count }, (_, i) => i);
+  const params = indexes.map((i) => `$p${i}: String!`).join(', ');
+  const fields = indexes.map(
+    (i) =>
+      `p${i}: history(first: 1, path: $p${i}) { nodes { oid committedDate url messageHeadline author { name user { login avatarUrl } } } }`,
+  );
+  return `query LastCommits($owner: String!, $name: String!, $oid: GitObjectID!, ${params}) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $oid) {
+      ... on Commit {
+        ${fields.join('\n        ')}
+      }
+    }
+  }
+}`;
+}
+
+/** GitHub gave up on the query as a whole (a gateway error or its own time limit): fewer paths may get through. */
+function isQueryTimeout(error: unknown): boolean {
+  if (!(error instanceof GitHubError)) return false;
+  if (error.code === 'http_error') return error.status === 502 || error.status === 504;
+  return (
+    error.code === 'graphql_error' &&
+    (error.graphqlErrors ?? []).some((e) => /timeout|timed out|respond to your request in time/i.test(e.message))
+  );
+}
+
+type LastCommitRow = { path: string; event: FileEvent | null };
+
+/**
+ * Asks the last commit of `paths` at commit `oid` in one query; on a timeout, in halves down to one path. Every answered
+ * query goes to `land`; a path that times out alone is left out.
+ */
+async function askLastCommits(
+  ctx: SourceContext,
+  oid: string,
+  paths: string[],
+  land: (rows: LastCommitRow[]) => Promise<void>,
+): Promise<void> {
+  let object: Record<string, { nodes: HistoryNode[] } | undefined> | null;
+  try {
+    const repo = await repoQuery<{ object: typeof object }>(ctx, lastCommitsQuery(paths.length), {
+      oid,
+      ...Object.fromEntries(paths.map((path, i) => [`p${i}`, path])),
+    });
+    object = repo.object;
+  } catch (error) {
+    if (!isQueryTimeout(error)) throw error;
+    if (paths.length === 1) return;
+    const half = Math.ceil(paths.length / 2);
+    await Promise.all([
+      askLastCommits(ctx, oid, paths.slice(0, half), land),
+      askLastCommits(ctx, oid, paths.slice(half), land),
+    ]);
+    return;
+  }
+  if (!object) throw new GitHubError('not_found', `Commit not found: ${oid}`);
+  await land(
+    paths.map((path, i) => {
+      const node = object[`p${i}`]?.nodes[0];
+      return { path, event: node ? nodeEvent(node) : null };
+    }),
+  );
+}
+
 const CONFLICT_MESSAGE = 'Changed on GitHub since it was read; reload and review';
 
 const COMMIT_MUTATION = `mutation Commit($input: CreateCommitOnBranchInput!) {
@@ -551,16 +667,95 @@ async function withMovedContentDir(ctx: SourceContext, snap: Snapshot, next: Sch
   return { ...snap, files };
 }
 
-/** UTF-8 text of every non-hidden `.md` under the `contentDir` of any of `schemas` (for the wide re-check). */
-async function readEntryTexts(ctx: SourceContext, snap: Snapshot, schemas: Schema[]): Promise<Map<string, string>> {
-  const texts = new Map<string, string>();
-  const paths = [...snap.files.keys()].filter(
+/** Every non-hidden `.md` under the `contentDir` of any of `schemas`: what a schema change re-checks. */
+function contentMarkdown(snap: Snapshot, schemas: Schema[]): string[] {
+  return [...snap.files.keys()].filter(
     (p) => p.endsWith('.md') && schemas.some((s) => p.startsWith(`${s.contentDir}/`) && !isHiddenContentPath(s, p)),
   );
+}
+
+/** An entry the re-check reads because the cache has no summary of it. */
+interface Unsummarized {
+  path: string;
+  collection: string;
+  sha: string;
+  fp: string;
+}
+
+/**
+ * What a batch that deletes files, and keeps the schema, re-checks (in snapshot order): the entries outside the batch
+ * whose kept summary points at a deleted path (`deleteSuspects`), and those with no kept summary. Other `.md` files are
+ * left out: they only get an issue when the schema changes. `unsummarized` are those with no kept summary.
+ */
+async function deleteRecheckPaths(
+  ctx: SourceContext,
+  snap: Snapshot,
+  schema: Schema,
+  todo: PreparedChange[],
+): Promise<{ paths: string[]; unsummarized: Unsummarized[] }> {
+  const changed = new Set(todo.map((c) => c.path));
+  const entries = [...snap.files].flatMap(([path, sha]) => {
+    const entry = changed.has(path) || isHiddenContentPath(schema, path) ? null : parseEntryPath(schema, path);
+    return entry ? [{ ...entry, path, sha }] : [];
+  });
+  const fingerprints = new Map(
+    await Promise.all(
+      [...new Set(entries.map((e) => e.collection))].map(
+        async (c) => [c, await summaryFingerprint(schema, c)] as const,
+      ),
+    ),
+  );
+  const keys = entries.map((e) => ({ ...e, fp: fingerprints.get(e.collection)! }));
+  // A cache that fails keeps nothing: every entry is read.
+  const kept = await ctx.cache.getSummaries(keys).catch(() => new Map<string, EntrySummary>());
+  const rows = keys.flatMap((e) => {
+    const summary = kept.get(`${e.sha}:${e.fp}`);
+    return summary ? [{ ...e, summary }] : [];
+  });
+  const deleted = new Set(todo.flatMap((c) => (c.bytes === null ? [c.path] : [])));
+  const suspects = deleteSuspects(schema, rows, deleted);
+  const unsummarized = keys.filter((e) => !kept.has(`${e.sha}:${e.fp}`));
+  const unknown = new Set(unsummarized.map((e) => e.path));
+  const paths = keys.filter((e) => suspects.has(e.path) || unknown.has(e.path)).map((e) => e.path);
+  return { paths, unsummarized };
+}
+
+/**
+ * Keeps the summaries of the entries the re-check read for want of one, made as the admin makes them, so the next delete
+ * does not read them again. Best effort: it never fails the commit. A file that does not parse gets no summary.
+ */
+async function keepSummaries(
+  ctx: SourceContext,
+  schema: Schema,
+  entries: Unsummarized[],
+  texts: ReadonlyMap<string, string>,
+): Promise<void> {
+  const rows = entries.flatMap(({ path, collection, sha, fp }) => {
+    const text = texts.get(path);
+    if (text === undefined) return []; // not UTF-8
+    try {
+      return [{ sha, fp, summary: summarizeEntry(schema, collection, parseEntryFile(text)) }];
+    } catch {
+      return [];
+    }
+  });
+  await ctx.cache.putSummaries(rows).catch(() => undefined);
+}
+
+/** UTF-8 text of `paths`; a file that is not UTF-8 is left out. */
+async function readEntryTexts(
+  ctx: SourceContext,
+  snap: Snapshot,
+  paths: string[],
+  options?: ReadFilesOptions,
+): Promise<Map<string, string>> {
   const blobs = await readBlobs(
     ctx,
     paths.map((p) => snap.files.get(p)!),
+    new Set(),
+    options,
   );
+  const texts = new Map<string, string>();
   for (const p of paths) {
     const decoded = decodeUtf8(blobs.get(snap.files.get(p)!)!, p);
     if ('text' in decoded) texts.set(p, decoded.text);
@@ -576,25 +771,32 @@ async function validateOn(
   message: string,
   next: Schema | null,
 ): Promise<Issue[]> {
-  const wide = todo.some((c) => c.bytes === null || c.path === snap.schemaPath);
-  const texts = wide
-    ? await readEntryTexts(
-        ctx,
-        snap,
-        [snap.schema, next].filter((x): x is Schema => x !== null),
-      )
-    : new Map<string, string>();
+  // What `validateChanges` re-checks: every entry for a schema change, only what a delete can break otherwise.
+  let list = (): Iterable<string> => snap.files.keys();
+  let texts = new Map<string, string>();
+  let unsummarized: Unsummarized[] = [];
+  if (todo.some((c) => c.path === snap.schemaPath)) {
+    const schemas = [snap.schema, next].filter((x): x is Schema => x !== null);
+    texts = await readEntryTexts(ctx, snap, contentMarkdown(snap, schemas));
+  } else if (snap.schema && todo.some((c) => c.bytes === null)) {
+    const recheck = await deleteRecheckPaths(ctx, snap, snap.schema, todo);
+    list = () => recheck.paths;
+    unsummarized = recheck.unsummarized;
+    // `keep: false`: the bytes are not needed again, a summary of them is kept below.
+    texts = await readEntryTexts(ctx, snap, recheck.paths, { keep: false });
+  }
   const issues = validateCommit(
     {
       schema: snap.schema,
       schemaPath: snap.schemaPath,
       exists: (p) => snap.files.has(p),
       read: (p) => texts.get(p),
-      list: () => snap.files.keys(),
+      list,
     },
     todo.map((c) => ({ path: c.path, content: c.bytes })),
     message,
   );
+  if (snap.schema && unsummarized.length > 0) await keepSummaries(ctx, snap.schema, unsummarized, texts);
   for (const c of todo) {
     if (c.bytes === null && !snap.files.has(c.path)) issues.push({ file: c.path, path: '', message: 'File not found' });
   }
@@ -638,25 +840,73 @@ export function createGitHubSource(options: GitHubSourceOptions): GitHubSource {
     schemaPath: options.schemaPath ?? 'cms/schema.json',
     baseBranch: options.baseBranch,
     branchPrefix: options.branchPrefix,
+    reachable: new Set(),
   };
   return makeSource(ctx, options.branch);
+}
+
+/** Drops, when the page is idle, cached rows that no tree listed so far has and that are old. Best effort. */
+function pruneWhenIdle(ctx: SourceContext): void {
+  // `async`, so that a cache that throws at once reaches nobody either.
+  const prune = async () => ctx.cache.pruneUnreachable(ctx.reachable!, Date.now() - PRUNE_AGE_MS);
+  whenIdle(() => void prune().catch(() => undefined));
 }
 
 function makeSource(ctx: SourceContext, branch: string): GitHubSource {
   let snapshot: Snapshot | null = null;
   let loading: Promise<Snapshot> | null = null;
   let generation = 0;
+  /** The head the cache was last pruned for: a poll that finds the same one prunes nothing. */
+  let prunedHead: string | null = null;
   /** path → blob sha of what this source last handed out (read) or wrote (commit): the default expected sha. */
   const served = new Map<string, string>();
+  /** The ETag and the sha of the last `200` of the head ref read; `null` after a commit or a failed read. */
+  let headRef: { etag: string; sha: string } | null = null;
 
-  /** Starts a fresh load; only the latest started load updates `snapshot`. */
-  function reload(): Promise<Snapshot> {
+  /**
+   * Reads the head ref with `If-None-Match` (a `304` costs no rate limit): the snapshot's own head stands. A moved head
+   * loads the snapshot again. A ref read that fails (other than an auth or rate-limit error) reads the head through
+   * GraphQL instead, so the admin still sees the update.
+   */
+  async function refresh(prev: Snapshot): Promise<Snapshot> {
+    const path = `/repos/${ctx.owner}/${ctx.repo}/git/ref/heads/${encodeRef(branch)}`;
+    let answer: ConditionalResponse<{ object?: { sha?: string } }>;
+    try {
+      answer = await ctx.client.restConditional(path, headRef?.etag ?? null);
+    } catch (error) {
+      if (error instanceof AuthError || (error instanceof GitHubError && error.code === 'rate_limited')) throw error;
+      headRef = null;
+      const head = await readHead(ctx, branch);
+      return head.oid === prev.headOid ? prev : buildSnapshot(ctx, head.oid, head.schemaSha);
+    }
+    if (answer.notModified) {
+      if (headRef?.sha === prev.headOid) return prev;
+      headRef = null; // the ETag and the snapshot disagree: load again, and read a fresh ETag next time
+      return loadSnapshot(ctx, branch);
+    }
+    const sha = answer.body.object?.sha;
+    headRef = answer.etag && typeof sha === 'string' ? { etag: answer.etag, sha } : null;
+    if (sha === prev.headOid) return prev;
+    return loadSnapshot(ctx, branch);
+  }
+
+  /**
+   * Starts a fresh load; only the latest started load updates `snapshot`. With a snapshot and `conditional`, the head
+   * ref is read first (`refresh`); the first load, and a load after a stale commit, read the head in full.
+   */
+  function reload(conditional = true): Promise<Snapshot> {
     const gen = ++generation;
-    const promise = loadSnapshot(ctx, branch).then(
+    const base = snapshot;
+    const promise = (conditional && base ? refresh(base) : loadSnapshot(ctx, branch)).then(
       (s) => {
         if (gen === generation) {
           snapshot = s;
           loading = null;
+          // Without a listed content tree (no valid schema) nearly everything would look unreachable.
+          if (s.contentDir !== null && s.headOid !== prunedHead) {
+            prunedHead = s.headOid;
+            pruneWhenIdle(ctx);
+          }
         }
         return s;
       },
@@ -675,13 +925,15 @@ function makeSource(ctx: SourceContext, branch: string): GitHubSource {
     return loading ?? reload();
   }
 
-  async function readFiles(paths: string[]): Promise<Map<string, Uint8Array>> {
+  async function readFiles(paths: string[], options?: ReadFilesOptions): Promise<Map<string, Uint8Array>> {
     const snap = await current();
     const missing = paths.filter((p) => !snap.files.has(p));
     if (missing.length > 0) throw notFoundIssues([...new Set(missing)]);
     const blobs = await readBlobs(
       ctx,
       paths.map((p) => snap.files.get(p)!),
+      new Set(paths.filter(isImagePath).map((p) => snap.files.get(p)!)),
+      options,
     );
     const out = new Map<string, Uint8Array>();
     for (const p of paths) {
@@ -690,6 +942,32 @@ function makeSource(ctx: SourceContext, branch: string): GitHubSource {
       served.set(p, sha);
     }
     return out;
+  }
+
+  async function lastCommits(paths: string[]): Promise<Map<string, FileEvent | null>> {
+    const snap = await current(); // every query of this call asks at this head, even if the branch moves meanwhile
+    const unique = [...new Set(paths)];
+    const missing = unique.filter((p) => !snap.files.has(p));
+    if (missing.length > 0) throw notFoundIssues(missing);
+
+    // Cached by blob sha: the last commit of a path stands until its content changes. The scope names the repository,
+    // as the pending scope does: two repositories on one origin share the database and the branch name.
+    const scope = `${ctx.owner}/${ctx.repo}#${branch}`;
+    const keyOf = (path: string) => ({ path, sha: snap.files.get(path)! });
+    const found = await ctx.cache.getLastCommits(scope, unique.map(keyOf));
+    const misses = unique.filter((p) => !found.has(p));
+    const land = async (rows: LastCommitRow[]): Promise<void> => {
+      for (const { path, event } of rows) found.set(path, event);
+      await ctx.cache.putLastCommits(
+        scope,
+        rows.map(({ path, event }) => ({ ...keyOf(path), event })),
+      );
+    };
+    const batches: string[][] = [];
+    for (let i = 0; i < misses.length; i += LAST_COMMIT_BATCH) batches.push(misses.slice(i, i + LAST_COMMIT_BATCH));
+    // All at once: the client keeps the requests in flight under its own limit.
+    await Promise.all(batches.map((batch) => askLastCommits(ctx, snap.headOid, batch, land)));
+    return new Map(unique.map((p) => [p, found.get(p) ?? null]));
   }
 
   async function baseBranch(): Promise<string> {
@@ -809,14 +1087,17 @@ function makeSource(ctx: SourceContext, branch: string): GitHubSource {
           if (attempt >= MAX_COMMIT_ATTEMPTS) {
             return { issues: [{ path: '', message: 'Branch keeps changing; try again' }] };
           }
-          snap = await reload();
+          snap = await reload(false); // the head moved: read it in full, not by its ETag
           continue;
         }
 
         ++generation; // an older in-flight reload must not overwrite this
         loading = null;
         snapshot = applyToSnapshot(snap, todo, commit.oid);
-        const blobs = todo.flatMap((c) => (c.bytes === null ? [] : [{ sha: c.next!, bytes: c.bytes }]));
+        headRef = null; // the ETag named the head before this commit
+        const blobs = todo.flatMap((c) =>
+          c.bytes === null ? [] : [{ sha: c.next!, bytes: c.bytes, kind: kindOf(c.path) }],
+        );
         await ctx.cache.putBlobs(blobs).catch(() => undefined); // best-effort: the commit already landed
         markServed();
         return { issues: [], commit: { oid: commit.oid, url: commit.url } };
@@ -841,6 +1122,8 @@ function makeSource(ctx: SourceContext, branch: string): GitHubSource {
       return { updated: nodeEvent(latest), created, commits: total };
     },
 
+    lastCommits,
+
     async listVersions(path, limit) {
       const repo = await repoQuery<{
         ref: { target: { history?: { nodes: VersionNode[] } } | null } | null;
@@ -853,7 +1136,8 @@ function makeSource(ctx: SourceContext, branch: string): GitHubSource {
       if (entry?.type !== 'blob') {
         throw new EditletError([{ file: path, path: '', message: `Not in ${commit.slice(0, 7)}: ${path}` }]);
       }
-      return (await readBlobs(ctx, [entry.oid])).get(entry.oid)!.slice();
+      const images = new Set(isImagePath(path) ? [entry.oid] : []);
+      return (await readBlobs(ctx, [entry.oid], images)).get(entry.oid)!.slice();
     },
 
     baseBranch,

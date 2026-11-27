@@ -24,7 +24,8 @@ const result = await source.publish({ headOid: diff.headOid });
 ## How it works
 
 1. `listFiles` reads the branch head and the schema in one GraphQL call, then the content tree. Every later read uses that
-   one commit.
+   one commit. The next `listFiles` first asks whether the head ref moved, with a conditional read that costs no rate
+   limit when it did not.
 2. `commit` checks the change against the schema, then makes one atomic commit with `createCommitOnBranch`. It only
    writes to branches with the prefix (`git.branchPrefix`, default `editlet/`).
 3. `publish` opens or finds the pull request, checks that its head is the reviewed `headOid` and that GitHub allows
@@ -34,12 +35,16 @@ const result = await source.publish({ headOid: diff.headOid });
 
 | Feature | Doc |
 |---|---|
-| Reading files and the tree, file history and versions (`listVersions`, `readVersion`), blob cache, pending edits | [docs/github/source.md](../../../docs/github/source.md) |
+| Reading files and the tree, file history and versions (`listVersions`, `readVersion`), pending edits | [docs/github/source.md](../../../docs/github/source.md) |
+| `lastCommits(paths)`: the last commit of many files, one query per `LAST_COMMIT_BATCH` (50) | [docs/github/source.md](../../../docs/github/source.md#last-commits) |
+| The head poll: a conditional ref read (`304`, free) | [docs/github/source.md](../../../docs/github/source.md#head-poll) |
+| The cache: blobs, last commits and entry summaries with budgets (`CACHE_BUDGET`), eviction, pruning, `clearContent` | [docs/github/source.md](../../../docs/github/source.md#cache) |
+| `readFiles(paths, { keep: false })`: read without keeping the blobs (the admin's [summaries](../../../docs/core/summary.md)) | [docs/github/source.md](../../../docs/github/source.md#how-it-works) |
 | Commit: atomic write, `sha` conflicts, issues | [docs/github/commit.md](../../../docs/github/commit.md) |
 | Branches, pull requests (draft, labels, body refresh, reviews), branch diff, `CODEOWNERS` | [docs/github/branches.md](../../../docs/github/branches.md) |
 | Publish: the merge gate and blocked reasons | [docs/github/publish.md](../../../docs/github/publish.md) |
 | Deployments and the deploy hook | [docs/github/deployments.md](../../../docs/github/deployments.md) |
-| Client, errors, rate limits | [docs/github/rate-limits.md](../../../docs/github/rate-limits.md) |
+| Client (`restConditional` too), errors, rate limits | [docs/github/rate-limits.md](../../../docs/github/rate-limits.md) |
 
 ## Configuration
 
@@ -53,6 +58,18 @@ const result = await source.publish({ headOid: diff.headOid });
 | `schemaPath` | no | Default `cms/schema.json` |
 | `cache` | no | Default `openGitHubCache()` (IndexedDB) |
 
+`openGitHubCache({ name?, indexedDB?, IDBKeyRange?, budget? })` and `createMemoryCache({ budget? })` make a cache.
+`budget` overrides parts of `CACHE_BUDGET`:
+
+| `CACHE_BUDGET` key | Default | Note |
+|---|---|---|
+| `entries` | 50 MB | Entry blobs. In IndexedDB, at most 10 % of the origin's free quota |
+| `images` | 50 MB | Image blobs. The same quota cap |
+| `lastCommits` | 50,000 rows | Cached answers of `lastCommits` |
+| `summaries` | 50,000 rows | Cached entry summaries, by blob sha and schema fingerprint |
+
+Over budget, the least recently used rows go, down to 80 %. Unsaved edits (`pending`) are never evicted.
+
 The GitHub App behind the token needs these repository permissions:
 
 | Permission | Level | Used for |
@@ -65,11 +82,11 @@ The GitHub App behind the token needs these repository permissions:
 
 | File | Role |
 |---|---|
-| `source.ts` | `createGitHubSource`: snapshot, reads, commit |
+| `source.ts` | `createGitHubSource`: snapshot, head poll, reads, last commits, commit |
 | `repo.ts` | Branches, pull requests, compare (`compare`, `compareFiles`), publish, deployments |
 | `codeowners.ts` | `readCodeowners`, `parseCodeowners`, `ownersOf`: `CODEOWNERS` as GitHub matches it |
-| `client.ts` | HTTP client: auth, rate limits, `GitHubError` |
-| `cache.ts` | Dexie cache of blobs and pending edits (`putMany`, `removeIf`, `scopes()`, `persistent`), memory fallback |
+| `client.ts` | HTTP client: auth, rate limits, conditional reads, `GitHubError` |
+| `cache.ts` | Dexie cache of blobs, last commits, entry summaries and pending edits (budgets, `evict`, `pruneUnreachable`, `clearContent`; `getSummaries`, `putSummaries`; `putMany`, `removeIf`, `scopes()`, `persistent`), memory fallback |
 | `deploy.ts`, `base64.ts` | Deploy hook call, base64 helper |
 | `smoke.ts` | Manual check against a real repository (not run in CI) |
 
